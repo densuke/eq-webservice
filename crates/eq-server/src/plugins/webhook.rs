@@ -39,7 +39,11 @@ impl Sink for WebhookSink {
         for (k, v) in &self.cfg.headers {
             req = req.header(k, v);
         }
-        req.send().await?.error_for_status()?;
+        // URL にトークンを含めることがあるので、エラー (ログに出る) には含めない
+        req.send()
+            .await
+            .and_then(|r| r.error_for_status())
+            .map_err(reqwest::Error::without_url)?;
         Ok(())
     }
 }

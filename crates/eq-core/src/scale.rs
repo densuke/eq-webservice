@@ -75,6 +75,44 @@ mod tests {
     use super::*;
 
     #[test]
+    fn parses_every_label_and_both_notations() {
+        for (text, scale) in [
+            ("1", Scale::S1),
+            ("2", Scale::S2),
+            ("3", Scale::S3),
+            ("4", Scale::S4),
+            ("5弱", Scale::S5_LOWER),
+            ("5-", Scale::S5_LOWER),
+            ("5強", Scale::S5_UPPER),
+            ("5+", Scale::S5_UPPER),
+            ("6弱", Scale::S6_LOWER),
+            ("6-", Scale::S6_LOWER),
+            ("6強", Scale::S6_UPPER),
+            ("6+", Scale::S6_UPPER),
+            ("7", Scale::S7),
+            (" 4 ", Scale::S4),
+        ] {
+            assert_eq!(Scale::parse(text), Some(scale), "{text}");
+        }
+        assert_eq!(Scale::parse("不明"), None);
+        assert_eq!(Scale::parse(""), None);
+        // 表示用ラベルは読み直すと同じ震度になる
+        for s in [
+            Scale::S1,
+            Scale::S4,
+            Scale::S5_LOWER,
+            Scale::S5_UPPER,
+            Scale::S6_LOWER,
+            Scale::S6_UPPER,
+            Scale::S7,
+        ] {
+            assert_eq!(Scale::parse(s.label()), Some(s));
+        }
+        assert_eq!(Scale::UNKNOWN.label(), "不明");
+        assert_eq!(Scale::S5_LOWER.to_string(), "震度5弱");
+    }
+
+    #[test]
     fn ordering_matches_intensity() {
         assert!(Scale::S5_LOWER < Scale::S5_UPPER);
         assert!(Scale::S6_UPPER < Scale::S7);

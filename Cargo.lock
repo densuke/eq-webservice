@@ -278,7 +278,7 @@ dependencies = [
 
 [[package]]
 name = "eq-core"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -286,7 +286,7 @@ dependencies = [
 
 [[package]]
 name = "eq-server"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -300,6 +300,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite 0.27.0",
  "toml",
+ "tower",
  "tower-http",
  "tracing",
  "tracing-subscriber",

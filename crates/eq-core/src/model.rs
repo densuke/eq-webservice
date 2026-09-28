@@ -262,8 +262,18 @@ impl Event {
                         lines.extend(hypocenter_lines(h));
                     }
                     let areas: Vec<_> = e.pref_max.iter().map(|p| p.pref.as_str()).collect();
-                    if !areas.is_empty() {
-                        lines.push(format!("強い揺れに警戒: {}", areas.join("、")));
+                    if e.warning {
+                        if !areas.is_empty() {
+                            lines.push(format!("強い揺れに警戒: {}", areas.join("、")));
+                        }
+                    } else {
+                        // 予報は警戒を呼びかける情報ではないので、予測震度と地域だけを書く
+                        if e.max_scale.is_known() {
+                            lines.push(format!("予測最大震度: {}", e.max_scale.label()));
+                        }
+                        if !areas.is_empty() {
+                            lines.push(format!("揺れが予測される地域: {}", areas.join("、")));
+                        }
                     }
                 }
             }
@@ -387,4 +397,110 @@ pub fn aggregate_pref_max<'a>(items: impl IntoIterator<Item = (&'a str, Scale)>)
     }
     out.sort_by_key(|p| std::cmp::Reverse(p.scale));
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{p2pquake, wolfx};
+
+    /// デモの場面のデータを読む (P2P地震情報 / Wolfx 形式)
+    fn scenario(text: &str) -> Vec<Event> {
+        text.lines()
+            .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
+            .filter_map(|l| {
+                if l.contains("\"EventID\"") {
+                    wolfx::parse(l).unwrap()
+                } else {
+                    p2pquake::parse(l).unwrap()
+                }
+            })
+            .collect()
+    }
+
+    fn all() -> Vec<Event> {
+        [
+            include_str!("../../../samples/scenarios/standard.jsonl"),
+            include_str!("../../../samples/scenarios/forecast.jsonl"),
+            include_str!("../../../samples/scenarios/tsunami.jsonl"),
+            include_str!("../../../samples/scenarios/islands.jsonl"),
+        ]
+        .into_iter()
+        .flat_map(scenario)
+        .collect()
+    }
+
+    /// Discord・RSS に出る見出しと本文は、どの種類の情報でも空にならない
+    #[test]
+    fn every_kind_has_a_title_and_summary() {
+        let events = all();
+        for kind in ["quake", "eew", "tsunami"] {
+            assert!(events.iter().any(|e| e.kind() == kind), "{kind} が場面のデータに無い");
+        }
+        for e in &events {
+            assert!(!e.title().is_empty(), "{}", e.id);
+            assert!(!e.summary().is_empty(), "{}", e.id);
+        }
+    }
+
+    #[test]
+    fn eew_warning_and_forecast_are_worded_differently() {
+        let events = all();
+        let eew = |warning: bool| {
+            events
+                .iter()
+                .find(|e| matches!(&e.body, EventBody::Eew(x) if x.warning == warning && !x.cancelled))
+                .unwrap()
+        };
+        let w = eew(true);
+        assert!(w.title().starts_with("【緊急地震速報(テスト)】") || w.title().starts_with("【緊急地震速報(警報)】"));
+        assert!(w.summary().contains("強い揺れに警戒"));
+        let f = eew(false);
+        assert!(!f.summary().contains("強い揺れに警戒"), "{}", f.summary());
+        assert!(f.summary().contains("予測最大震度"));
+    }
+
+    #[test]
+    fn tsunami_summary_lists_areas_with_grades() {
+        let t = all()
+            .into_iter()
+            .find(|e| e.kind() == "tsunami" && e.summary().contains("大津波警報"))
+            .unwrap();
+        let s = t.summary();
+        assert!(s.contains("大津波警報 岩手県 (ただちに来襲)"), "{s}");
+        assert!(s.contains("津波注意報 茨城県"), "{s}");
+        assert!(t.title().contains("大津波警報"), "{}", t.title());
+    }
+
+    #[test]
+    fn cancelled_reports() {
+        let mut e = all().into_iter().find(|e| e.kind() == "eew").unwrap();
+        if let EventBody::Eew(x) = &mut e.body {
+            x.cancelled = true;
+            x.test = false;
+        }
+        assert!(e.title().ends_with("取消"), "{}", e.title());
+        assert!(e.summary().contains("取り消されました"));
+        let t = Event {
+            id: "t".into(),
+            source: "test".into(),
+            received_at_ms: 0,
+            body: EventBody::Tsunami(Tsunami {
+                cancelled: true,
+                issued_at: "2026/01/01 12:00:00".into(),
+                areas: vec![],
+            }),
+        };
+        assert_eq!(t.title(), "【津波予報】解除");
+    }
+
+    #[test]
+    fn filter_helpers() {
+        let events = all();
+        let q = events.iter().find(|e| e.kind() == "quake").unwrap();
+        assert!(q.max_scale().is_some_and(|s| s.is_known()));
+        let t = events.iter().find(|e| e.kind() == "tsunami").unwrap();
+        assert_eq!(t.max_scale(), None);
+        assert!(events.iter().all(|e| e.issued_at_ms().is_some()));
+    }
 }

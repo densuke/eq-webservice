@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { countdown, nearestArea, notifyScale, shouldNotify } from "./personal.ts";
+import { countdown, countdownWorthShowing, estimateIntensity, intensityToScale, nearestArea, notifyScale, shouldNotify } from "./personal.ts";
 import type { Station } from "./detail.ts";
 
 const stations = new Map<string, Station>([
@@ -44,4 +44,32 @@ test("countdown to the S wave at home", () => {
   assert.ok(Math.abs(c.remainingSec - 6) < 0.1, `${c.remainingSec}`);
   assert.equal(c.arrived, false);
   assert.equal(countdown(home, epi, origin, origin + 12_000).arrived, true);
+});
+
+test("estimated intensity falls with distance and rises with magnitude", () => {
+  // 宮城県沖 M6.8 深さ 40km → 仙台 (約 100km): 震度4 程度
+  const near = estimateIntensity(6.8, 40, 99);
+  assert.ok(near > 3.5 && near < 4.5, `${near}`);
+  // 千葉 M5.0 深さ 50km → 神戸 (約 450km): ほとんど揺れない
+  const far = estimateIntensity(5.0, 50, 450);
+  assert.ok(far < 1, `${far}`);
+  assert.ok(estimateIntensity(7.5, 40, 99) > near);
+  assert.ok(estimateIntensity(6.8, 40, 300) < near);
+});
+
+test("countdown is shown when jma predicts shaking at home or the estimate reaches intensity 3", () => {
+  assert.equal(countdownWorthShowing(30, null), true);
+  assert.equal(countdownWorthShowing(10, null), true); // 気象庁が地域に含めている
+  assert.equal(countdownWorthShowing(null, 3.9), true);
+  assert.equal(countdownWorthShowing(null, 2.5), true);
+  assert.equal(countdownWorthShowing(null, 2.4), false);
+  assert.equal(countdownWorthShowing(null, null), false);
+});
+
+test("instrumental intensity to scale class", () => {
+  assert.equal(intensityToScale(0.4), 0);
+  assert.equal(intensityToScale(2.5), 30);
+  assert.equal(intensityToScale(4.6), 45);
+  assert.equal(intensityToScale(5.2), 50);
+  assert.equal(intensityToScale(6.6), 70);
 });

@@ -27,8 +27,8 @@ pub struct DiscordSink {
     url: String,
     username: Option<String>,
     client: reqwest::Client,
-    /// 緊急地震速報は続報が多いので、地震ごと (event_id) に通知済みの最大震度を覚えておく
-    eew_notified: Mutex<HashMap<String, Scale>>,
+    /// 緊急地震速報は続報が多いので、地震ごと (event_id) に通知済みの (警報か, 最大震度) を覚えておく
+    eew_notified: Mutex<HashMap<String, (bool, Scale)>>,
 }
 
 impl DiscordSink {
@@ -46,18 +46,20 @@ impl DiscordSink {
         })
     }
 
-    /// EEW は「その地震で初めて」「予測震度が上がった」「取消」のときだけ通知する。
+    /// EEW は「その地震で初めて」「予報から警報に上がった」「予測震度が上がった」「取消」のときだけ通知する。
     async fn should_post(&self, ev: &Event) -> bool {
         let EventBody::Eew(e) = &ev.body else { return true };
         let mut seen = self.eew_notified.lock().await;
         if seen.len() > 256 {
             seen.clear();
         }
+        let now = (e.warning, e.max_scale);
         match seen.get(&e.event_id) {
             _ if e.cancelled => true,
-            Some(prev) if e.max_scale <= *prev => false,
+            // (警報か, 震度) の順に比べる: 予報から警報に上がったら震度が同じでも通知する
+            Some(prev) if now <= *prev => false,
             _ => {
-                seen.insert(e.event_id.clone(), e.max_scale);
+                seen.insert(e.event_id.clone(), now);
                 true
             }
         }
@@ -83,7 +85,14 @@ impl Sink for DiscordSink {
             body["username"] = json!(u);
         }
         for _ in 0..2 {
-            let res = self.client.post(&self.url).json(&body).send().await?;
+            // Webhook の URL は秘密情報なので、エラー (ログに出る) には含めない
+            let res = self
+                .client
+                .post(&self.url)
+                .json(&body)
+                .send()
+                .await
+                .map_err(reqwest::Error::without_url)?;
             if res.status().as_u16() == 429 {
                 // レート制限: 指定秒数待って 1 回だけ再送
                 let wait: f64 = res
@@ -95,7 +104,7 @@ impl Sink for DiscordSink {
                 tokio::time::sleep(Duration::from_secs_f64(wait.min(10.0))).await;
                 continue;
             }
-            res.error_for_status()?;
+            res.error_for_status().map_err(reqwest::Error::without_url)?;
             return Ok(());
         }
         anyhow::bail!("rate limited")
@@ -129,5 +138,60 @@ fn color(ev: &Event) -> u32 {
         20 => 0x00aaff,
         10 => 0xf2f2ff,
         _ => 0x888888,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use eq_core::Eew;
+
+    fn sink() -> DiscordSink {
+        DiscordSink::new(DiscordConfig {
+            webhook_url: Some("https://discord.example/api/webhooks/x".into()),
+            webhook_url_env: None,
+            username: None,
+        })
+        .unwrap()
+    }
+
+    fn eew(event_id: &str, warning: bool, scale: Scale, cancelled: bool) -> Event {
+        Event {
+            id: format!("{event_id}-{warning}-{}-{cancelled}", scale.0),
+            source: "test".into(),
+            received_at_ms: 0,
+            body: EventBody::Eew(Eew {
+                event_id: event_id.into(),
+                serial: "1".into(),
+                cancelled,
+                test: false,
+                warning,
+                issued_at: String::new(),
+                origin_time: None,
+                origin_time_ms: None,
+                hypocenter: None,
+                areas: vec![],
+                pref_max: vec![],
+                max_scale: scale,
+            }),
+        }
+    }
+
+    #[tokio::test]
+    async fn eew_is_posted_once_and_again_only_when_it_gets_worse() {
+        let s = sink();
+        assert!(s.should_post(&eew("A", false, Scale::S4, false)).await);
+        // 続報で変わらなければ送らない
+        assert!(!s.should_post(&eew("A", false, Scale::S4, false)).await);
+        assert!(!s.should_post(&eew("A", false, Scale::S3, false)).await);
+        // 予報から警報に上がったら、震度が同じでも送る
+        assert!(s.should_post(&eew("A", true, Scale::S4, false)).await);
+        assert!(!s.should_post(&eew("A", true, Scale::S4, false)).await);
+        // 予測震度が上がったら送る
+        assert!(s.should_post(&eew("A", true, Scale::S5_LOWER, false)).await);
+        // 取消はいつでも送る
+        assert!(s.should_post(&eew("A", true, Scale::S5_LOWER, true)).await);
+        // 別の地震は別に数える
+        assert!(s.should_post(&eew("B", false, Scale::S3, false)).await);
     }
 }

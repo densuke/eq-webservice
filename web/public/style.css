@@ -185,7 +185,8 @@ body {
 .map.picking { cursor: crosshair; }
 /* 自分の地点に主要動が届くまで (緊急地震速報を受けているとき) */
 .countdown {
-  position: absolute; left: 50%; top: 12px; transform: translateX(-50%); z-index: 2; pointer-events: none;
+  /* 右上の日時表示と重ならないよう左上に置く (寄っている間は左上の離島の別枠も隠れる) */
+  position: absolute; left: 12px; top: 12px; z-index: 2; pointer-events: none; max-width: calc(100% - 24px);
   background: rgba(90, 10, 16, 0.92); border: 2px solid #f85149; border-radius: 8px; padding: 6px 14px;
   font-weight: 700; text-align: center; white-space: nowrap;
 }
@@ -226,7 +227,7 @@ body {
   .c-hm { font-size: 26px; }
   .c-day { font-size: 20px; }
   .eew-banner { font-size: 14px; }
-  .countdown { top: auto; bottom: 64px; }
+  .countdown { top: auto; bottom: 64px; left: 50%; transform: translateX(-50%); }
   .layout { display: block; }
   .map-wrap { height: 60vh; height: 60svh; }
   .side { border-left: none; border-top: 1px solid var(--line); }

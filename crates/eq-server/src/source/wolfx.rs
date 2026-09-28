@@ -53,7 +53,7 @@ async fn session(url: &str, hub: &Hub) -> anyhow::Result<()> {
 fn handle_text(text: &str, hub: &Hub) {
     match wolfx::parse(text) {
         Ok(Some(ev)) => {
-            if ev.issued_at_ms().is_some_and(|t| now_ms() as i64 - t > MAX_AGE_MS) {
+            if is_stale(&ev, now_ms() as i64) {
                 tracing::info!(id = %ev.id, "skipped stale EEW");
                 return;
             }
@@ -64,5 +64,28 @@ fn handle_text(text: &str, hub: &Hub) {
         }
         Ok(None) => {}
         Err(e) => tracing::warn!("unparsable Wolfx message: {e}"),
+    }
+}
+
+/// 発表から MAX_AGE_MS を過ぎた速報か (再接続直後に届く古い速報を流さない)
+fn is_stale(ev: &eq_core::Event, now_ms: i64) -> bool {
+    ev.issued_at_ms().is_some_and(|t| now_ms - t > MAX_AGE_MS)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stale_reports_are_dropped() {
+        let ev = wolfx::parse(
+            r#"{"type":"jma_eew","EventID":"1","Serial":1,"AnnouncedTime":"2026/09/29 04:45:58","OriginTime":"2026/09/29 04:45:05","Hypocenter":"茨城県南部","MaxIntensity":"4","WarnArea":[]}"#,
+        )
+        .unwrap()
+        .unwrap();
+        let issued = ev.issued_at_ms().unwrap();
+        assert!(!is_stale(&ev, issued + 1_000));
+        assert!(!is_stale(&ev, issued + MAX_AGE_MS));
+        assert!(is_stale(&ev, issued + MAX_AGE_MS + 1));
     }
 }

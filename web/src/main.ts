@@ -1,4 +1,5 @@
 import { Connection, type Status } from "./connection.ts";
+import { esc } from "./html.ts";
 import { GroupStore, latestEew, summarizeQuake, type Group } from "./groups.ts";
 import { alertLevel, type AlertLevel } from "./alert.ts";
 import { followRadiusKm, pad, pointBox, stopRadiusKm, union, type Box } from "./camera.ts";
@@ -14,7 +15,18 @@ import { assignNumbers } from "./numbering.ts";
 import { clockParts } from "./clock.ts";
 import { eewAreaScales, quakeDetail, type Station } from "./detail.ts";
 import { schedule, type Scenario, type ScenarioSummary } from "./demo.ts";
-import { countdown, loadSettings, nearestArea, notifyScale, saveSettings, shouldNotify, type NotifyLevel } from "./personal.ts";
+import {
+  countdown,
+  countdownWorthShowing,
+  estimateIntensity,
+  intensityToScale,
+  loadSettings,
+  nearestArea,
+  notifyScale,
+  saveSettings,
+  shouldNotify,
+  type NotifyLevel,
+} from "./personal.ts";
 
 /** 発生からこの秒数を過ぎたら P波・S波の表示を止める */
 const WAVE_MAX_SEC = 180;
@@ -47,10 +59,6 @@ let numbers = new Map<string, number>();
 let conn: Connection;
 
 // ---------- 描画ヘルパ ----------
-
-function esc(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-}
 
 function numTag(key: string): string {
   const n = numbers.get(key);
@@ -199,7 +207,8 @@ function updateNumbers(now: number): boolean {
 function renderMarkers(now: number): void {
   const cur = currentGroup();
   const shown = cur && relatedQuake(cur);
-  const groups = selectedKey ? (shown ? [shown] : []) : [...recentQuakes(now), ...(shown ? [shown] : [])];
+  // 履歴や矢印で別の地震を選んでいる間も、直近のほかの地震の印と矢印は出す (元の地震へ戻れるように)
+  const groups = [...recentQuakes(now), ...(shown ? [shown] : [])];
   const byNum = new Map<string, { key: string; lat: number; lon: number; label: number | null; primary: boolean; scale: number; quake: boolean }>();
   for (const g of groups) {
     const c = geoOf(g)?.center;
@@ -655,18 +664,22 @@ function renderCountdown(now: number): void {
   const cands = h
     ? activeEews(now).filter((e) => e.hypocenter?.latitude != null && e.hypocenter.longitude != null && e.origin_time_ms != null)
     : [];
-  // 自分の地点の予測震度が大きいもの、同じなら先に揺れが届くものを出す
+  // 遠くて揺れそうにない地震は出さない: 自分の地点の区域が緊急地震速報に含まれているか、
+  // 距離減衰式で推定した震度が 3 以上のときだけ
   const best = cands
-    .map((x) => ({
-      e: x,
-      s: homeScaleOf(x),
-      c: countdown(h!, { lat: x.hypocenter!.latitude!, lon: x.hypocenter!.longitude!, depth: x.hypocenter!.depth_km ?? 10 }, x.origin_time_ms!, now),
-    }))
-    .sort((a, b) => (b.s ?? -1) - (a.s ?? -1) || a.c.remainingSec - b.c.remainingSec)[0];
+    .map((x) => {
+      const hy = x.hypocenter!;
+      const c = countdown(h!, { lat: hy.latitude!, lon: hy.longitude!, depth: hy.depth_km ?? 10 }, x.origin_time_ms!, now);
+      const est = hy.magnitude != null ? estimateIntensity(hy.magnitude, hy.depth_km ?? 10, c.distKm) : null;
+      return { s: homeScaleOf(x), est, c };
+    })
+    .filter((x) => countdownWorthShowing(x.s, x.est))
+    // 自分の地点の予測震度 (無ければ推定) が大きいもの、同じなら先に揺れが届くもの
+    .sort((a, b) => (b.s ?? intensityToScale(b.est!)) - (a.s ?? intensityToScale(a.est!)) || a.c.remainingSec - b.c.remainingSec)[0];
   el.hidden = !best;
   if (!best) return;
-  const { c, s } = best;
-  const scaleText = s != null ? `予測震度${scaleLabel(s)}` : "予測震度 不明";
+  const { c, s, est } = best;
+  const scaleText = s != null ? `予測震度${scaleLabel(s)}` : `推定震度${scaleLabel(intensityToScale(est!))} (概算)`;
   el.classList.toggle("arrived", c.arrived);
   const html = `${esc(homeArea ?? "自分の地点")} ・ ${scaleText}<div class="cd-sec">${
     c.arrived ? "揺れが到達したと推定" : `あと ${Math.ceil(c.remainingSec)} 秒`
