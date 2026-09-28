@@ -1,5 +1,6 @@
 // 警戒音 (WebAudio で合成。音声ファイルは持たない)。
-// ブラウザは利用者の操作があるまで音を出せないので、ボタンやタップで unlock() する。
+// ブラウザは利用者の操作があるまで音を出せないことが多い。ページを開いた直後にも unlock() を試し
+// (サイトの設定で音声を許可していれば操作なしで鳴らせる)、だめならボタンやタップで unlock() する。
 
 import type { AlertLevel } from "./alert.ts";
 
@@ -22,10 +23,23 @@ export function setSoundEnabled(on: boolean): void {
   }
 }
 
-/** 利用者の操作の中で呼ぶ */
+let onChange: () => void = () => {};
+
+/** 鳴らせる状態が変わったとき (有効化できた、など) に呼ぶ */
+export function onSoundStateChange(f: () => void): void {
+  onChange = f;
+}
+
+/** 鳴らせる状態にする。操作の中で呼ぶのが確実だが、許可されていれば操作なしでも通る */
 export function unlock(): void {
-  ctx ??= new AudioContext();
-  void ctx.resume();
+  if (!ctx) {
+    ctx = new AudioContext();
+    ctx.onstatechange = () => onChange();
+  }
+  ctx.resume().then(
+    () => onChange(),
+    () => {},
+  );
 }
 
 export function soundReady(): boolean {

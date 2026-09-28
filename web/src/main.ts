@@ -7,7 +7,7 @@ import { JapanMap, project } from "./map.ts";
 import { isKnownScale, scaleColor, scaleLabel, scaleTextColor } from "./scale.ts";
 import { activeAreas, latestTsunami, tsunamiAlert } from "./tsunami.ts";
 import type { EewEvent, EqEvent, Hypocenter, Scale, TsunamiEvent } from "./types.ts";
-import { play, setSoundEnabled, soundEnabled, soundReady, unlock } from "./sound.ts";
+import { onSoundStateChange, play, setSoundEnabled, soundEnabled, soundReady, unlock } from "./sound.ts";
 import { surfaceRadiusKm, VP_KM_S, VS_KM_S } from "./waves.ts";
 import { byPriority, sameQuake, type Place } from "./priority.ts";
 import { assignNumbers } from "./numbering.ts";
@@ -625,22 +625,38 @@ $("#follow").addEventListener("click", () => {
 });
 
 function renderSound(): void {
+  const waiting = soundEnabled() && !soundReady();
+  // 設定は ON だがブラウザの制限でまだ鳴らせないときは、地図の上に案内を出す
+  $("#sound-hint").hidden = !waiting;
   const btn = $("#sound");
-  const text = !soundEnabled() ? "音 OFF" : soundReady() ? "音 ON" : "音 ON (タップで有効化)";
+  const text = !soundEnabled() ? "音 OFF" : waiting ? "音 ON (タップで有効化)" : "音 ON";
   if (btn.textContent === text) return;
   btn.textContent = text;
-  btn.classList.toggle("active", soundEnabled() && soundReady());
+  btn.classList.toggle("active", soundEnabled() && !waiting);
+  btn.classList.toggle("waiting", waiting);
+}
+function enableSound(): void {
+  unlock();
+  play("low"); // 確認用
 }
 $("#sound").addEventListener("click", () => {
-  setSoundEnabled(!soundEnabled());
-  if (soundEnabled()) {
-    unlock();
-    play("low"); // 確認用
+  // 「タップで有効化」の状態で押したら、OFF にせず有効化する
+  if (soundEnabled() && !soundReady()) enableSound();
+  else {
+    setSoundEnabled(!soundEnabled());
+    if (soundEnabled()) enableSound();
   }
   renderSound();
 });
-// 前回 ON にしていた場合、ブラウザの制約で最初の操作までは鳴らせない
-if (soundEnabled()) document.addEventListener("pointerdown", unlock, { once: true });
+$("#sound-hint").addEventListener("click", enableSound);
+onSoundStateChange(renderSound);
+if (soundEnabled()) {
+  // サイトの設定で音声を許可していれば、操作なしでこのまま鳴らせるようになる
+  unlock();
+  // だめなら最初の操作で有効化する
+  document.addEventListener("pointerdown", unlock, { once: true });
+  document.addEventListener("keydown", unlock, { once: true });
+}
 
 loadTelop();
 Promise.all([

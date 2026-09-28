@@ -81,6 +81,14 @@ body {
 .tsunami-banner[data-grade="major_warning"] { color: #fff; background: var(--t-major); }
 .num { display: inline-block; min-width: 1.4em; padding: 0 3px; margin-right: 4px; border-radius: 4px; background: #fff; color: #111; font-size: 0.85em; font-weight: 700; text-align: center; }
 
+/* 音の設定は ON だが、ブラウザの制限でまだ鳴らせないときの案内 */
+.sound-hint {
+  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 2;
+  background: #b35900; color: #fff; border: 0; border-radius: 999px; padding: 8px 16px;
+  font: 600 14px/1.2 system-ui, sans-serif; cursor: pointer; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+#sound.waiting { border-color: #d29922; color: #d29922; }
+
 /* 離島の別枠 (日本全体を表示しているときだけ) */
 .inset {
   position: absolute; z-index: 1; pointer-events: none; background: var(--sea);
