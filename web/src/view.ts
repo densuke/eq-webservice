@@ -97,7 +97,11 @@ export function renderMode(): void {
     el.dataset.mode = mode;
     el.textContent = { live: "リアルタイム", replay: "リプレイ中", demo: "デモモード中", tour: "巡回中" }[mode];
   }
-  $("#back-live").hidden = (mode === "live" || mode === "tour") && !map.userMoved;
+  const back = $("#back-live");
+  back.hidden = (mode === "live" || mode === "tour") && !map.userMoved;
+  // デモ中に地震を選んだり地図を動かしたりしたときは、デモを終えずに自動表示 (巡回) へ戻す
+  const label = app.demo && (app.selectedKey || map.userMoved) ? "自動表示に戻る" : "リアルタイムに戻る";
+  if (back.textContent !== label) back.textContent = label;
   $("#demo-open").hidden = app.demo != null;
 }
 
