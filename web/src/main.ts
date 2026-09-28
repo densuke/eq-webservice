@@ -17,6 +17,8 @@ import { clockParts } from "./clock.ts";
 const WAVE_MAX_SEC = 180;
 /** EEW 警報バナーを出し続ける時間 */
 const EEW_BANNER_MS = 3 * 60_000;
+/** テロップの文を切り替える間隔 */
+const TELOP_INTERVAL_MS = 8000;
 /** EEW バナーに並べる件数 (残りは「ほか N 件」) */
 const EEW_BANNER_MAX = 3;
 /** この時間内に続けて届いた情報では、前より強い音のときだけ鳴らす */
@@ -487,6 +489,7 @@ function tick(): void {
     renderDetail();
   }
   $("#legend-wave").hidden = !waving;
+  renderTelop(now, waving || activeEews(now).length > 0 || priorityGroups(now).length > 0 || activeAreas(tsunami).length > 0);
   if (!waving) {
     map.setWaves([]);
     $("#wave-info").textContent = "";
@@ -536,6 +539,33 @@ function onEvents(events: EqEvent[], live: boolean): void {
     lastAlert = { level: alert, at: now() };
   }
   tick();
+}
+
+let telopMessages: string[] = [];
+
+/** テロップ。地震の情報を出している間は邪魔をしないよう消す */
+function renderTelop(now: number, busy: boolean): void {
+  const el = $("#telop");
+  el.hidden = busy || telopMessages.length === 0;
+  if (el.hidden) return;
+  const slot = Math.floor(now / TELOP_INTERVAL_MS);
+  const text = telopMessages[slot % telopMessages.length];
+  if (el.textContent === text) return;
+  // 切り替え時は一度消してから出す
+  el.classList.add("fading");
+  setTimeout(() => {
+    el.textContent = text;
+    el.classList.remove("fading");
+  }, 400);
+}
+
+function loadTelop(): void {
+  fetch("api/telop")
+    .then((r) => (r.ok ? r.json() : []))
+    .then((m: unknown) => {
+      if (Array.isArray(m)) telopMessages = m.filter((x): x is string => typeof x === "string");
+    })
+    .catch(() => {});
 }
 
 function renderClock(now: number): void {
@@ -594,6 +624,7 @@ $("#sound").addEventListener("click", () => {
 // 前回 ON にしていた場合、ブラウザの制約で最初の操作までは鳴らせない
 if (soundEnabled()) document.addEventListener("pointerdown", unlock, { once: true });
 
+loadTelop();
 Promise.all([
   map.load("japan.geojson"),
   // 無くても地震の表示はできる

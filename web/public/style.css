@@ -18,6 +18,8 @@
 }
 
 * { box-sizing: border-box; }
+/* hidden 属性は display を指定した要素でも必ず隠す */
+[hidden] { display: none !important; }
 html, body { height: 100%; margin: 0; }
 body {
   background: var(--bg);
@@ -36,6 +38,9 @@ body {
 .version { font-size: 12px; font-weight: 400; color: var(--muted); }
 .wave-info { color: var(--s-wave); font-variant-numeric: tabular-nums; }
 #sound { margin-left: auto; }
+/* テロップ: 平常時に出典や注意書きを切り替えて表示する */
+.topbar > .telop { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font-size: 12px; transition: opacity 0.4s; }
+.telop.fading { opacity: 0; }
 
 /* 日時表示 (地図の右上)。枠の色で接続状態を示す: 緑=オンライン / 赤=切断中 */
 .clock-panel {
@@ -152,6 +157,7 @@ body {
   html, body { height: auto; }
   .topbar { position: sticky; top: 0; z-index: 2; gap: 8px; }
   .topbar h1 { font-size: 14px; }
+  .version { display: none; }
   .clock-panel { top: 6px; right: 6px; padding: 3px 8px 4px; }
   .c-hm { font-size: 26px; }
   .c-day { font-size: 20px; }
