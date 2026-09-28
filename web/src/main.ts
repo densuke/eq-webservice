@@ -11,11 +11,15 @@ import { play, setSoundEnabled, soundEnabled, soundReady, unlock } from "./sound
 import { surfaceRadiusKm, VP_KM_S, VS_KM_S } from "./waves.ts";
 import { byPriority, sameQuake, type Place } from "./priority.ts";
 import { assignNumbers } from "./numbering.ts";
+import { clockParts } from "./clock.ts";
+import { eewAreaScales, quakeDetail, type Station } from "./detail.ts";
 
 /** 発生からこの秒数を過ぎたら P波・S波の表示を止める */
 const WAVE_MAX_SEC = 180;
 /** EEW 警報バナーを出し続ける時間 */
 const EEW_BANNER_MS = 3 * 60_000;
+/** テロップの文を切り替える間隔 */
+const TELOP_INTERVAL_MS = 8000;
 /** EEW バナーに並べる件数 (残りは「ほか N 件」) */
 const EEW_BANNER_MAX = 3;
 /** この時間内に続けて届いた情報では、前より強い音のときだけ鳴らす */
@@ -139,11 +143,15 @@ function paintMap(g: Group | undefined): void {
   if (g?.kind === "quake") {
     const q = summarizeQuake(g);
     map.setPrefScales(q.prefMax);
+    const d = quakeDetail(q.points, stations);
+    map.setDetail(d.areas, false, d.dots);
   } else if (g?.kind === "eew") {
     const e = latestEew(g);
     map.setPrefScales(e.cancelled ? [] : e.pref_max, true);
+    map.setDetail(e.cancelled ? [] : eewAreaScales(e.areas), true, []);
   } else {
     map.setPrefScales([]);
+    map.setDetail([], false, []);
   }
 }
 
@@ -182,7 +190,7 @@ function renderMarkers(now: number): void {
   const cur = currentGroup();
   const shown = cur && relatedQuake(cur);
   const groups = selectedKey ? (shown ? [shown] : []) : [...recentQuakes(now), ...(shown ? [shown] : [])];
-  const byNum = new Map<string, { lat: number; lon: number; label: number | null; primary: boolean; quake: boolean }>();
+  const byNum = new Map<string, { key: string; lat: number; lon: number; label: number | null; primary: boolean; scale: number; quake: boolean }>();
   for (const g of groups) {
     const c = geoOf(g)?.center;
     if (!c) continue;
@@ -194,7 +202,7 @@ function renderMarkers(now: number): void {
       prev.primary ||= primary;
       continue;
     }
-    byNum.set(id, { lat: c.lat, lon: c.lon, label, primary: primary || (prev?.primary ?? false), quake: g.kind === "quake" });
+    byNum.set(id, { key: g.key, lat: c.lat, lon: c.lon, label, primary: primary || (prev?.primary ?? false), scale: groupScale(g), quake: g.kind === "quake" });
   }
   map.setEpicenters([...byNum.values()].map(({ quake: _, ...m }) => m));
 }
@@ -465,9 +473,7 @@ function tick(): void {
   cancelAnimationFrame(raf);
   clearTimeout(timer);
   const now = conn.now();
-  const d = new Date(now);
-  $("#clock-date").textContent = d.toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo" });
-  $("#clock-time").textContent = d.toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour12: false });
+  renderClock(now);
   if (updateNumbers(now)) {
     renderList();
     renderDetail();
@@ -487,6 +493,8 @@ function tick(): void {
     renderList();
     renderDetail();
   }
+  $("#legend-wave").hidden = !waving;
+  renderTelop(now, waving || activeEews(now).length > 0 || priorityGroups(now).length > 0 || activeAreas(tsunami).length > 0);
   if (!waving) {
     map.setWaves([]);
     $("#wave-info").textContent = "";
@@ -529,6 +537,7 @@ function onEvents(events: EqEvent[], live: boolean): void {
   // Wolfx 経由の情報を受けたら出典を出す
   if (events.some((e) => e.source === "wolfx")) $("#credit-wolfx").hidden = false;
   map.setTsunami(activeAreas(tsunami));
+  $("#legend-tsunami").hidden = activeAreas(tsunami).length === 0;
   renderTsunamiBanner();
   if (alert && !(now() - lastAlert.at < ALERT_MERGE_MS && rank[alert] <= rank[lastAlert.level])) {
     play(alert);
@@ -537,23 +546,76 @@ function onEvents(events: EqEvent[], live: boolean): void {
   tick();
 }
 
+let telopMessages: string[] = [];
+/** 震度観測点の位置と属する細分区域 (観測点名 → 位置) */
+let stations = new Map<string, Station>();
+
+async function loadStations(): Promise<void> {
+  const res = await fetch("stations.json");
+  if (!res.ok) return;
+  const rows: [string, number, number, string][] = await res.json();
+  stations = new Map(rows.map(([name, lat, lon, area]) => [name, { lat, lon, area }]));
+}
+
+/** テロップ。地震の情報を出している間は邪魔をしないよう消す */
+function renderTelop(now: number, busy: boolean): void {
+  const el = $("#telop");
+  el.hidden = busy || telopMessages.length === 0;
+  if (el.hidden) return;
+  const slot = Math.floor(now / TELOP_INTERVAL_MS);
+  const text = telopMessages[slot % telopMessages.length];
+  if (el.textContent === text) return;
+  // 切り替え時は一度消してから出す
+  el.classList.add("fading");
+  setTimeout(() => {
+    el.textContent = text;
+    el.classList.remove("fading");
+  }, 400);
+}
+
+function loadTelop(): void {
+  fetch("api/telop")
+    .then((r) => (r.ok ? r.json() : []))
+    .then((m: unknown) => {
+      if (Array.isArray(m)) telopMessages = m.filter((x): x is string => typeof x === "string");
+    })
+    .catch(() => {});
+}
+
+function renderClock(now: number): void {
+  const c = clockParts(now);
+  const set = (id: string, text: string) => {
+    const el = $(id);
+    if (el.textContent !== text) el.textContent = text;
+  };
+  set("#c-year", `${c.year}年`);
+  set("#c-month", `${c.month}月`);
+  set("#c-day", `${c.day}日`);
+  set("#c-wd", `(${c.weekday})`);
+  set("#c-hm", c.hm);
+  set("#c-sec", c.sec);
+}
+
 function setStatus(s: Status): void {
-  const el = $("#status");
-  el.dataset.status = s;
-  el.title = { connecting: "接続中", open: "接続済み", closed: "切断 (再接続します)" }[s];
+  $("#clock").dataset.status = s;
+  $("#c-status").textContent = { connecting: "接続中", open: "時刻同期", closed: "切断中" }[s];
 }
 
 // ---------- 起動 ----------
 
-$("#list").addEventListener("click", (e) => {
-  const li = (e.target as HTMLElement).closest("li");
-  if (!li) return;
-  selectedKey = li.dataset.key ?? null;
+function select(key: string): void {
+  selectedKey = key;
   selectedAt = conn.now();
   map.release();
   renderList();
   renderDetail();
+}
+$("#list").addEventListener("click", (e) => {
+  const key = (e.target as HTMLElement).closest("li")?.dataset.key;
+  if (key) select(key);
 });
+// 画面外の地震の矢印からも選べる
+map.onSelect = select;
 $("#follow").addEventListener("click", () => {
   selectedKey = null;
   map.release();
@@ -580,10 +642,15 @@ $("#sound").addEventListener("click", () => {
 // 前回 ON にしていた場合、ブラウザの制約で最初の操作までは鳴らせない
 if (soundEnabled()) document.addEventListener("pointerdown", unlock, { once: true });
 
+loadTelop();
 Promise.all([
   map.load("japan.geojson"),
   // 無くても地震の表示はできる
   map.loadTsunami("tsunami.geojson").catch(() => {}),
+  // 無ければ寄っても都道府県で塗る
+  map.loadAreas("areas.geojson").catch(() => {}),
+  map.loadNeighbors("neighbors.geojson").catch(() => {}),
+  loadStations().catch(() => {}),
 ])
   .catch((err) => {
     $("#detail").innerHTML = `<p class="error">${esc(String(err))}</p>`;

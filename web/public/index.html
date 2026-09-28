@@ -10,20 +10,25 @@
 </head>
 <body>
   <header class="topbar">
-    <span id="status" class="status" data-status="connecting" title="接続中"></span>
     <h1>地震情報マップ <span class="version">v%VERSION%</span></h1>
     <span id="wave-info" class="wave-info"></span>
-    <span class="clock"><span id="clock-date" class="clock-date"></span> <span id="clock-time"></span></span>
+    <span id="telop" class="telop" aria-live="off"></span>
     <button id="sound" class="follow" type="button" title="新しい地震情報で警戒音を鳴らします">音 OFF</button>
   </header>
   <div id="eew-banner" class="eew-banner" role="alert" hidden></div>
   <div id="tsunami-banner" class="tsunami-banner" role="status" hidden></div>
   <main class="layout">
     <section id="map" class="map-wrap" aria-label="日本地図">
+      <div id="clock" class="clock-panel" data-status="connecting" role="timer" aria-live="off">
+        <div class="c-top"><span id="c-year" class="c-year"></span><span id="c-status" class="c-status">接続中</span></div>
+        <div class="c-date"><span id="c-month" class="c-small"></span><span id="c-day" class="c-day"></span><span id="c-wd" class="c-small"></span></div>
+        <div class="c-time"><span id="c-hm" class="c-hm"></span><span id="c-sec" class="c-sec"></span></div>
+      </div>
       <div class="legend" aria-hidden="true">
-        <span style="background:#f2f2ff;color:#111">1</span><span style="background:#00aaff">2</span><span style="background:#0041ff">3</span><span style="background:#faf500;color:#111">4</span><span style="background:#ffe600;color:#111">5-</span><span style="background:#ff9900">5+</span><span style="background:#ff2800">6-</span><span style="background:#a50021">6+</span><span style="background:#b40068">7</span>
-        <span class="legend-tsunami major_warning">大津波警報</span><span class="legend-tsunami warning">津波警報</span><span class="legend-tsunami watch">津波注意報</span>
-        <span class="legend-wave p">P波</span><span class="legend-wave s">S波</span>
+        <div class="gauge"><i style="background:#f2f2ff"></i><i style="background:#00aaff"></i><i style="background:#0041ff"></i><i style="background:#faf500"></i><i style="background:#ffe600"></i><i style="background:#ff9900"></i><i style="background:#ff2800"></i><i style="background:#a50021"></i><i style="background:#b40068"></i></div>
+        <div class="gauge-labels"><span>1</span><span>2</span><span>3</span><span>4</span><span>5-</span><span>5+</span><span>6-</span><span>6+</span><span>7</span></div>
+        <div id="legend-tsunami" class="legend-row" hidden><span class="lt major_warning">大津波警報</span><span class="lt warning">津波警報</span><span class="lt watch">津波注意報</span></div>
+        <div id="legend-wave" class="legend-row" hidden><span class="lw p">P波</span><span class="lw s">S波</span></div>
       </div>
     </section>
     <aside class="side">
@@ -36,7 +41,7 @@
       <footer class="credit">
         情報: <a href="https://www.p2pquake.net/" target="_blank" rel="noopener">P2P地震情報</a> (気象庁発表)<br>
         地図: 地球地図日本 (国土地理院) を加工<br>
-        津波予報区: 気象庁のデータを加工<br>
+        津波予報区・細分区域・震度観測点: 気象庁のデータを加工<br>
         <span id="credit-wolfx" hidden>緊急地震速報 (予報): <a href="https://wolfx.jp/" target="_blank" rel="noopener">Wolfx Project</a> 経由 (気象庁発表、非公式の中継)<br></span>
         P波・S波の円は一様速度による概算です。
       </footer>

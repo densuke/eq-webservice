@@ -4,6 +4,7 @@ mod http;
 mod hub;
 mod plugins;
 mod source;
+mod telop;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -46,6 +47,9 @@ async fn main() -> anyhow::Result<()> {
         seeders.push((loaded.name.clone(), loaded.sink.clone(), loaded.filter.clone()));
         plugins::spawn(loaded, &hub);
     }
+
+    let eew_enabled = matches!(&cfg.source, config::SourceConfig::P2pquake { eew_url, .. } if !eew_url.is_empty());
+    routes.push(telop::router(telop::messages(&cfg.telop.messages, eew_enabled)));
 
     let listener = tokio::net::TcpListener::bind(&cfg.server.listen)
         .await

@@ -29,6 +29,11 @@ eew_url = ""
 # rebase_time = true
 # loop = true
 
+# 平常時に画面上部で切り替えて表示する文 (出典と注意書きのあとに足される)
+[telop]
+messages = []
+# messages = ["保守のため 10/1 3:00〜3:10 に停止します"]
+
 # ---- 配信先プラグイン ----
 # 共通キー: type (必須) / name / enabled / kinds / min_scale
 #   kinds     : "quake" (地震情報) / "eew" (緊急地震速報) / "eew_detection" / "tsunami"。省略ですべて

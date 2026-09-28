@@ -20,6 +20,8 @@ const options = {
   target: ["es2022"],
   format: "esm",
   outfile: "dist/app.js",
+  // 地図の図形のスタイルは SVG に埋め込むので文字列として読み込む
+  loader: { ".css": "text" },
   logLevel: "info",
 };
 

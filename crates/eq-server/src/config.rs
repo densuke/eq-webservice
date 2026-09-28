@@ -13,6 +13,16 @@ pub struct Config {
     /// 配信先プラグイン。`type` でプラグインを選び、残りのキーはプラグイン固有。
     #[serde(default)]
     pub sinks: Vec<toml::Table>,
+    #[serde(default)]
+    pub telop: TelopConfig,
+}
+
+/// 平常時に画面上部で切り替えて表示する文
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct TelopConfig {
+    /// 出典と注意書きのあとに足す文
+    pub messages: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -127,6 +137,12 @@ mod tests {
         let cfg = Config::parse(include_str!("../../../config.example.toml")).unwrap();
         assert!(matches!(cfg.source, SourceConfig::P2pquake { .. }));
         assert!(!cfg.sinks.is_empty());
+    }
+
+    #[test]
+    fn telop_messages_are_read() {
+        let cfg = Config::parse("[telop]\nmessages = [\"a\"]\n[server]\nlisten = \"x\"").unwrap();
+        assert_eq!(cfg.telop.messages, ["a"]);
     }
 
     #[test]
