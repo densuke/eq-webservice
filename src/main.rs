@@ -77,7 +77,9 @@ async fn poller(state: AppState) {
 
 async fn handle_index(State(state): State<AppState>) -> Html<String> {
     let earthquakes = state.earthquakes.load();
-    let markers_json = serde_json::to_string(&**earthquakes).unwrap_or_default();
+    let markers_json = serde_json::to_string(&**earthquakes)
+        .unwrap_or_default()
+        .replace("</", r"<\/");
 
     let html = format!(
         r#"<!DOCTYPE html>
