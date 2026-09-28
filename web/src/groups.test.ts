@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { GroupStore } from "./groups.ts";
-import type { EewDetectionEvent, QuakeEvent } from "./types.ts";
+import { GroupStore, latestEew, summarizeQuake, type EewGroup, type QuakeGroup } from "./groups.ts";
+import type { EewDetectionEvent, EewEvent, QuakeEvent } from "./types.ts";
 
 const ev = (id: string): EewDetectionEvent => ({
   id,
@@ -71,4 +71,34 @@ test("reports of different minutes are different earthquakes", () => {
   const a = s.add(quake("1", "detail_scale", "宮城県沖", ["宮城県"], "2026/09/28 12:00"))!;
   const b = s.add(quake("2", "detail_scale", "宮城県沖", ["宮城県"], "2026/09/28 12:05"))!;
   assert.notEqual(a.key, b.key);
+});
+
+test("the summary of a quake takes each field from the latest report that has it", () => {
+  const s = new GroupStore();
+  const withPoints = (q: QuakeEvent, scale: number): QuakeEvent => ({
+    ...q,
+    max_scale: scale,
+    points: [{ pref: "宮城県", addr: "仙台市青葉区", is_area: false, scale }],
+  });
+  s.add(withPoints(quake("1", "scale_prompt", null, ["宮城県"]), 40));
+  s.add({ ...quake("2", "destination", "宮城県沖", []), max_scale: -1, comment: "震源情報" });
+  const g = s.add(withPoints(quake("3", "detail_scale", "宮城県沖", ["宮城県"]), 50))!;
+  assert.equal(g.kind, "quake");
+  const q = summarizeQuake(g as QuakeGroup);
+  assert.equal(q.infoLabel, "各地の震度に関する情報");
+  assert.equal(q.hypocenter?.name, "宮城県沖");
+  // 最大震度はまとめた情報の中で最大、観測点は観測点のある最新の報から
+  assert.equal(q.maxScale, 50);
+  assert.equal(q.points[0].scale, 50);
+  assert.equal(q.comment, "");
+});
+
+test("the latest eew is the one with the largest serial", () => {
+  const s = new GroupStore();
+  const e = (id: string, serial: string): EewEvent =>
+    ({ id, source: "t", received_at_ms: 1, kind: "eew", event_id: "E", serial, cancelled: false, test: false, warning: true, issued_at: "", origin_time: null, origin_time_ms: null, hypocenter: null, areas: [], pref_max: [], max_scale: 40 }) as EewEvent;
+  s.add(e("a", "2"));
+  s.add(e("b", "10"));
+  const g = s.add(e("c", "9"))!;
+  assert.equal(latestEew(g as EewGroup).serial, "10");
 });

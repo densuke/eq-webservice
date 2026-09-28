@@ -79,3 +79,41 @@ export function countdown(
   const remainingSec = (originMs + arrivalSec(VS_KM_S, epi.depth, distKm) * 1000 - now) / 1000;
   return { remainingSec, arrived: remainingSec <= 0, distKm };
 }
+
+/**
+ * 震源のマグニチュード・深さ・震央距離から、地点の計測震度を推定する (概算)。
+ * 最大速度の距離減衰式 (司・翠川 1999) と、最大速度から計測震度への換算 (翠川ほか 1999) による。
+ * 断層の広がりや地盤の違いは考えず、震源距離と標準的な地盤増幅 (1.4 倍) を使う
+ */
+export function estimateIntensity(mag: number, depthKm: number, distKm: number): number {
+  const x = Math.max(Math.hypot(distKm, Math.max(depthKm, 0)), 3);
+  const logPgv600 = 0.58 * mag + 0.0038 * depthKm - 1.29 - Math.log10(x + 0.0028 * 10 ** (0.5 * mag)) - 0.002 * x;
+  const pgv = 10 ** logPgv600 * 1.4;
+  return 2.68 + 1.72 * Math.log10(pgv);
+}
+
+/** 震度3 の下限 (計測震度) */
+const SHINDO3 = 2.5;
+
+/**
+ * 自分の地点のカウントダウンを出すか。homeScale は緊急地震速報で自分の地点の区域に出ている予測震度
+ * (区域に含まれていなければ null)、estimated は推定した計測震度 (推定できなければ null)
+ */
+export function countdownWorthShowing(homeScale: number | null, estimated: number | null): boolean {
+  if (homeScale != null) return true;
+  return estimated != null && estimated >= SHINDO3;
+}
+
+/** 計測震度から震度階級 (P2P地震情報の数値表現) */
+export function intensityToScale(i: number): number {
+  if (i < 0.5) return 0;
+  if (i < 1.5) return 10;
+  if (i < 2.5) return 20;
+  if (i < 3.5) return 30;
+  if (i < 4.5) return 40;
+  if (i < 5.0) return 45;
+  if (i < 5.5) return 50;
+  if (i < 6.0) return 55;
+  if (i < 6.5) return 60;
+  return 70;
+}

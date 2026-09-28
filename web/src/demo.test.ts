@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { schedule, shiftJst } from "./demo.ts";
-import type { EewEvent, QuakeEvent } from "./types.ts";
+import type { EewEvent, EqEvent, QuakeEvent } from "./types.ts";
 
 test("JST strings shift by milliseconds", () => {
   assert.equal(shiftJst("2026/01/01 12:00:05", 60_000), "2026/01/01 12:01:05");
@@ -55,4 +55,11 @@ test("ids and event ids get a per-run suffix and the source becomes demo", () =>
   assert.equal(x.event.id, "e1#demo7");
   assert.equal(x.event.source, "demo");
   assert.equal(x.event.kind === "eew" && x.event.event_id, "E1#demo7");
+});
+
+test("tsunami reports shift only their issued time", () => {
+  const t = { id: "t1", source: "p2pquake", received_at_ms: 0, kind: "tsunami", cancelled: false, issued_at: "2026/01/01 12:02:00", areas: [] } as unknown as EqEvent;
+  const [x] = schedule([t], Date.UTC(2026, 8, 29, 0, 0, 0), 1);
+  assert.equal(x.event.kind === "tsunami" && x.event.issued_at, "2026/09/29 09:00:00");
+  assert.equal(x.event.id, "t1#demo1");
 });
