@@ -7,7 +7,8 @@ import { byPriority } from "./priority.ts";
 import { activeEews, currentGroup, relatedQuake } from "./quakes.ts";
 import { isKnownScale, scaleColor, scaleLabel, scaleTextColor } from "./scale.ts";
 import { $, map } from "./dom.ts";
-import { app } from "./state.ts";
+import { listOpen } from "./personal.ts";
+import { app, now } from "./state.ts";
 import { activeAreas } from "./tsunami.ts";
 import type { Hypocenter, Scale, TsunamiEvent } from "./types.ts";
 
@@ -90,13 +91,13 @@ export function renderList(): void {
 
 /** 今の表示モード (リアルタイム / リプレイ中 / デモモード中) と「リアルタイムに戻る」ボタン */
 export function renderMode(): void {
-  const mode = app.demo ? "demo" : app.selectedKey ? "replay" : "live";
+  const mode = app.demo ? "demo" : app.selectedKey ? "replay" : app.tourKey ? "tour" : "live";
   const el = $("#mode");
   if (el.dataset.mode !== mode) {
     el.dataset.mode = mode;
-    el.textContent = { live: "リアルタイム", replay: "リプレイ中", demo: "デモモード中" }[mode];
+    el.textContent = { live: "リアルタイム", replay: "リプレイ中", demo: "デモモード中", tour: "巡回中" }[mode];
   }
-  $("#back-live").hidden = mode === "live" && !map.userMoved;
+  $("#back-live").hidden = (mode === "live" || mode === "tour") && !map.userMoved;
   $("#demo-open").hidden = app.demo != null;
 }
 
@@ -115,6 +116,18 @@ export function paintMap(g: Group | undefined): void {
     map.setPrefScales([]);
     map.setDetail([], false, []);
   }
+}
+
+/** 観測点の一覧を開いておくか (最後の発表から設定の時間で畳む。利用者が開閉していればそれに従う) */
+function pointsOpen(g: Group): boolean {
+  return listOpen(app.settings.collapseMin, g.updatedAt, now(), app.listOpen.get(g.key));
+}
+
+/** 時間がたって一覧を畳む時刻になったら畳む (描き直さずに開閉だけ変える) */
+export function updatePointsOpen(): void {
+  const el = document.querySelector<HTMLDetailsElement>("#detail details.points-box");
+  const g = el?.dataset.key ? app.world.store.get(el.dataset.key) : undefined;
+  if (el && g && el.open !== pointsOpen(g)) el.open = pointsOpen(g);
 }
 
 export function renderDetail(): void {
@@ -145,6 +158,16 @@ export function renderDetail(): void {
         <dt>津波</dt><dd>${esc(TSUNAMI_TEXT[q.domesticTsunami] ?? "—")}</dd>
       </dl>
       ${q.comment ? `<p class="comment">${esc(q.comment)}</p>` : ""}
+      ${
+        scales.length
+          ? `<details class="points-box" data-key="${esc(g.key)}"${pointsOpen(g) ? " open" : ""}><summary>${scales
+              .map((s) => {
+                const n = [...byScale.get(s)!.values()].reduce((a, v) => a + v.length, 0);
+                return `<span class="sum-item">${badge(s)}${n}${q.points.some((p) => p.is_area) ? "地域" : "地点"}</span>`;
+              })
+              .join("")}<span class="sum-more">一覧</span></summary>`
+          : ""
+      }
       <div class="points">${scales
         .map(
           (s) =>
@@ -152,7 +175,7 @@ export function renderDetail(): void {
               .map(([pref, addrs]) => `<b>${esc(pref)}</b> ${esc(addrs.slice(0, 30).join("、"))}${addrs.length > 30 ? " ほか" : ""}`)
               .join("<br>")}</div></div>`,
         )
-        .join("")}</div>`;
+        .join("")}</div>${scales.length ? "</details>" : ""}`;
   } else if (g.kind === "eew") {
     const e = latestEew(g);
     box.innerHTML = `

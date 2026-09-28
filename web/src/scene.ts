@@ -2,7 +2,8 @@
 
 import { type Box, followRadiusKm, pad, pointBox, stopRadiusKm, union } from "./camera.ts";
 import { project } from "./map.ts";
-import { type Center, type WaveSource, currentGroup, geoOf, groupScale, priorityGroups, recentQuakes, relatedQuake, waveSources } from "./quakes.ts";
+import { type Center, type WaveSource, currentGroup, geoOf, groupPlace, groupScale, priorityGroups, recentQuakes, relatedQuake, waveSources } from "./quakes.ts";
+import { sameQuake } from "./priority.ts";
 import { $, map } from "./dom.ts";
 import { REPLAY_SPEED, WAVE_MAX_SEC, app, now } from "./state.ts";
 import { activeAreas } from "./tsunami.ts";
@@ -48,6 +49,22 @@ export function scene(now: number): Scene | null {
     const geo = g && relatedQuake(g) && geoOf(relatedQuake(g)!);
     if (!geo) return null;
     return { center: geo.center, others: [], t: ((now - app.selectedAt) / 1000) * REPLAY_SPEED, shaken: map.prefBox(geo.prefs), replay: true };
+  }
+  // 巡回中はその地震に合わせる (ほかの地震の波も描く)
+  if (app.tourKey) {
+    const g = app.world.store.get(app.tourKey);
+    const geo = g && geoOf(g);
+    if (geo) {
+      const sources = waveSources(now);
+      const mine = sources.find((s) => s.group === g || sameQuake(groupPlace(s.group), groupPlace(g)));
+      return {
+        center: mine ?? geo.center,
+        others: sources.filter((s) => s !== mine),
+        t: mine ? (now - mine.origin) / 1000 : null,
+        shaken: map.prefBox(geo.prefs),
+        replay: false,
+      };
+    }
   }
   // カメラは揺れの大きい方に合わせる
   const [src, ...others] = waveSources(now);

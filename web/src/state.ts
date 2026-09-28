@@ -5,6 +5,7 @@ import type { Connection } from "./connection.ts";
 import type { ScenarioSummary } from "./demo.ts";
 import type { Station } from "./detail.ts";
 import { GroupStore } from "./groups.ts";
+import { loadSettings } from "./personal.ts";
 import type { EqEvent, TsunamiEvent } from "./types.ts";
 
 /** 発生からこの秒数を過ぎたら P波・S波の表示を止める */
@@ -44,6 +45,15 @@ export const app = {
   stations: new Map<string, Station>(),
   /** デモモードの状態。null ならデモモードではない */
   demo: null as DemoState | null,
+  /** 利用者の設定 (端末の中に保存) */
+  settings: loadSettings(),
+  /** 利用者が観測点の一覧を自分で開閉した地震 (グループのキー → 開いているか) */
+  listOpen: new Map<string, boolean>(),
+  /** 巡回を始めた時刻 (巡回していなければ null) と、今見せている地震 */
+  tourStart: null as number | null,
+  tourKey: null as string | null,
+  /** 新しく届いた地震をしばらく優先して見せる (巡回より先) */
+  tourHold: null as { key: string; until: number } | null,
 };
 
 /** main.ts にある処理。ほかのモジュールからはこれを通して呼ぶ (循環参照を避けるため) */

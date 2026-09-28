@@ -13,6 +13,7 @@
     <h1>地震情報マップ <span class="version">v%VERSION%</span></h1>
     <span id="mode" class="mode" data-mode="live">リアルタイム</span>
     <button id="back-live" class="back-live" type="button" hidden>リアルタイムに戻る</button>
+    <button id="overview" class="follow" type="button" title="日本全体を表示します (震央を押すとその地震へ寄ります)">全体図</button>
     <span id="wave-info" class="wave-info"></span>
     <span id="telop" class="telop" aria-live="off"></span>
     <button id="settings-open" class="follow" type="button" title="自分の地点と通知の設定">設定</button>
@@ -24,6 +25,7 @@
   <main class="layout">
     <section id="map" class="map-wrap" aria-label="日本地図">
       <div id="countdown" class="countdown" role="status" hidden></div>
+      <div id="tour-toast" class="tour-toast" role="status" hidden></div>
       <button id="sound-hint" class="sound-hint" type="button" hidden>タップすると警戒音が鳴るようになります</button>
       <div id="clock" class="clock-panel" data-status="connecting" role="timer" aria-live="off">
         <div class="c-top"><span id="c-year" class="c-year"></span><span id="c-status" class="c-status">接続中</span></div>
@@ -52,6 +54,19 @@
             <option value="4">震度4以上</option>
             <option value="3">震度3以上</option>
           </select>
+        </div>
+        <div class="settings-row"><b>観測点の一覧</b>
+          <select id="collapse-min">
+            <option value="0">最初から畳む</option>
+            <option value="5">最後の発表から5分で畳む</option>
+            <option value="10">最後の発表から10分で畳む</option>
+            <option value="30">最後の発表から30分で畳む</option>
+            <option value="60">最後の発表から60分で畳む</option>
+            <option value="-1">自動で畳まない</option>
+          </select>
+        </div>
+        <div class="settings-row"><b>離れた地震の巡回</b>
+          <select id="tour-sec"></select>
         </div>
         <p id="settings-note" class="muted">地点と設定はこの端末の中だけに保存されます。通知はこの画面が裏にあるときに出ます。</p>
       </section>

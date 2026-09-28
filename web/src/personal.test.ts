@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { countdown, countdownWorthShowing, estimateIntensity, intensityToScale, nearestArea, notifyScale, shouldNotify } from "./personal.ts";
+import { countdown, countdownWorthShowing, DEFAULTS, estimateIntensity, intensityToScale, listOpen, nearestArea, normalizeSettings, notifyScale, shouldNotify } from "./personal.ts";
 import type { Station } from "./detail.ts";
 
 const stations = new Map<string, Station>([
@@ -72,4 +72,22 @@ test("instrumental intensity to scale class", () => {
   assert.equal(intensityToScale(4.6), 45);
   assert.equal(intensityToScale(5.2), 50);
   assert.equal(intensityToScale(6.6), 70);
+});
+
+test("saved settings are validated; broken or old values fall back to the defaults", () => {
+  assert.deepEqual(normalizeSettings(null), DEFAULTS);
+  assert.deepEqual(normalizeSettings({ home: { lat: 35, lon: 139 }, notify: "3" }), { ...DEFAULTS, home: { lat: 35, lon: 139 }, notify: "3" });
+  assert.deepEqual(normalizeSettings({ home: { lat: "x", lon: 1 }, notify: "9", tourSec: 7, collapseMin: 3 }), DEFAULTS);
+  assert.equal(normalizeSettings({ tourSec: 0 }).tourSec, 0);
+  assert.equal(normalizeSettings({ collapseMin: -1 }).collapseMin, -1);
+});
+
+test("the station list is open until some minutes after the last report, unless the user chose", () => {
+  const t = 1_000_000;
+  assert.equal(listOpen(10, t, t + 9 * 60_000, undefined), true);
+  assert.equal(listOpen(10, t, t + 10 * 60_000, undefined), false);
+  assert.equal(listOpen(0, t, t, undefined), false); // 最初から畳む
+  assert.equal(listOpen(-1, t, t + 999 * 60_000, undefined), true); // 自動で畳まない
+  assert.equal(listOpen(10, t, t + 60 * 60_000, true), true);
+  assert.equal(listOpen(10, t, t, false), false);
 });

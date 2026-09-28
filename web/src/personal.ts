@@ -9,20 +9,45 @@ export type NotifyLevel = "off" | "warning" | "4" | "3";
 export interface Settings {
   home: { lat: number; lon: number } | null;
   notify: NotifyLevel;
+  /** 離れた地震を巡回する間隔 (秒)。0 は巡回しない */
+  tourSec: number;
+  /** 観測点の一覧を最後の発表から何分で畳むか。0 は最初から畳む、-1 は自動で畳まない */
+  collapseMin: number;
 }
 
 const KEY = "eq-settings";
-const DEFAULTS: Settings = { home: null, notify: "4" };
+export const DEFAULTS: Settings = { home: null, notify: "4", tourSec: 10, collapseMin: 10 };
+export const TOUR_CHOICES = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60];
+export const COLLAPSE_CHOICES = [0, 5, 10, 30, 60, -1];
+
+/** 保存された値を検査して設定にする (壊れた値・古い版の値は既定に戻す) */
+export function normalizeSettings(v: unknown): Settings {
+  const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
+  const h = o.home as { lat?: unknown; lon?: unknown } | null | undefined;
+  const home =
+    h && typeof h.lat === "number" && typeof h.lon === "number" && Number.isFinite(h.lat) && Number.isFinite(h.lon) ? { lat: h.lat, lon: h.lon } : null;
+  const pick = <T>(x: unknown, choices: readonly T[], d: T): T => (choices.includes(x as T) ? (x as T) : d);
+  return {
+    home,
+    notify: pick(o.notify, ["off", "warning", "4", "3"] as const, DEFAULTS.notify),
+    tourSec: pick(o.tourSec, TOUR_CHOICES, DEFAULTS.tourSec),
+    collapseMin: pick(o.collapseMin, COLLAPSE_CHOICES, DEFAULTS.collapseMin),
+  };
+}
 
 export function loadSettings(): Settings {
   try {
-    const v = JSON.parse(localStorage.getItem(KEY) ?? "{}");
-    const home = v.home && Number.isFinite(v.home.lat) && Number.isFinite(v.home.lon) ? { lat: v.home.lat, lon: v.home.lon } : null;
-    const notify: NotifyLevel = ["off", "warning", "4", "3"].includes(v.notify) ? v.notify : DEFAULTS.notify;
-    return { home, notify };
+    return normalizeSettings(JSON.parse(localStorage.getItem(KEY) ?? "{}"));
   } catch {
     return { ...DEFAULTS };
   }
+}
+
+/** 観測点の一覧を開いておくか。userOpen は利用者が自分で開閉したとき (優先する) */
+export function listOpen(collapseMin: number, lastIssuedMs: number, now: number, userOpen: boolean | undefined): boolean {
+  if (userOpen != null) return userOpen;
+  if (collapseMin < 0) return true;
+  return now - lastIssuedMs < collapseMin * 60_000;
 }
 
 export function saveSettings(s: Settings): void {

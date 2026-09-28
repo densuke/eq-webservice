@@ -5,6 +5,7 @@ import { type Group, latestEew, summarizeQuake } from "./groups.ts";
 import { assignNumbers } from "./numbering.ts";
 import { type Place, byPriority, sameQuake } from "./priority.ts";
 import { EEW_BANNER_MS, WAVE_MAX_SEC, app, now } from "./state.ts";
+import { tourIndex, worthTouring } from "./tour.ts";
 import type { EewEvent, Hypocenter, Scale } from "./types.ts";
 
 /** 津波予報などに対応する地震 (その情報より前に届いた直近の地震情報・EEW) */
@@ -53,6 +54,7 @@ export function displayedOriginMs(): number {
 
 export function currentGroup(): Group | undefined {
   if (app.selectedKey) return app.world.store.get(app.selectedKey);
+  if (app.tourKey) return app.world.store.get(app.tourKey);
   return priorityGroups(now())[0] ?? app.world.store.list().find((g) => g.kind === "quake" || g.kind === "eew" || g.kind === "tsunami");
 }
 
@@ -137,4 +139,23 @@ export function waveSources(now: number): WaveSource[] {
     .map((s) => ({ s, scale: groupScale(s.group), at: s.group.updatedAt }))
     .sort(byPriority)
     .map((c) => c.s);
+}
+
+/**
+ * 巡回で今見せる地震を決める (app.tourKey)。離れた場所で 2 つ以上起きているときだけ、番号順に設定の間隔で切り替える。
+ * manual は利用者が地図を動かしているか (そのときは巡回しない)
+ */
+export function updateTour(now: number, manual: boolean): void {
+  const hold = app.tourHold && now < app.tourHold.until && app.world.store.get(app.tourHold.key) ? app.tourHold.key : null;
+  const cands = priorityGroups(now)
+    .map((g) => ({ g, c: geoOf(g)?.center }))
+    .filter((x): x is { g: Group; c: NonNullable<typeof x.c> } => x.c != null)
+    .sort((a, b) => (app.numbers.get(a.g.key) ?? 0) - (app.numbers.get(b.g.key) ?? 0));
+  if (app.selectedKey || manual || app.settings.tourSec === 0 || !worthTouring(cands.map((x) => x.c))) {
+    app.tourStart = null;
+    app.tourKey = null;
+    return;
+  }
+  app.tourStart ??= now;
+  app.tourKey = hold ?? cands[tourIndex(app.tourStart, now, app.settings.tourSec, cands.length)].g.key;
 }

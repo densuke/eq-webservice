@@ -150,6 +150,16 @@ body {
 .facts dt { color: var(--muted); }
 .facts dd { margin: 0; }
 .comment { font-size: 12px; color: var(--muted); white-space: pre-wrap; }
+/* 観測点の一覧 (要約を押すと開く) */
+.points-box { margin-top: 8px; }
+.points-box > summary { cursor: pointer; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; font-size: 13px; list-style: none; }
+.points-box > summary::-webkit-details-marker { display: none; }
+.points-box > summary .badge { min-width: 30px; height: 22px; font-size: 12px; margin-right: 3px; }
+.sum-item { display: inline-flex; align-items: center; }
+.sum-more { margin-left: auto; color: #58a6ff; font-size: 12px; }
+.sum-more::after { content: " ▼"; font-size: 10px; }
+.points-box[open] .sum-more::after { content: " ▲"; }
+.points-box[open] > .points { margin-top: 8px; }
 .points { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
 .point-row { display: flex; gap: 8px; align-items: flex-start; }
 .arrived { color: #ff7b72; font-size: 12px; }
@@ -175,6 +185,14 @@ body {
 .mode { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; color: #fff; background: #238636; white-space: nowrap; }
 .mode[data-mode="replay"] { background: #1f6feb; }
 .mode[data-mode="demo"] { background: #b35900; }
+.mode[data-mode="tour"] { background: #0e7c7b; }
+/* 巡回で次の地震へ移ったときの案内 */
+.tour-toast {
+  position: absolute; left: 50%; bottom: 60px; transform: translateX(-50%); z-index: 2; pointer-events: none;
+  background: rgba(14, 124, 123, 0.92); color: #fff; border-radius: 999px; padding: 6px 16px; font-weight: 700; white-space: nowrap;
+}
+.tour-toast.show { animation: toast 2.5s ease-out forwards; }
+@keyframes toast { 0% { opacity: 0; } 10% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
 .back-live { background: #1f6feb; border: 1px solid #58a6ff; color: #fff; border-radius: 999px; padding: 2px 10px; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
 /* 自分の地点と通知の設定 */
 .settings-panel { padding: 10px 16px; border-bottom: 1px solid var(--line); background: #10202f; font-size: 13px; }
@@ -190,6 +208,8 @@ body {
   background: rgba(90, 10, 16, 0.92); border: 2px solid #f85149; border-radius: 8px; padding: 6px 14px;
   font-weight: 700; text-align: center; white-space: nowrap;
 }
+/* 全体図で南西諸島の別枠が出ているときは、その下に置く */
+.map-wrap:has(.inset-okinawa:not([hidden])) .countdown { top: 172px; }
 .countdown .cd-sec { font-size: 28px; font-variant-numeric: tabular-nums; }
 .countdown .cd-sub { font-size: 11px; font-weight: 400; color: #ffb3ad; }
 .countdown.arrived { border-color: #d29922; background: rgba(60, 40, 5, 0.92); }

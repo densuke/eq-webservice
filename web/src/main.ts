@@ -8,14 +8,15 @@ import { fadeOpacity } from "./fade.ts";
 import { esc } from "./html.ts";
 import { notify, renderCountdown, updateHome } from "./personal-ui.ts";
 import { sameQuake } from "./priority.ts";
-import { activeEews, currentGroup, displayedOriginMs, placeOf, priorityGroups, updateNumbers } from "./quakes.ts";
+import { activeEews, currentGroup, displayedOriginMs, placeOf, priorityGroups, updateNumbers, updateTour } from "./quakes.ts";
 import { renderMarkers, renderScene, scene } from "./scene.ts";
 import { play } from "./sound.ts";
 import { $, map } from "./dom.ts";
 import { type World, app, hooks, liveWorld, now, now as serverNow } from "./state.ts";
 import { activeAreas, latestTsunami, tsunamiAlert } from "./tsunami.ts";
 import type { EewEvent, EqEvent } from "./types.ts";
-import { renderBanner, renderDetail, renderList, renderMode, renderTsunamiBanner } from "./view.ts";
+import { numTag, renderBanner, renderDetail, renderList, renderMode, renderTsunamiBanner, updatePointsOpen } from "./view.ts";
+import { latestEew, summarizeQuake } from "./groups.ts";
 
 /** この時間内に続けて届いた情報では、前より強い音のときだけ鳴らす */
 export const ALERT_MERGE_MS = 3000;
@@ -40,6 +41,9 @@ export function tick(): void {
     renderList();
     renderDetail();
   }
+  const prevTour = app.tourKey;
+  updateTour(now, map.userMoved);
+  if (app.tourKey && app.tourKey !== prevTour) showTourToast(app.tourKey);
   renderBanner(now);
   renderMarkers(now);
   const sc = scene(now);
@@ -66,6 +70,7 @@ export function tick(): void {
   renderMode();
   renderSound();
   renderCountdown(now);
+  updatePointsOpen();
   // 波の表示中は滑らかに、そうでなければ時計の更新だけ
   if (waving) raf = requestAnimationFrame(tick);
   else timer = window.setTimeout(tick, 1000);
@@ -109,6 +114,10 @@ export function onEvents(events: EqEvent[], live: boolean, target: World = liveW
       g.events.length === 1 || (e.kind === "eew" && e.warning && !g.events.slice(0, -1).some((x) => (x as EewEvent).warning));
     const lv = alertLevel(e, isNew, eewActive);
     if (lv && (!alert || rank[lv] > rank[alert])) alert = lv;
+    // 新しい地震は、巡回より先にしばらく見せる
+    if (isNew && (e.kind === "eew" || e.kind === "quake")) {
+      app.tourHold = { key: g.key, until: now() + Math.max(20, app.settings.tourSec * 2) * 1000 };
+    }
   }
   // Wolfx 経由の情報を受けたら出典を出す
   if (events.some((e) => e.source === "wolfx")) $("#credit-wolfx").hidden = false;
@@ -119,6 +128,21 @@ export function onEvents(events: EqEvent[], live: boolean, target: World = liveW
     play(alert);
     lastAlert = { level: alert, at: now() };
   }
+}
+
+let toastTimer = 0;
+/** 巡回で次の地震へ移ったとき、番号と名前を短く出す */
+function showTourToast(key: string): void {
+  const g = app.world.store.get(key);
+  const name = g && (g.kind === "quake" ? summarizeQuake(g).hypocenter?.name : g.kind === "eew" ? latestEew(g).hypocenter?.name : "");
+  const el = $("#tour-toast");
+  el.innerHTML = `${numTag(key)}${esc(name || "震源調査中")}`;
+  el.hidden = false;
+  el.classList.remove("show");
+  void el.offsetWidth;
+  el.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => (el.hidden = true), 2500);
 }
 
 /** 表示中のデータで画面全体を描き直す */
@@ -155,6 +179,17 @@ $("#list").addEventListener("click", (e) => {
 // 画面外の地震の矢印からも選べる
 map.onSelect = select;
 
+// 全体図: 日本全体を表示する。震央を押すとその地震へ寄る (「リアルタイムに戻る」で自動に戻る)
+$("#overview").addEventListener("click", () => {
+  map.showOverview();
+  renderMode();
+});
+// 観測点の一覧を自分で開閉したら、その地震は自動で畳まない
+$("#detail").addEventListener("click", (e) => {
+  const summary = (e.target as HTMLElement).closest("summary");
+  const box = summary?.parentElement as HTMLDetailsElement | undefined;
+  if (box?.dataset.key) app.listOpen.set(box.dataset.key, !box.open);
+});
 $("#back-live").addEventListener("click", () => {
   if (app.demo) exitDemo();
   else {
