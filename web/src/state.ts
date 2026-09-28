@@ -12,6 +12,8 @@ import type { EqEvent, TsunamiEvent } from "./types.ts";
 export const WAVE_MAX_SEC = 180;
 /** EEW 警報バナーを出し続ける時間 */
 export const EEW_BANNER_MS = 3 * 60_000;
+/** 最後の情報からこの時間がたち、揺れも描き終えたら、カメラは日本全体に戻す (選んだ地震と津波予報は除く) */
+export const CAMERA_MS = 3 * 60_000;
 /** 履歴を選んだときの P波・S波の再生速度 */
 export const REPLAY_SPEED = 3;
 

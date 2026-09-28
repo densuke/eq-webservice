@@ -35,8 +35,13 @@ function distToEdges(p: Pt, r: Pt[]): number {
  * 地域の内側で、縁から最も離れた点 (の近似)。一番大きい輪を格子で調べる。
  * 外接矩形の中心は、湾や入り組んだ形では外 (海) に落ちるため使わない
  */
+/** いちばん大きい輪 (離島を除いた本土) */
+export function mainRing(rings: Pt[][]): Pt[] {
+  return rings.reduce((a, b) => (ringArea(b) > ringArea(a) ? b : a));
+}
+
 export function interiorPoint(rings: Pt[][], grid = 12): Pt {
-  const r = rings.reduce((a, b) => (ringArea(b) > ringArea(a) ? b : a));
+  const r = mainRing(rings);
   const xs = r.map((p) => p[0]);
   const ys = r.map((p) => p[1]);
   const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { interiorPoint, labelPx, pickLabels } from "./labels.ts";
+import { interiorPoint, labelPx, mainRing, pickLabels } from "./labels.ts";
 
 const inside = (p: [number, number], ring: [number, number][]) => {
   let c = false;
@@ -60,4 +60,10 @@ test("overlapping labels: the stronger shaking wins", () => {
 test("labels grow with intensity", () => {
   assert.ok(labelPx(70) > labelPx(45));
   assert.ok(labelPx(45) > labelPx(10));
+});
+
+test("main ring is the largest one, so far islands do not widen the camera", () => {
+  const island: [number, number][] = [[0, 100], [1, 100], [1, 101], [0, 101]];
+  const main: [number, number][] = [[0, 0], [10, 0], [10, 10], [0, 10]];
+  assert.deepEqual(mainRing([island, main]), main);
 });
