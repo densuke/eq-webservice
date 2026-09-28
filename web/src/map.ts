@@ -3,6 +3,7 @@
 import type { PrefScale } from "./types.ts";
 import { scaleColor } from "./scale.ts";
 import { geoCircle } from "./waves.ts";
+import { union, type Box } from "./camera.ts";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const LON0 = 137;
@@ -54,7 +55,10 @@ export class JapanMap {
   private epicenter: SVGGElement | null = null;
   private pWave = el("path", { class: "wave wave-p" });
   private sWave = el("path", { class: "wave wave-s" });
-  /** 利用者が手で動かしたら自動フォーカスを控える */
+  private target: View | null = null;
+  private moving = false;
+  private lastFrame = 0;
+  /** 利用者が手で動かしたら自動カメラを止める */
   userMoved = false;
 
   constructor(container: HTMLElement) {
@@ -127,19 +131,60 @@ export class JapanMap {
     this.sWave.setAttribute("d", circle(sKm));
   }
 
-  /** 震央付近へ移動する (spanKm 四方程度が見えるように) */
-  focus(lat: number, lon: number, spanKm = 700): void {
+  /** 自動カメラの目標。null は日本全体。利用者が手で動かしている間は何もしない */
+  setTarget(box: Box | null): void {
     if (this.userMoved) return;
-    const [x, y] = project(lon, lat);
-    const h = (spanKm / 111) * KY;
-    const aspect = this.aspect();
-    const w = h * aspect;
-    this.animateTo({ x: x - w / 2, y: y - h / 2, w, h });
+    this.target = box ? this.boxToView(box) : this.homeView();
+    if (!this.moving) {
+      this.moving = true;
+      this.lastFrame = performance.now();
+      requestAnimationFrame(this.step);
+    }
   }
 
-  resetView(): void {
+  /** 自動カメラに戻す */
+  release(): void {
     this.userMoved = false;
-    this.animateTo(this.homeView());
+  }
+
+  /** 都道府県の外接矩形 (地図座標) */
+  prefBox(names: string[]): Box | null {
+    let box: Box | null = null;
+    for (const n of names) {
+      const b = this.prefs.get(n)?.getBBox();
+      if (b) box = union(box, { x0: b.x, y0: b.y, x1: b.x + b.width, y1: b.y + b.height });
+    }
+    return box;
+  }
+
+  /** 目標へ指数的に近づける (目標が毎フレーム動いても滑らかに追う) */
+  private step = (now: number): void => {
+    const target = this.target;
+    if (this.userMoved || !target) {
+      this.moving = false;
+      return;
+    }
+    const k = 1 - Math.exp(-(now - this.lastFrame) / 250);
+    this.lastFrame = now;
+    const v = this.view;
+    const eps = v.w * 0.002;
+    const near = Math.max(Math.abs(target.x - v.x), Math.abs(target.y - v.y), Math.abs(target.w - v.w), Math.abs(target.h - v.h)) < eps;
+    this.view = near
+      ? { ...target }
+      : { x: v.x + (target.x - v.x) * k, y: v.y + (target.y - v.y) * k, w: v.w + (target.w - v.w) * k, h: v.h + (target.h - v.h) * k };
+    this.applyView();
+    if (near) this.moving = false;
+    else requestAnimationFrame(this.step);
+  };
+
+  /** 画面の縦横比に合わせて box 全体が収まる表示範囲 */
+  private boxToView(b: Box): View {
+    const aspect = this.aspect();
+    const w = Math.max(b.x1 - b.x0, (b.y1 - b.y0) * aspect);
+    const h = w / aspect;
+    const cx = (b.x0 + b.x1) / 2;
+    const cy = (b.y0 + b.y1) / 2;
+    return { x: cx - w / 2, y: cy - h / 2, w, h };
   }
 
   private homeView(): View {
@@ -151,25 +196,6 @@ export class JapanMap {
   private aspect(): number {
     const r = this.svg.getBoundingClientRect();
     return r.width > 0 && r.height > 0 ? r.width / r.height : 1;
-  }
-
-  private animateTo(target: View): void {
-    const from = { ...this.view };
-    const start = performance.now();
-    const dur = 600;
-    const step = (now: number) => {
-      const t = Math.min(1, (now - start) / dur);
-      const e = 1 - (1 - t) ** 3;
-      this.view = {
-        x: from.x + (target.x - from.x) * e,
-        y: from.y + (target.y - from.y) * e,
-        w: from.w + (target.w - from.w) * e,
-        h: from.h + (target.h - from.h) * e,
-      };
-      this.applyView();
-      if (t < 1) requestAnimationFrame(step);
-    };
-    requestAnimationFrame(step);
   }
 
   private applyView(): void {

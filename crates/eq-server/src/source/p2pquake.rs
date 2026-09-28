@@ -89,5 +89,12 @@ pub async fn fetch_history(base: &str, limit: u32) -> anyhow::Result<Vec<Event>>
         .collect();
     // 履歴 API は新しい順
     events.reverse();
+    // 受信時刻を発表時刻にしておく。起動時にまとめて配信すると全件がほぼ同じ時刻になり、
+    // ブラウザ側で新旧の順が崩れるため
+    for ev in &mut events {
+        if let Some(t) = ev.issued_at_ms() {
+            ev.received_at_ms = t.max(0) as u64;
+        }
+    }
     Ok(events)
 }

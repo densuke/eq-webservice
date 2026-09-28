@@ -1,20 +1,28 @@
 import { Connection, type Status } from "./connection.ts";
 import { GroupStore, latestEew, summarizeQuake, type Group } from "./groups.ts";
-import { JapanMap } from "./map.ts";
+import { alertLevel, type AlertLevel } from "./alert.ts";
+import { followRadiusKm, pad, pointBox, stopRadiusKm, union, type Box } from "./camera.ts";
+import { JapanMap, project } from "./map.ts";
 import { isKnownScale, scaleColor, scaleLabel, scaleTextColor } from "./scale.ts";
 import type { EewEvent, EqEvent, Hypocenter, Scale, TsunamiEvent } from "./types.ts";
+import { play, setSoundEnabled, soundEnabled, soundReady, unlock } from "./sound.ts";
 import { surfaceRadiusKm, VP_KM_S, VS_KM_S } from "./waves.ts";
 
 /** 発生からこの秒数を過ぎたら P波・S波の表示を止める */
 const WAVE_MAX_SEC = 180;
 /** EEW 警報バナーを出し続ける時間 */
 const EEW_BANNER_MS = 3 * 60_000;
+/** 履歴を選んだときの P波・S波の再生速度 */
+const REPLAY_SPEED = 3;
+/** 最新の地震はこの時間まで寄って表示し、過ぎたら日本全体に戻す */
+const AUTO_FIT_MS = 10 * 60_000;
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as T;
 
 const store = new GroupStore();
 const map = new JapanMap($("#map"));
 let selectedKey: string | null = null; // null は「最新に自動追従」
+let selectedAt = 0; // 履歴を選んだ時刻 (再生の起点)
 let conn: Connection;
 
 // ---------- 描画ヘルパ ----------
@@ -91,7 +99,16 @@ function renderList(): void {
     .slice(0, 100)
     .map((g) => `<li data-key="${esc(g.key)}" class="${g.key === current?.key ? "selected" : ""}">${groupRow(g)}</li>`)
     .join("");
-  $("#follow").classList.toggle("active", selectedKey === null);
+  renderFollow();
+}
+
+function renderFollow(): void {
+  const following = selectedKey === null && !map.userMoved;
+  const btn = $("#follow");
+  const text = following ? "リアルタイム表示中" : "リアルタイムに戻る";
+  if (btn.textContent === text) return;
+  btn.textContent = text;
+  btn.classList.toggle("active", following);
 }
 
 // ---------- 詳細 ----------
@@ -187,27 +204,81 @@ function activeEew(now: number): EewEvent | null {
   return null;
 }
 
+interface Center {
+  lat: number;
+  lon: number;
+  depth: number;
+}
+
+/** 地震 (地震情報・EEW) のグループから震源・発生時刻・揺れた都道府県を取り出す */
+function geoOf(g: Group): { center: Center | null; origin: number | null; prefs: string[] } | null {
+  let h: Hypocenter | null;
+  let origin: number | null;
+  let prefs: string[];
+  if (g.kind === "eew") {
+    const e = latestEew(g);
+    if (e.cancelled) return null;
+    [h, origin, prefs] = [e.hypocenter, e.origin_time_ms, e.pref_max.map((p) => p.pref)];
+  } else if (g.kind === "quake") {
+    const q = summarizeQuake(g);
+    [h, origin, prefs] = [q.hypocenter, q.originTimeMs, q.prefMax.map((p) => p.pref)];
+  } else return null;
+  const center = h?.latitude != null && h.longitude != null ? { lat: h.latitude, lon: h.longitude, depth: h.depth_km ?? 10 } : null;
+  return { center, origin, prefs };
+}
+
 /** P波・S波を描く対象 (直近の EEW、なければ直近の地震情報) */
-function waveSource(now: number): { lat: number; lon: number; depth: number; origin: number } | null {
+function waveSource(now: number): (Center & { origin: number }) | null {
   for (const g of store.list()) {
-    let h: Hypocenter | null = null;
-    let origin: number | null = null;
-    if (g.kind === "eew") {
-      const e = latestEew(g);
-      if (e.cancelled) continue;
-      h = e.hypocenter;
-      origin = e.origin_time_ms;
-    } else if (g.kind === "quake") {
-      const q = summarizeQuake(g);
-      h = q.hypocenter;
-      origin = q.originTimeMs;
-    } else continue;
-    if (origin == null) continue;
-    if (now - origin > WAVE_MAX_SEC * 1000) return null; // 新しい順なのでこれより前は不要
-    if (h?.latitude == null || h.longitude == null) continue;
-    return { lat: h.latitude, lon: h.longitude, depth: h.depth_km ?? 10, origin };
+    const geo = geoOf(g);
+    if (!geo || geo.origin == null) continue;
+    if (now - geo.origin > WAVE_MAX_SEC * 1000) return null; // 新しい順なのでこれより前は不要
+    if (geo.center) return { ...geo.center, origin: geo.origin };
   }
   return null;
+}
+
+interface Scene {
+  center: Center | null;
+  /** 発生からの秒数。null なら波は描かない */
+  t: number | null;
+  shaken: Box | null;
+  replay: boolean;
+}
+
+/** いま地図で見せる地震。null なら日本全体 */
+function scene(now: number): Scene | null {
+  if (selectedKey) {
+    const g = store.get(selectedKey);
+    const geo = g && geoOf(g);
+    if (!geo) return null;
+    return { center: geo.center, t: ((now - selectedAt) / 1000) * REPLAY_SPEED, shaken: map.prefBox(geo.prefs), replay: true };
+  }
+  const src = waveSource(now);
+  const g = store.list().find((g) => g.kind === "quake" || g.kind === "eew");
+  if (!src && (!g || now - g.updatedAt > AUTO_FIT_MS)) return null;
+  const geo = g && geoOf(g);
+  return {
+    center: src ?? geo?.center ?? null,
+    t: src ? (now - src.origin) / 1000 : null,
+    shaken: geo ? map.prefBox(geo.prefs) : null,
+    replay: false,
+  };
+}
+
+/** 波を描き、カメラの目標を返す。波を描いているかどうかも返す */
+function renderScene(sc: Scene | null): { box: Box | null; waving: boolean } {
+  if (!sc?.center) return { box: sc?.shaken ? pad(sc.shaken) : null, waving: false };
+  const c = sc.center;
+  const [x, y] = project(c.lon, c.lat);
+  const stop = stopRadiusKm(x, y, sc.shaken);
+  const s = sc.t == null ? null : surfaceRadiusKm(VS_KM_S, c.depth, sc.t);
+  // 再生は揺れた地域を覆い終えたら打ち切る (早回しでも 180 秒分は長い)
+  const waving = sc.t != null && sc.t < WAVE_MAX_SEC && !(sc.replay && (s ?? 0) > stop);
+  if (!waving) return { box: pad(union(sc.shaken, pointBox(x, y, 0))!), waving };
+  map.setWaves(c, surfaceRadiusKm(VP_KM_S, c.depth, sc.t!), s);
+  $("#wave-info").textContent = sc.replay ? `再生中 ${sc.t!.toFixed(0)}秒 (×${REPLAY_SPEED})` : `発生から${sc.t!.toFixed(0)}秒`;
+  return { box: pad(pointBox(x, y, followRadiusKm(s, stop))), waving };
 }
 
 function renderBanner(now: number): void {
@@ -229,34 +300,33 @@ function tick(): void {
   $("#clock-date").textContent = d.toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo" });
   $("#clock-time").textContent = d.toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour12: false });
   renderBanner(now);
-  const src = waveSource(now);
-  if (src) {
-    const t = (now - src.origin) / 1000;
-    map.setWaves(src, surfaceRadiusKm(VP_KM_S, src.depth, t), surfaceRadiusKm(VS_KM_S, src.depth, t));
-    $("#wave-info").textContent = `発生から${t.toFixed(0)}秒`;
-  } else {
+  const { box, waving } = renderScene(scene(now));
+  if (!waving) {
     map.setWaves(null, null, null);
     $("#wave-info").textContent = "";
   }
+  map.setTarget(box);
+  renderFollow();
+  renderSound();
   // 波の表示中は滑らかに、そうでなければ時計の更新だけ
-  if (src) raf = requestAnimationFrame(tick);
+  if (waving) raf = requestAnimationFrame(tick);
   else timer = window.setTimeout(tick, 1000);
 }
 
 // ---------- イベント受信 ----------
 
 function onEvents(events: EqEvent[], live: boolean): void {
-  let focusTarget: Hypocenter | null = null;
+  const rank: Record<AlertLevel, number> = { low: 1, medium: 2, strong: 3 };
+  let alert: AlertLevel | null = null;
   for (const e of events) {
     const g = store.add(e);
     if (!g || !live) continue;
-    if (e.kind === "eew" || e.kind === "quake") focusTarget = e.hypocenter ?? focusTarget;
+    const lv = alertLevel(e, g.events.length === 1, activeEew(conn.now()) !== null);
+    if (lv && (!alert || rank[lv] > rank[alert])) alert = lv;
   }
   renderList();
   renderDetail();
-  if (live && selectedKey === null && focusTarget?.latitude != null && focusTarget.longitude != null) {
-    map.focus(focusTarget.latitude, focusTarget.longitude);
-  }
+  if (alert) play(alert);
   tick();
 }
 
@@ -272,15 +342,36 @@ $("#list").addEventListener("click", (e) => {
   const li = (e.target as HTMLElement).closest("li");
   if (!li) return;
   selectedKey = li.dataset.key ?? null;
+  selectedAt = conn.now();
+  map.release();
   renderList();
   renderDetail();
 });
 $("#follow").addEventListener("click", () => {
   selectedKey = null;
-  map.resetView();
+  map.release();
   renderList();
   renderDetail();
+  tick();
 });
+
+function renderSound(): void {
+  const btn = $("#sound");
+  const text = !soundEnabled() ? "音 OFF" : soundReady() ? "音 ON" : "音 ON (タップで有効化)";
+  if (btn.textContent === text) return;
+  btn.textContent = text;
+  btn.classList.toggle("active", soundEnabled() && soundReady());
+}
+$("#sound").addEventListener("click", () => {
+  setSoundEnabled(!soundEnabled());
+  if (soundEnabled()) {
+    unlock();
+    play("low"); // 確認用
+  }
+  renderSound();
+});
+// 前回 ON にしていた場合、ブラウザの制約で最初の操作までは鳴らせない
+if (soundEnabled()) document.addEventListener("pointerdown", unlock, { once: true });
 
 map
   .load("japan.geojson")
