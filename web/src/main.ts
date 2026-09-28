@@ -10,11 +10,14 @@ import type { EewEvent, EqEvent, Hypocenter, Scale, TsunamiEvent } from "./types
 import { play, setSoundEnabled, soundEnabled, soundReady, unlock } from "./sound.ts";
 import { surfaceRadiusKm, VP_KM_S, VS_KM_S } from "./waves.ts";
 import { byPriority, sameQuake, type Place } from "./priority.ts";
+import { assignNumbers } from "./numbering.ts";
 
 /** 発生からこの秒数を過ぎたら P波・S波の表示を止める */
 const WAVE_MAX_SEC = 180;
 /** EEW 警報バナーを出し続ける時間 */
 const EEW_BANNER_MS = 3 * 60_000;
+/** EEW バナーに並べる件数 (残りは「ほか N 件」) */
+const EEW_BANNER_MAX = 3;
 /** この時間内に続けて届いた情報では、前より強い音のときだけ鳴らす */
 const ALERT_MERGE_MS = 3000;
 /** 履歴を選んだときの P波・S波の再生速度 */
@@ -28,12 +31,19 @@ let selectedKey: string | null = null; // null は「最新に自動追従」
 let selectedAt = 0; // 履歴を選んだ時刻 (再生の起点)
 /** 受け取った最新の津波予報 (解除を含む)。一覧の整理で消えないよう別に持つ */
 let tsunami: TsunamiEvent | null = null;
+/** 直近の地震の一時的な番号 (グループのキー → 番号) */
+let numbers = new Map<string, number>();
 let conn: Connection;
 
 // ---------- 描画ヘルパ ----------
 
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+}
+
+function numTag(key: string): string {
+  const n = numbers.get(key);
+  return n == null ? "" : `<span class="num">${n}</span>`;
 }
 
 function badge(s: Scale, big = false): string {
@@ -72,13 +82,13 @@ function groupRow(g: Group): string {
   switch (g.kind) {
     case "quake": {
       const q = summarizeQuake(g);
-      return `${badge(q.maxScale)}<div class="row-main"><div class="row-title">${esc(
+      return `${badge(q.maxScale)}<div class="row-main"><div class="row-title">${numTag(g.key)}${esc(
         q.hypocenter?.name || "震源調査中",
       )}</div><div class="row-sub">${esc(q.originTime.slice(5, 16))} ${q.hypocenter?.magnitude != null ? "M" + q.hypocenter.magnitude.toFixed(1) : ""} ・${q.infoLabel}</div></div>`;
     }
     case "eew": {
       const e = latestEew(g);
-      return `${badge(e.max_scale)}<div class="row-main"><div class="row-title eew-title">${e.test ? "[テスト] " : ""}緊急地震速報 ${
+      return `${badge(e.max_scale)}<div class="row-main"><div class="row-title eew-title">${numTag(g.key)}${e.test ? "[テスト] " : ""}緊急地震速報 ${
         e.cancelled ? "(取消)" : esc(e.hypocenter?.name ?? "")
       }</div><div class="row-sub">${esc((e.origin_time ?? e.issued_at).slice(5, 16))} ・第${esc(e.serial)}報</div></div>`;
     }
@@ -129,15 +139,64 @@ function paintMap(g: Group | undefined): void {
   if (g?.kind === "quake") {
     const q = summarizeQuake(g);
     map.setPrefScales(q.prefMax);
-    map.setEpicenter(q.hypocenter?.latitude ?? null, q.hypocenter?.longitude ?? null);
   } else if (g?.kind === "eew") {
     const e = latestEew(g);
     map.setPrefScales(e.cancelled ? [] : e.pref_max, true);
-    map.setEpicenter(e.hypocenter?.latitude ?? null, e.hypocenter?.longitude ?? null);
   } else {
     map.setPrefScales([]);
-    map.setEpicenter(null, null);
   }
+}
+
+/** 直近の地震 (起きた順) */
+function recentQuakes(now: number): Group[] {
+  const origin = (g: Group) => geoOf(g)?.origin ?? g.updatedAt;
+  return store
+    .list()
+    .filter((g) => (g.kind === "quake" || g.kind === "eew") && geoOf(g) && now - g.updatedAt <= FULL_MS)
+    .sort((a, b) => origin(a) - origin(b));
+}
+
+/** 番号を振り直す。変わったら true */
+function updateNumbers(now: number): boolean {
+  const recent = recentQuakes(now);
+  const eews = recent.filter((g) => g.kind === "eew");
+  const linkOf = (g: Group) => {
+    if (g.kind !== "quake") return undefined;
+    const p = groupPlace(g);
+    const near = eews.filter((e) => sameQuake(groupPlace(e), p));
+    // 群発で候補が複数あれば発生時刻の近いもの
+    near.sort((a, b) => Math.abs(groupPlace(a).originMs! - p.originMs!) - Math.abs(groupPlace(b).originMs! - p.originMs!));
+    return near[0]?.key;
+  };
+  const next = assignNumbers(
+    numbers,
+    recent.map((g) => ({ key: g.key, linkedTo: linkOf(g) })),
+  );
+  const changed = JSON.stringify([...next]) !== JSON.stringify([...numbers]);
+  numbers = next;
+  return changed;
+}
+
+/** 震央の印。番号ごとに 1 つ (同じ地震の EEW と地震情報は地震情報の震源を使う) */
+function renderMarkers(now: number): void {
+  const cur = currentGroup();
+  const shown = cur && relatedQuake(cur);
+  const groups = selectedKey ? (shown ? [shown] : []) : [...recentQuakes(now), ...(shown ? [shown] : [])];
+  const byNum = new Map<string, { lat: number; lon: number; label: number | null; primary: boolean; quake: boolean }>();
+  for (const g of groups) {
+    const c = geoOf(g)?.center;
+    if (!c) continue;
+    const label = numbers.get(g.key) ?? null;
+    const id = label == null ? g.key : String(label);
+    const primary = g === shown || (label != null && shown != null && numbers.get(shown.key) === label);
+    const prev = byNum.get(id);
+    if (prev && (prev.quake || g.kind !== "quake")) {
+      prev.primary ||= primary;
+      continue;
+    }
+    byNum.set(id, { lat: c.lat, lon: c.lon, label, primary: primary || (prev?.primary ?? false), quake: g.kind === "quake" });
+  }
+  map.setEpicenters([...byNum.values()].map(({ quake: _, ...m }) => m));
 }
 
 /** 地図に塗っている地震の発生時刻 (無ければ受信時刻) */
@@ -174,7 +233,7 @@ function renderDetail(): void {
     box.innerHTML = `
       <div class="detail-head">${badge(q.maxScale, true)}
         <div><div class="detail-kind">${q.infoLabel}</div>
-        <div class="detail-title">${esc(q.hypocenter?.name || "震源調査中")}</div>
+        <div class="detail-title">${numTag(g.key)}${esc(q.hypocenter?.name || "震源調査中")}</div>
         <div class="detail-sub">${esc(q.originTime)} 発生</div></div></div>
       <dl class="facts">
         <dt>震源</dt><dd>${hypoText(q.hypocenter)}</dd>
@@ -194,7 +253,7 @@ function renderDetail(): void {
     box.innerHTML = `
       <div class="detail-head">${badge(e.max_scale, true)}
         <div><div class="detail-kind eew-title">緊急地震速報 (警報)${e.test ? " [テスト]" : ""} 第${esc(e.serial)}報</div>
-        <div class="detail-title">${e.cancelled ? "取り消されました" : esc(e.hypocenter?.name ?? "震源不明")}</div>
+        <div class="detail-title">${numTag(g.key)}${e.cancelled ? "取り消されました" : esc(e.hypocenter?.name ?? "震源不明")}</div>
         <div class="detail-sub">${esc(e.origin_time ?? e.issued_at)} 発生</div></div></div>
       <dl class="facts"><dt>震源</dt><dd>${hypoText(e.hypocenter)}</dd><dt>予測最大</dt><dd>震度${scaleLabel(e.max_scale)}</dd></dl>
       <div class="points">${e.areas
@@ -374,15 +433,22 @@ function renderTsunamiBanner(): void {
 }
 
 function renderBanner(now: number): void {
-  const eews = activeEews(now);
+  // 揺れの大きい順に数件だけ並べる
+  const eews = activeEews(now)
+    .map((e) => ({ e, scale: e.max_scale, at: e.received_at_ms }))
+    .sort(byPriority)
+    .map((c) => c.e);
   const banner = $("#eew-banner");
   banner.hidden = eews.length === 0;
-  banner.innerHTML = eews
-    .map((e) => {
-      const prefs = e.pref_max.map((p) => p.pref).join("・");
-      return `<div><b>${e.test ? "【テスト】" : ""}緊急地震速報 (警報)</b> ${esc(e.hypocenter?.name ?? "")} で地震 ・ 強い揺れに警戒: ${esc(prefs || "—")}</div>`;
-    })
-    .join("");
+  const rest = eews.length - EEW_BANNER_MAX;
+  banner.innerHTML =
+    eews
+      .slice(0, EEW_BANNER_MAX)
+      .map((e) => {
+        const prefs = e.pref_max.map((p) => p.pref).join("・");
+        return `<div>${numTag(`e:${e.event_id}`)}<b>${e.test ? "【テスト】" : ""}緊急地震速報 (警報)</b> ${esc(e.hypocenter?.name ?? "")} で地震 ・ 強い揺れに警戒: ${esc(prefs || "—")}</div>`;
+      })
+      .join("") + (rest > 0 ? `<div>ほか ${rest} 件の緊急地震速報</div>` : "");
 }
 
 let raf = 0;
@@ -398,7 +464,12 @@ function tick(): void {
   const d = new Date(now);
   $("#clock-date").textContent = d.toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo" });
   $("#clock-time").textContent = d.toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour12: false });
+  if (updateNumbers(now)) {
+    renderList();
+    renderDetail();
+  }
   renderBanner(now);
+  renderMarkers(now);
   const sc = scene(now);
   const { box, waving } = renderScene(sc);
   // 波の広がり中 (ライブのみ) は 2 秒ごとに短い音で警戒中を知らせる (地震が重なっても 1 本)

@@ -62,7 +62,8 @@ export class JapanMap {
   private hitColors = new Map<string, string>();
   private fade = 1;
   private view: View;
-  private epicenter: SVGGElement | null = null;
+  private epicenters: SVGGElement[] = [];
+  private epicenterSig = "";
   private pWave = el("path", { class: "wave wave-p" });
   private sWave = el("path", { class: "wave wave-s" });
   private target: View | null = null;
@@ -160,26 +161,36 @@ export class JapanMap {
       p.style.fill = a >= 1 ? color : `color-mix(in srgb, ${color} ${(a * 100).toFixed(1)}%, var(--land))`;
       p.classList.toggle("hit", a > 0);
     }
-    if (this.epicenter) this.epicenter.style.opacity = String(a);
+    this.markerLayer.style.opacity = String(a);
   }
 
-  setEpicenter(lat: number | null, lon: number | null): void {
-    this.epicenter?.remove();
-    this.epicenter = null;
-    if (lat == null || lon == null) return;
-    const [x, y] = project(lon, lat);
-    const g = el("g", { class: "epicenter" });
-    g.dataset.x = String(x);
-    g.dataset.y = String(y);
-    const r = 9;
-    g.append(
-      el("circle", { r: 16, class: "epicenter-pulse" }),
-      el("path", { d: `M${-r} ${-r}L${r} ${r}M${r} ${-r}L${-r} ${r}`, class: "epicenter-x-bg" }),
-      el("path", { d: `M${-r} ${-r}L${r} ${r}M${r} ${-r}L${-r} ${r}`, class: "epicenter-x" }),
-    );
-    this.markerLayer.append(g);
-    this.epicenter = g;
-    g.style.opacity = String(this.fade);
+  /** 震央の印。primary (表示中の地震) は大きく、ほかは小さく。label は一時的な番号 */
+  setEpicenters(items: { lat: number; lon: number; label: number | null; primary: boolean }[]): void {
+    const sig = JSON.stringify(items);
+    if (sig === this.epicenterSig) return;
+    this.epicenterSig = sig;
+    this.epicenters.forEach((g) => g.remove());
+    // 表示中の地震を最前面に
+    this.epicenters = [...items]
+      .sort((a, b) => Number(a.primary) - Number(b.primary))
+      .map(({ lat, lon, label, primary }) => {
+        const [x, y] = project(lon, lat);
+        const g = el("g", { class: primary ? "epicenter" : "epicenter sub" });
+        g.dataset.x = String(x);
+        g.dataset.y = String(y);
+        g.dataset.k = primary ? "1" : "0.65";
+        const r = 9;
+        const x9 = `M${-r} ${-r}L${r} ${r}M${r} ${-r}L${-r} ${r}`;
+        if (primary) g.append(el("circle", { r: 16, class: "epicenter-pulse" }));
+        g.append(el("path", { d: x9, class: "epicenter-x-bg" }), el("path", { d: x9, class: "epicenter-x" }));
+        if (label != null) {
+          const t = el("text", { x: 11, y: -9, class: "epicenter-label" });
+          t.textContent = String(label);
+          g.append(t);
+        }
+        this.markerLayer.append(g);
+        return g;
+      });
     this.updateMarkerScale();
   }
 
@@ -277,10 +288,11 @@ export class JapanMap {
   }
 
   private updateMarkerScale(): void {
-    if (!this.epicenter) return;
     const k = this.unitsPerPixel();
-    const { x, y } = this.epicenter.dataset;
-    this.epicenter.setAttribute("transform", `translate(${x} ${y}) scale(${k})`);
+    for (const g of this.epicenters) {
+      const { x, y, k: size } = g.dataset;
+      g.setAttribute("transform", `translate(${x} ${y}) scale(${k * Number(size)})`);
+    }
   }
 
   private clientToMap(cx: number, cy: number): [number, number] {

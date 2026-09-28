@@ -69,6 +69,9 @@ body {
 .wave-s { stroke: var(--s-wave); fill: rgba(255, 82, 82, 0.05); }
 .epicenter-x { stroke: #ff1744; stroke-width: 4; stroke-linecap: round; fill: none; }
 .epicenter-x-bg { stroke: #fff; stroke-width: 8; stroke-linecap: round; fill: none; }
+.epicenter.sub { opacity: 0.8; }
+.epicenter-label { font-size: 15px; font-weight: 700; fill: #fff; stroke: #000; stroke-width: 4px; paint-order: stroke; }
+.num { display: inline-block; min-width: 1.4em; padding: 0 3px; margin-right: 4px; border-radius: 4px; background: #fff; color: #111; font-size: 0.85em; font-weight: 700; text-align: center; }
 .epicenter-pulse { fill: none; stroke: #ff1744; stroke-width: 2; animation: pulse 1.6s ease-out infinite; transform-box: fill-box; transform-origin: center; }
 @keyframes pulse { from { transform: scale(0.4); opacity: 1; } to { transform: scale(2.2); opacity: 0; } }
 
