@@ -215,7 +215,9 @@ body {
 @media (max-width: 800px) {
   /* スマホでは地図の下に詳細・履歴を並べ、ページ全体をスクロールさせる */
   html, body { height: auto; }
-  .topbar { position: sticky; top: 0; z-index: 2; gap: 8px; }
+  /* ボタンが収まらないので折り返す (上部バーの高さが変わるので、バナーは固定しない) */
+  .topbar { position: sticky; top: 0; z-index: 2; gap: 6px 8px; flex-wrap: wrap; padding: 6px 10px; }
+  .topbar > .telop { order: 10; flex-basis: 100%; }
   .topbar h1 { font-size: 14px; }
   .version { display: none; }
   .mode { font-size: 11px; padding: 2px 6px; }
@@ -223,7 +225,8 @@ body {
   .inset-okinawa, .inset-ogasawara { height: 100px; }
   .c-hm { font-size: 26px; }
   .c-day { font-size: 20px; }
-  .eew-banner { position: sticky; top: 37px; z-index: 2; font-size: 14px; }
+  .eew-banner { font-size: 14px; }
+  .countdown { top: auto; bottom: 64px; }
   .layout { display: block; }
   .map-wrap { height: 60vh; height: 60svh; }
   .side { border-left: none; border-top: 1px solid var(--line); }
