@@ -5,6 +5,7 @@ import { followRadiusKm, pad, pointBox, stopRadiusKm, union, type Box } from "./
 import { fadeOpacity, FULL_MS } from "./fade.ts";
 import { JapanMap, project } from "./map.ts";
 import { isKnownScale, scaleColor, scaleLabel, scaleTextColor } from "./scale.ts";
+import { activeAreas, latestTsunami, tsunamiAlert } from "./tsunami.ts";
 import type { EewEvent, EqEvent, Hypocenter, Scale, TsunamiEvent } from "./types.ts";
 import { play, setSoundEnabled, soundEnabled, soundReady, unlock } from "./sound.ts";
 import { surfaceRadiusKm, VP_KM_S, VS_KM_S } from "./waves.ts";
@@ -22,6 +23,8 @@ const store = new GroupStore();
 const map = new JapanMap($("#map"));
 let selectedKey: string | null = null; // null は「最新に自動追従」
 let selectedAt = 0; // 履歴を選んだ時刻 (再生の起点)
+/** 受け取った最新の津波予報 (解除を含む)。一覧の整理で消えないよう別に持つ */
+let tsunami: TsunamiEvent | null = null;
 let conn: Connection;
 
 // ---------- 描画ヘルパ ----------
@@ -278,6 +281,9 @@ function scene(now: number): Scene | null {
   }
   const src = waveSource(now);
   const g = store.list().find((g) => g.kind === "quake" || g.kind === "eew");
+  // 波が終わったら、津波予報が出ていれば予報区全体を見せる
+  const tsunamiBox = map.tsunamiBox(activeAreas(tsunami).map((a) => a.name));
+  if (!src && tsunamiBox) return { center: null, t: null, shaken: tsunamiBox, replay: false };
   if (!src && (!g || now - g.updatedAt > FULL_MS)) return null;
   const geo = g && geoOf(g);
   return {
@@ -301,6 +307,18 @@ function renderScene(sc: Scene | null): { box: Box | null; waving: boolean } {
   map.setWaves(c, surfaceRadiusKm(VP_KM_S, c.depth, sc.t!), s);
   $("#wave-info").textContent = sc.replay ? `再生中 ${sc.t!.toFixed(0)}秒 (×${REPLAY_SPEED})` : `発生から${sc.t!.toFixed(0)}秒`;
   return { box: pad(pointBox(x, y, followRadiusKm(s, stop))), waving };
+}
+
+function renderTsunamiBanner(): void {
+  const areas = activeAreas(tsunami);
+  const banner = $("#tsunami-banner");
+  banner.hidden = areas.length === 0;
+  if (areas.length === 0) return;
+  const grades = (["major_warning", "warning", "watch"] as const).filter((g) => areas.some((a) => a.grade === g));
+  banner.dataset.grade = grades[0] ?? "unknown";
+  banner.innerHTML = grades
+    .map((g) => `<b>${GRADE_LABEL[g]}</b> ${esc(areas.filter((a) => a.grade === g).map((a) => a.name).join("・"))}`)
+    .join(" ／ ");
 }
 
 function renderBanner(now: number): void {
@@ -349,12 +367,21 @@ function onEvents(events: EqEvent[], live: boolean): void {
   let alert: AlertLevel | null = null;
   for (const e of events) {
     const g = store.add(e);
-    if (!g || !live) continue;
+    if (!g) continue;
+    if (e.kind === "tsunami") {
+      const prev = activeAreas(tsunami);
+      tsunami = latestTsunami(tsunami, e);
+      const lv = live ? tsunamiAlert(prev, activeAreas(tsunami)) : null;
+      if (lv && (!alert || rank[lv] > rank[alert])) alert = lv;
+    }
+    if (!live) continue;
     const lv = alertLevel(e, g.events.length === 1, activeEew(conn.now()) !== null);
     if (lv && (!alert || rank[lv] > rank[alert])) alert = lv;
   }
   renderList();
   renderDetail();
+  map.setTsunami(activeAreas(tsunami));
+  renderTsunamiBanner();
   if (alert) play(alert);
   tick();
 }
@@ -402,8 +429,11 @@ $("#sound").addEventListener("click", () => {
 // 前回 ON にしていた場合、ブラウザの制約で最初の操作までは鳴らせない
 if (soundEnabled()) document.addEventListener("pointerdown", unlock, { once: true });
 
-map
-  .load("japan.geojson")
+Promise.all([
+  map.load("japan.geojson"),
+  // 無くても地震の表示はできる
+  map.loadTsunami("tsunami.geojson").catch(() => {}),
+])
   .catch((err) => {
     $("#detail").innerHTML = `<p class="error">${esc(String(err))}</p>`;
   })

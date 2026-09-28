@@ -14,6 +14,8 @@ type = "p2pquake"
 url = "wss://api.p2pquake.net/v2/ws"
 history_url = "https://api.p2pquake.net/v2/history"
 history_limit = 30
+# 現在の津波予報 (履歴 API には含まれないため別に取得する)
+tsunami_url = "https://api.p2pquake.net/v2/jma/tsunami"
 
 # 地震が起きていないときの画面確認用: 記録データを「今」の時刻にずらして再生する
 # [source]

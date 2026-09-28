@@ -1,6 +1,6 @@
 // SVG による日本地図。外部タイルに依存せず、都道府県の塗り分け・震央・P波/S波を描く。
 
-import type { PrefScale } from "./types.ts";
+import type { PrefScale, TsunamiArea } from "./types.ts";
 import { scaleColor } from "./scale.ts";
 import { geoCircle } from "./waves.ts";
 import { union, type Box } from "./camera.ts";
@@ -26,6 +26,11 @@ interface GeoFeature {
   geometry: { type: "MultiPolygon"; coordinates: number[][][][] };
 }
 
+interface LineFeature {
+  properties: { name: string };
+  geometry: { type: "MultiLineString"; coordinates: number[][][] };
+}
+
 export function project(lon: number, lat: number): [number, number] {
   return [(lon - LON0) * KX, -(lat - LAT0) * KY];
 }
@@ -48,9 +53,11 @@ function ringPath(coords: [number, number][]): string {
 export class JapanMap {
   readonly svg: SVGSVGElement;
   private prefLayer = el("g", { class: "prefs" });
+  private tsunamiLayer = el("g", { class: "tsunami" });
   private waveLayer = el("g", { class: "waves" });
   private markerLayer = el("g", { class: "markers" });
   private prefs = new Map<string, SVGPathElement>();
+  private tsunamiAreas = new Map<string, { path: SVGPathElement; box: Box }>();
   /** 塗り分け中の都道府県と色 (薄くするときに使う) */
   private hitColors = new Map<string, string>();
   private fade = 1;
@@ -66,7 +73,7 @@ export class JapanMap {
 
   constructor(container: HTMLElement) {
     this.svg = el("svg", { class: "map", preserveAspectRatio: "xMidYMid meet" });
-    this.svg.append(this.prefLayer, this.waveLayer, this.markerLayer);
+    this.svg.append(this.prefLayer, this.tsunamiLayer, this.waveLayer, this.markerLayer);
     this.waveLayer.append(this.sWave, this.pWave);
     container.append(this.svg);
     this.view = this.homeView();
@@ -88,6 +95,44 @@ export class JapanMap {
       this.prefLayer.append(path);
       this.prefs.set(f.properties.name, path);
     }
+  }
+
+  /** 津波予報区の沿岸線 */
+  async loadTsunami(url: string): Promise<void> {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`津波予報区のデータを取得できません (${res.status})`);
+    const data: { features: LineFeature[] } = await res.json();
+    for (const f of data.features) {
+      let d = "";
+      let box: Box | null = null;
+      for (const line of f.geometry.coordinates) {
+        line.forEach(([lon, lat], i) => {
+          const [x, y] = project(lon, lat);
+          d += `${i === 0 ? "M" : "L"}${x.toFixed(1)} ${y.toFixed(1)}`;
+          box = union(box, { x0: x, y0: y, x1: x, y1: y });
+        });
+      }
+      const path = el("path", { d, class: "tsunami-line" });
+      const title = el("title");
+      title.textContent = f.properties.name;
+      path.append(title);
+      this.tsunamiLayer.append(path);
+      this.tsunamiAreas.set(f.properties.name, { path, box: box! });
+    }
+  }
+
+  /** 発表中の津波予報区を等級の色で描く */
+  setTsunami(areas: TsunamiArea[]): void {
+    for (const { path } of this.tsunamiAreas.values()) delete path.dataset.grade;
+    for (const a of areas) {
+      const t = this.tsunamiAreas.get(a.name);
+      if (t) t.path.dataset.grade = a.grade;
+    }
+  }
+
+  /** 津波予報区の外接矩形 (地図座標) */
+  tsunamiBox(names: string[]): Box | null {
+    return names.reduce<Box | null>((b, n) => union(b, this.tsunamiAreas.get(n)?.box ?? null), null);
   }
 
   /** 都道府県の塗り分け。forecast は緊急地震速報の予測 (破線で区別) */
