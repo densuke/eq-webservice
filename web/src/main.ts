@@ -190,7 +190,7 @@ function renderMarkers(now: number): void {
   const cur = currentGroup();
   const shown = cur && relatedQuake(cur);
   const groups = selectedKey ? (shown ? [shown] : []) : [...recentQuakes(now), ...(shown ? [shown] : [])];
-  const byNum = new Map<string, { lat: number; lon: number; label: number | null; primary: boolean; scale: number; quake: boolean }>();
+  const byNum = new Map<string, { key: string; lat: number; lon: number; label: number | null; primary: boolean; scale: number; quake: boolean }>();
   for (const g of groups) {
     const c = geoOf(g)?.center;
     if (!c) continue;
@@ -202,7 +202,7 @@ function renderMarkers(now: number): void {
       prev.primary ||= primary;
       continue;
     }
-    byNum.set(id, { lat: c.lat, lon: c.lon, label, primary: primary || (prev?.primary ?? false), scale: groupScale(g), quake: g.kind === "quake" });
+    byNum.set(id, { key: g.key, lat: c.lat, lon: c.lon, label, primary: primary || (prev?.primary ?? false), scale: groupScale(g), quake: g.kind === "quake" });
   }
   map.setEpicenters([...byNum.values()].map(({ quake: _, ...m }) => m));
 }
@@ -603,15 +603,19 @@ function setStatus(s: Status): void {
 
 // ---------- 起動 ----------
 
-$("#list").addEventListener("click", (e) => {
-  const li = (e.target as HTMLElement).closest("li");
-  if (!li) return;
-  selectedKey = li.dataset.key ?? null;
+function select(key: string): void {
+  selectedKey = key;
   selectedAt = conn.now();
   map.release();
   renderList();
   renderDetail();
+}
+$("#list").addEventListener("click", (e) => {
+  const key = (e.target as HTMLElement).closest("li")?.dataset.key;
+  if (key) select(key);
 });
+// 画面外の地震の矢印からも選べる
+map.onSelect = select;
 $("#follow").addEventListener("click", () => {
   selectedKey = null;
   map.release();

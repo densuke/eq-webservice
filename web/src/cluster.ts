@@ -38,3 +38,17 @@ export function labelSize(scale: number): number {
   const s = Math.min(Math.max(scale, 10), 70);
   return Math.round(12 + ((s - 10) / 60) * 8);
 }
+
+/**
+ * 画面 (w x h px) の外にある点 (px, py) を、画面の中心からその点へ向かう線が
+ * 余白 margin の内側の枠と交わる位置に置く。画面内なら null。angle は向き (度、右が 0、下が 90)
+ */
+export function edgePoint(px: number, py: number, w: number, h: number, margin: number): { x: number; y: number; angle: number } | null {
+  if (px >= 0 && px <= w && py >= 0 && py <= h) return null;
+  const cx = w / 2;
+  const cy = h / 2;
+  const dx = px - cx;
+  const dy = py - cy;
+  const t = Math.min(dx === 0 ? Infinity : (cx - margin) / Math.abs(dx), dy === 0 ? Infinity : (cy - margin) / Math.abs(dy));
+  return { x: cx + dx * t, y: cy + dy * t, angle: (Math.atan2(dy, dx) * 180) / Math.PI };
+}

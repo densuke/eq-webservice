@@ -103,6 +103,18 @@ body {
 .epicenter-pulse { fill: none; stroke: #ff1744; stroke-width: 2; animation: pulse 1.6s ease-out infinite; transform-box: fill-box; transform-origin: center; }
 @keyframes pulse { from { transform: scale(0.4); opacity: 1; } to { transform: scale(2.2); opacity: 0; } }
 
+/* 画面外の地震の方向 (地図の端)。色は最大震度 */
+.offscreen-layer { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+.offscreen {
+  position: absolute; transform: translate(-50%, -50%); pointer-events: auto; cursor: pointer;
+  min-width: 26px; height: 26px; padding: 0 5px; border-radius: 13px; border: 2px solid var(--c);
+  background: rgba(13, 17, 23, 0.85); color: #fff; font: 700 13px/1 system-ui, sans-serif;
+}
+.offscreen i {
+  position: absolute; left: 50%; top: 50%; width: 0; height: 0; margin: -6px 0 0 -6px; pointer-events: none;
+  border: 6px solid transparent; border-left-color: var(--c); transform-origin: 6px 6px;
+}
+
 /* 凡例 (地図の左下)。震度は細いゲージ、津波と P波・S波は必要なときだけ行を足す */
 .legend {
   position: absolute; left: 10px; bottom: 10px; z-index: 1; pointer-events: none; width: 180px;

@@ -4,7 +4,7 @@ import type { PrefScale, TsunamiArea } from "./types.ts";
 import { scaleColor } from "./scale.ts";
 import { geoCircle } from "./waves.ts";
 import { union, type Box } from "./camera.ts";
-import { clusterMarkers, labelSize, type Cluster, type Marker } from "./cluster.ts";
+import { clusterMarkers, edgePoint, labelSize, type Cluster, type Marker } from "./cluster.ts";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const LON0 = 137;
@@ -76,7 +76,11 @@ export class JapanMap {
   private view: View;
   private epicenters: SVGGElement[] = [];
   private epicenterSig = "";
-  private markerItems: { x: number; y: number; label: number | null; primary: boolean; scale: number }[] = [];
+  private markerItems: { key: string; x: number; y: number; label: number | null; primary: boolean; scale: number }[] = [];
+  /** 画面外の地震の方向を示す矢印 (地図の上に重ねる HTML) */
+  private offscreen = document.createElement("div");
+  /** 画面外の矢印が押されたとき (グループのキー) */
+  onSelect: ((key: string) => void) | null = null;
   private pWave = el("path", { class: "wave wave-p" });
   private sWave = el("path", { class: "wave wave-s" });
   private target: View | null = null;
@@ -89,7 +93,12 @@ export class JapanMap {
     this.svg = el("svg", { class: "map", preserveAspectRatio: "xMidYMid meet" });
     this.svg.append(this.prefLayer, this.areaLayer, this.tsunamiLayer, this.waveLayer, this.dotLayer, this.markerLayer);
     this.waveLayer.append(this.sWave, this.pWave);
-    container.append(this.svg);
+    this.offscreen.className = "offscreen-layer";
+    this.offscreen.addEventListener("click", (e) => {
+      const key = (e.target as HTMLElement).closest<HTMLElement>("[data-key]")?.dataset.key;
+      if (key) this.onSelect?.(key);
+    });
+    container.append(this.svg, this.offscreen);
     this.view = this.homeView();
     this.applyView();
     this.installPanZoom();
@@ -222,7 +231,7 @@ export class JapanMap {
   }
 
   /** 震央の印。primary (表示中の地震) は大きく、ほかは小さく。label は一時的な番号、scale は最大震度 */
-  setEpicenters(items: { lat: number; lon: number; label: number | null; primary: boolean; scale: number }[]): void {
+  setEpicenters(items: { key: string; lat: number; lon: number; label: number | null; primary: boolean; scale: number }[]): void {
     this.markerItems = items.map(({ lat, lon, ...rest }) => {
       const [x, y] = project(lon, lat);
       return { x, y, ...rest };
@@ -232,7 +241,8 @@ export class JapanMap {
 
   /** 画面上で重なる印をまとめて描く。まとまり方はズームで変わるので、表示範囲が変わるたびに呼ぶ */
   private renderMarkers(): void {
-    const labeled = this.markerItems.filter((m): m is Marker => m.label != null);
+    this.renderOffscreen();
+    const labeled = this.markerItems.flatMap(({ label, ...m }): Marker[] => (label == null ? [] : [{ ...m, label }]));
     const clusters: Cluster[] = [
       ...clusterMarkers(labeled, MARKER_MERGE_PX * this.unitsPerPixel()),
       ...this.markerItems.filter((m) => m.label == null).map(({ x, y, primary }) => ({ x, y, primary, labels: [] })),
@@ -268,6 +278,24 @@ export class JapanMap {
         return g;
       });
     this.updateMarkerScale();
+  }
+
+  /** 番号の付いた地震の震央が画面外にあれば、画面の端にその方向の矢印と番号を出す */
+  private renderOffscreen(): void {
+    const r = this.svg.getBoundingClientRect();
+    const k = this.unitsPerPixel();
+    const ox = this.view.x - (r.width * k - this.view.w) / 2;
+    const oy = this.view.y - (r.height * k - this.view.h) / 2;
+    const html = this.markerItems
+      .filter((m) => m.label != null)
+      .map((m) => ({ m, p: edgePoint((m.x - ox) / k, (m.y - oy) / k, r.width, r.height, 22) }))
+      .filter(({ p }) => p)
+      .map(({ m, p }) => {
+        const c = scaleColor(m.scale);
+        return `<button type="button" class="offscreen" data-key="${m.key.replace(/"/g, "&quot;")}" style="left:${p!.x.toFixed(0)}px;top:${p!.y.toFixed(0)}px;--c:${c}" title="${m.label}番の地震へ"><i style="transform:rotate(${p!.angle.toFixed(0)}deg) translateX(17px)"></i>${m.label}</button>`;
+      })
+      .join("");
+    if (this.offscreen.innerHTML !== html) this.offscreen.innerHTML = html;
   }
 
   /** P波・S波の到達範囲 (km)。複数の地震の円をまとめて描く。空配列で非表示 */
