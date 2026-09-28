@@ -1,7 +1,8 @@
 // SVG による日本地図。外部タイルに依存せず、都道府県の塗り分け・震央・P波/S波を描く。
 
 import type { PrefScale, TsunamiArea } from "./types.ts";
-import { scaleColor, scaleLabel } from "./scale.ts";
+import { scaleColor, scaleLabel, scaleTextColor } from "./scale.ts";
+import { interiorPoint, labelPx, pickLabels } from "./labels.ts";
 import { geoCircle } from "./waves.ts";
 import { union, type Box } from "./camera.ts";
 import mapCss from "./map.css";
@@ -79,6 +80,14 @@ export class JapanMap {
   private prefLayer = el("g", { class: "prefs" });
   private areaLayer = el("g", { class: "areas" });
   private dotLayer = el("g", { class: "dots" });
+  /** 塗り分けた地域の震度の数字 */
+  private labelLayer = el("g", { class: "labels" });
+  /** 地域の内側に数字を置く点 (都道府県・細分区域) */
+  private centers = new Map<string, [number, number]>();
+  private labelEls = new Map<string, SVGGElement>();
+  private labelSig = "";
+  private prefForecast = false;
+  private areaForecast = false;
   private tsunamiLayer = el("g", { class: "tsunami" });
   private waveLayer = el("g", { class: "waves" });
   private markerLayer = el("g", { class: "markers" });
@@ -124,7 +133,7 @@ export class JapanMap {
     const style = el("style");
     style.textContent = mapCss;
     base.append(style, this.neighborLayer, this.prefLayer, this.areaLayer, this.tsunamiLayer, this.dotLayer);
-    this.svg.append(base, this.waveLayer, this.markerLayer);
+    this.svg.append(base, this.waveLayer, this.labelLayer, this.markerLayer);
     for (const ins of INSETS) {
       const [x0, y0] = project(ins.lonMin, ins.latMax);
       const [x1, y1] = project(ins.lonMax, ins.latMin);
@@ -180,6 +189,10 @@ export class JapanMap {
     const data: { features: GeoFeature[] } = await res.json();
     for (const f of data.features) {
       const d = f.geometry.coordinates.flatMap((poly) => poly.map((ring) => ringPath(ring as [number, number][]))).join("");
+      if (cls !== "neighbor") {
+        const rings = f.geometry.coordinates.flatMap((poly) => poly.map((ring) => ring.map(([lon, lat]) => project(lon, lat))));
+        this.centers.set(f.properties.name, interiorPoint(rings));
+      }
       const path = el("path", { d, class: cls, "data-name": f.properties.name });
       const title = el("title");
       title.textContent = f.properties.name;
@@ -192,6 +205,7 @@ export class JapanMap {
   /** 寄ったときの細かい表示: 細分区域の塗り分けと、震度観測点の点。forecast は緊急地震速報の予測 */
   setDetail(areas: { name: string; scale: number }[], forecast: boolean, dots: { name: string; lat: number; lon: number; scale: number }[]): void {
     this.areaScales = new Map(areas.map(({ name, scale }) => [name, scale]));
+    this.areaForecast = forecast;
     this.dotItems = dots.map(({ name, lat, lon, scale }) => {
       const [x, y] = project(lon, lat);
       return { name, x, y, scale };
@@ -317,6 +331,7 @@ export class JapanMap {
     }
     this.hitColors = new Map(items.filter(({ pref }) => this.prefs.has(pref)).map(({ pref, scale }) => [pref, scaleColor(scale)]));
     this.prefScales = new Map(items.map(({ pref, scale }) => [pref, scale]));
+    this.prefForecast = forecast;
     for (const pref of this.hitColors.keys()) this.prefs.get(pref)!.classList.toggle("forecast", forecast);
     this.paintFade();
   }
@@ -343,6 +358,50 @@ export class JapanMap {
     }
     this.markerLayer.style.opacity = String(a);
     this.dotLayer.style.opacity = String(a);
+    this.labelLayer.style.opacity = String(a);
+    this.renderLabels();
+  }
+
+  /**
+   * 塗り分けた地域に震度の数字を出す (日本全体では都道府県、寄ったときは細分区域)。
+   * 重なるものは震度の大きい方を残す。選ばれるものが変わったときだけ作り直し、ほかは位置と大きさだけ直す
+   */
+  private renderLabels(): void {
+    const zoomed = this.svg.classList.contains("zoomed");
+    const scales = zoomed ? this.areaScales : this.prefScales;
+    const forecast = zoomed ? this.areaForecast : this.prefForecast;
+    const k = this.unitsPerPixel();
+    const items = [...scales]
+      .filter(([name, s]) => s > 0 && this.centers.has(name))
+      .map(([name, scale]) => {
+        const [x, y] = this.centers.get(name)!;
+        const px = labelPx(scale);
+        const text = scaleLabel(scale);
+        const wPx = px * (text.length * 0.62 + 0.9);
+        const hPx = px * 1.35;
+        return { key: name, x, y, w: wPx * k, h: hPx * k, scale, text, px, wPx, hPx };
+      });
+    const picked = this.fade > 0 ? pickLabels(items) : [];
+    const sig = JSON.stringify([forecast, picked.map((l) => [l.key, l.scale])]);
+    if (sig !== this.labelSig) {
+      this.labelSig = sig;
+      this.labelEls = new Map(
+        picked.map((l) => {
+          const g = el("g", { class: forecast ? "label forecast" : "label" });
+          g.dataset.x = String(l.x);
+          g.dataset.y = String(l.y);
+          const rect = el("rect", { x: -l.wPx / 2, y: -l.hPx / 2, width: l.wPx, height: l.hPx, rx: l.hPx * 0.28 });
+          rect.style.fill = scaleColor(l.scale);
+          const t = el("text", { "text-anchor": "middle", "dominant-baseline": "central", style: `font-size:${l.px}px` });
+          t.style.fill = scaleTextColor(l.scale);
+          t.textContent = l.text;
+          g.append(rect, t);
+          return [l.key, g];
+        }),
+      );
+      this.labelLayer.replaceChildren(...this.labelEls.values());
+    }
+    for (const g of this.labelEls.values()) g.setAttribute("transform", `translate(${g.dataset.x} ${g.dataset.y}) scale(${k})`);
   }
 
   /** 震央の印。primary (表示中の地震) は大きく、ほかは小さく。label は一時的な番号、scale は最大震度 */
@@ -508,6 +567,7 @@ export class JapanMap {
     this.tip.hidden = true;
     this.svg.setAttribute("viewBox", `${v.x} ${v.y} ${v.w} ${v.h}`);
     this.svg.classList.toggle("zoomed", this.areas.size > 0 && v.h < DETAIL_MAX_H);
+    this.renderLabels();
     this.updateInsets();
     this.renderMarkers();
     this.updateMarkerScale();
