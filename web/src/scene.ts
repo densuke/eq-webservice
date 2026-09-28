@@ -3,7 +3,8 @@
 import { type Box, followRadiusKm, pad, pointBox, stopRadiusKm, union } from "./camera.ts";
 import { project } from "./map.ts";
 import { type Center, type WaveSource, currentGroup, geoOf, groupScale, priorityGroups, recentQuakes, relatedQuake, waveSources } from "./quakes.ts";
-import { $, REPLAY_SPEED, WAVE_MAX_SEC, app, map, now } from "./state.ts";
+import { $, map } from "./dom.ts";
+import { REPLAY_SPEED, WAVE_MAX_SEC, app, now } from "./state.ts";
 import { activeAreas } from "./tsunami.ts";
 import { VP_KM_S, VS_KM_S, surfaceRadiusKm } from "./waves.ts";
 

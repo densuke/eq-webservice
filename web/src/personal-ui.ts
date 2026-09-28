@@ -5,7 +5,8 @@ import { esc } from "./html.ts";
 import { type NotifyLevel, countdown, countdownWorthShowing, estimateIntensity, intensityToScale, loadSettings, nearestArea, notifyScale, saveSettings, shouldNotify } from "./personal.ts";
 import { activeEews } from "./quakes.ts";
 import { scaleLabel } from "./scale.ts";
-import { $, app, map } from "./state.ts";
+import { $, map } from "./dom.ts";
+import { app } from "./state.ts";
 import type { EqEvent } from "./types.ts";
 import { GRADE_LABEL } from "./view.ts";
 

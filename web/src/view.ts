@@ -6,7 +6,8 @@ import { esc } from "./html.ts";
 import { byPriority } from "./priority.ts";
 import { activeEews, currentGroup, relatedQuake } from "./quakes.ts";
 import { isKnownScale, scaleColor, scaleLabel, scaleTextColor } from "./scale.ts";
-import { $, app, map } from "./state.ts";
+import { $, map } from "./dom.ts";
+import { app } from "./state.ts";
 import { activeAreas } from "./tsunami.ts";
 import type { Hypocenter, Scale, TsunamiEvent } from "./types.ts";
 

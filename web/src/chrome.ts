@@ -3,7 +3,7 @@
 import { clockParts } from "./clock.ts";
 import type { Status } from "./connection.ts";
 import { onSoundStateChange, play, setSoundEnabled, soundEnabled, soundReady, unlock } from "./sound.ts";
-import { $ } from "./state.ts";
+import { $ } from "./dom.ts";
 
 /** テロップの文を切り替える間隔 */
 export const TELOP_INTERVAL_MS = 8000;

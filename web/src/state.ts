@@ -1,11 +1,10 @@
-// 画面全体で共有する状態と、よく使う定数・関数。
+// 画面全体で共有する状態と、よく使う定数・関数 (DOM には触らない。テストから読み込めるように)。
 // モジュールをまたいで書き換える状態は app にまとめる (import した変数は書き換えられないため)。
 
 import type { Connection } from "./connection.ts";
 import type { ScenarioSummary } from "./demo.ts";
 import type { Station } from "./detail.ts";
 import { GroupStore } from "./groups.ts";
-import { JapanMap } from "./map.ts";
 import type { EqEvent, TsunamiEvent } from "./types.ts";
 
 /** 発生からこの秒数を過ぎたら P波・S波の表示を止める */
@@ -15,8 +14,6 @@ export const EEW_BANNER_MS = 3 * 60_000;
 /** 履歴を選んだときの P波・S波の再生速度 */
 export const REPLAY_SPEED = 3;
 
-export const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as T;
-
 /** 表示するデータ一式。デモモードでは実際のデータと入れ替える (実際のデータは裏で受け続ける) */
 export interface World {
   store: GroupStore;
@@ -24,7 +21,6 @@ export interface World {
   tsunami: TsunamiEvent | null;
 }
 export const liveWorld: World = { store: new GroupStore(), tsunami: null };
-export const map = new JapanMap($("#map"));
 
 /** デモモードの状態 */
 export interface DemoState {

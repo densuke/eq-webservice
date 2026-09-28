@@ -3,7 +3,8 @@
 import { type Scenario, type ScenarioSummary, schedule } from "./demo.ts";
 import { GroupStore } from "./groups.ts";
 import { esc } from "./html.ts";
-import { $, app, hooks, liveWorld, map, now, type World } from "./state.ts";
+import { $, map } from "./dom.ts";
+import { app, hooks, liveWorld, now, type World } from "./state.ts";
 
 /** デモモードの状態。null ならデモモードではない */
 
