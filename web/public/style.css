@@ -33,6 +33,7 @@ body {
 }
 .topbar h1 { font-size: 15px; margin: 0; font-weight: 600; white-space: nowrap; }
 .topbar > * { flex: none; }
+.version { font-size: 12px; font-weight: 400; color: var(--muted); }
 .clock { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--muted); }
 .wave-info { color: var(--s-wave); font-variant-numeric: tabular-nums; }
 .status { width: 10px; height: 10px; border-radius: 50%; background: #d29922; flex: none; }
