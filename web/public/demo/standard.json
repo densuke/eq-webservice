@@ -1,0 +1,545 @@
+{
+  "id": "standard",
+  "name": "標準: 宮城県沖の緊急地震速報 (警報)",
+  "description": "緊急地震速報 (警報) → 震度速報 → 津波注意報 → 各地の震度。同じ時刻に千葉県東方沖でも地震 (予報)",
+  "events": [
+    {
+      "id": "demo-eew-1",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "eew",
+      "event_id": "demo20260101120000",
+      "serial": "1",
+      "cancelled": false,
+      "test": true,
+      "warning": true,
+      "issued_at": "2026/01/01 12:00:05",
+      "origin_time": "2026/01/01 12:00:00",
+      "origin_time_ms": 1767236400000,
+      "hypocenter": {
+        "name": "宮城県沖",
+        "latitude": 38.3,
+        "longitude": 142.0,
+        "depth_km": 40,
+        "magnitude": 6.1
+      },
+      "areas": [
+        {
+          "pref": "宮城県",
+          "name": "宮城県北部",
+          "scale_from": 50,
+          "scale_to": 55,
+          "arrival_time": "2026/01/01 12:00:22",
+          "arrived": false
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "宮城県",
+          "scale": 50
+        }
+      ],
+      "max_scale": 55
+    },
+    {
+      "id": "demo-eew-2",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "eew",
+      "event_id": "demo20260101120000",
+      "serial": "2",
+      "cancelled": false,
+      "test": true,
+      "warning": true,
+      "issued_at": "2026/01/01 12:00:08",
+      "origin_time": "2026/01/01 12:00:00",
+      "origin_time_ms": 1767236400000,
+      "hypocenter": {
+        "name": "宮城県沖",
+        "latitude": 38.3,
+        "longitude": 142.0,
+        "depth_km": 40,
+        "magnitude": 6.5
+      },
+      "areas": [
+        {
+          "pref": "宮城県",
+          "name": "宮城県北部",
+          "scale_from": 50,
+          "scale_to": 55,
+          "arrival_time": "2026/01/01 12:00:22",
+          "arrived": false
+        },
+        {
+          "pref": "岩手県",
+          "name": "岩手県沿岸南部",
+          "scale_from": 45,
+          "scale_to": 50,
+          "arrival_time": "2026/01/01 12:00:25",
+          "arrived": false
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "宮城県",
+          "scale": 50
+        },
+        {
+          "pref": "岩手県",
+          "scale": 45
+        }
+      ],
+      "max_scale": 55
+    },
+    {
+      "id": "wolfx-demo20260101120000b-1",
+      "source": "wolfx",
+      "received_at_ms": 0,
+      "kind": "eew",
+      "event_id": "demo20260101120000b",
+      "serial": "1",
+      "cancelled": false,
+      "test": true,
+      "warning": false,
+      "issued_at": "2026/01/01 12:00:10",
+      "origin_time": "2026/01/01 12:00:00",
+      "origin_time_ms": 1767236400000,
+      "hypocenter": {
+        "name": "千葉県東方沖",
+        "latitude": 35.7,
+        "longitude": 140.9,
+        "depth_km": 30,
+        "magnitude": 5.0
+      },
+      "areas": [
+        {
+          "pref": "千葉県",
+          "name": "千葉県北東部",
+          "scale_from": 30,
+          "scale_to": 30,
+          "arrival_time": "2026/01/01 12:00:08",
+          "arrived": false
+        },
+        {
+          "pref": "千葉県",
+          "name": "千葉県南部",
+          "scale_from": 20,
+          "scale_to": 20,
+          "arrival_time": "2026/01/01 12:00:12",
+          "arrived": false
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "千葉県",
+          "scale": 30
+        }
+      ],
+      "max_scale": 30
+    },
+    {
+      "id": "demo-eew-3",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "eew",
+      "event_id": "demo20260101120000",
+      "serial": "3",
+      "cancelled": false,
+      "test": true,
+      "warning": true,
+      "issued_at": "2026/01/01 12:00:15",
+      "origin_time": "2026/01/01 12:00:00",
+      "origin_time_ms": 1767236400000,
+      "hypocenter": {
+        "name": "宮城県沖",
+        "latitude": 38.3,
+        "longitude": 142.0,
+        "depth_km": 40,
+        "magnitude": 6.8
+      },
+      "areas": [
+        {
+          "pref": "宮城県",
+          "name": "宮城県北部",
+          "scale_from": 55,
+          "scale_to": 60,
+          "arrival_time": "2026/01/01 12:00:22",
+          "arrived": true
+        },
+        {
+          "pref": "岩手県",
+          "name": "岩手県沿岸南部",
+          "scale_from": 45,
+          "scale_to": 50,
+          "arrival_time": "2026/01/01 12:00:25",
+          "arrived": false
+        },
+        {
+          "pref": "福島県",
+          "name": "福島県中通り",
+          "scale_from": 45,
+          "scale_to": 50,
+          "arrival_time": "2026/01/01 12:00:30",
+          "arrived": false
+        },
+        {
+          "pref": "山形県",
+          "name": "山形県村山",
+          "scale_from": 45,
+          "scale_to": 45,
+          "arrival_time": "2026/01/01 12:00:32",
+          "arrived": false
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "宮城県",
+          "scale": 55
+        },
+        {
+          "pref": "岩手県",
+          "scale": 45
+        },
+        {
+          "pref": "福島県",
+          "scale": 45
+        },
+        {
+          "pref": "山形県",
+          "scale": 45
+        }
+      ],
+      "max_scale": 60
+    },
+    {
+      "id": "demo-q3",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "quake",
+      "info_type": "scale_and_destination",
+      "origin_time": "2026/01/01 12:00:00",
+      "origin_time_ms": 1767236400000,
+      "issued_at": "2026/01/01 12:00:40",
+      "hypocenter": {
+        "name": "千葉県東方沖",
+        "latitude": 35.7,
+        "longitude": 140.9,
+        "depth_km": 30,
+        "magnitude": 5.0
+      },
+      "max_scale": 30,
+      "domestic_tsunami": "None",
+      "points": [
+        {
+          "pref": "千葉県",
+          "addr": "千葉県北東部",
+          "is_area": true,
+          "scale": 30
+        },
+        {
+          "pref": "千葉県",
+          "addr": "千葉県南部",
+          "is_area": true,
+          "scale": 20
+        },
+        {
+          "pref": "東京都",
+          "addr": "東京都２３区",
+          "is_area": true,
+          "scale": 10
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "千葉県",
+          "scale": 30
+        },
+        {
+          "pref": "東京都",
+          "scale": 10
+        }
+      ],
+      "comment": "【デモデータ】同じ時刻に別の場所で起きた地震 (同時多発の確認用)。"
+    },
+    {
+      "id": "demo-q1",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "quake",
+      "info_type": "scale_prompt",
+      "origin_time": "2026/01/01 12:00:00",
+      "origin_time_ms": 1767236400000,
+      "issued_at": "2026/01/01 12:01:30",
+      "hypocenter": null,
+      "max_scale": 55,
+      "domestic_tsunami": "Checking",
+      "points": [
+        {
+          "pref": "宮城県",
+          "addr": "宮城県北部",
+          "is_area": true,
+          "scale": 55
+        },
+        {
+          "pref": "宮城県",
+          "addr": "宮城県中部",
+          "is_area": true,
+          "scale": 50
+        },
+        {
+          "pref": "岩手県",
+          "addr": "岩手県沿岸南部",
+          "is_area": true,
+          "scale": 50
+        },
+        {
+          "pref": "福島県",
+          "addr": "福島県中通り",
+          "is_area": true,
+          "scale": 45
+        },
+        {
+          "pref": "山形県",
+          "addr": "山形県村山",
+          "is_area": true,
+          "scale": 40
+        },
+        {
+          "pref": "秋田県",
+          "addr": "秋田県内陸南部",
+          "is_area": true,
+          "scale": 30
+        },
+        {
+          "pref": "青森県",
+          "addr": "青森県三八上北",
+          "is_area": true,
+          "scale": 30
+        },
+        {
+          "pref": "茨城県",
+          "addr": "茨城県北部",
+          "is_area": true,
+          "scale": 30
+        },
+        {
+          "pref": "栃木県",
+          "addr": "栃木県北部",
+          "is_area": true,
+          "scale": 20
+        },
+        {
+          "pref": "新潟県",
+          "addr": "新潟県下越",
+          "is_area": true,
+          "scale": 20
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "宮城県",
+          "scale": 55
+        },
+        {
+          "pref": "岩手県",
+          "scale": 50
+        },
+        {
+          "pref": "福島県",
+          "scale": 45
+        },
+        {
+          "pref": "山形県",
+          "scale": 40
+        },
+        {
+          "pref": "秋田県",
+          "scale": 30
+        },
+        {
+          "pref": "青森県",
+          "scale": 30
+        },
+        {
+          "pref": "茨城県",
+          "scale": 30
+        },
+        {
+          "pref": "栃木県",
+          "scale": 20
+        },
+        {
+          "pref": "新潟県",
+          "scale": 20
+        }
+      ],
+      "comment": "【デモデータ】これは画面確認用の架空の情報です。"
+    },
+    {
+      "id": "demo-t1",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "tsunami",
+      "cancelled": false,
+      "issued_at": "2026/01/01 12:03:00",
+      "areas": [
+        {
+          "name": "宮城県",
+          "grade": "watch",
+          "immediate": false,
+          "first_height": null,
+          "max_height": "１ｍ"
+        },
+        {
+          "name": "岩手県",
+          "grade": "watch",
+          "immediate": false,
+          "first_height": null,
+          "max_height": "１ｍ"
+        }
+      ]
+    },
+    {
+      "id": "demo-q2",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "quake",
+      "info_type": "detail_scale",
+      "origin_time": "2026/01/01 12:00:00",
+      "origin_time_ms": 1767236400000,
+      "issued_at": "2026/01/01 12:03:20",
+      "hypocenter": {
+        "name": "宮城県沖",
+        "latitude": 38.3,
+        "longitude": 142.0,
+        "depth_km": 40,
+        "magnitude": 6.8
+      },
+      "max_scale": 55,
+      "domestic_tsunami": "Watch",
+      "points": [
+        {
+          "pref": "宮城県",
+          "addr": "栗原市築館",
+          "is_area": false,
+          "scale": 55
+        },
+        {
+          "pref": "宮城県",
+          "addr": "登米市迫町",
+          "is_area": false,
+          "scale": 50
+        },
+        {
+          "pref": "宮城県",
+          "addr": "仙台宮城野区苦竹",
+          "is_area": false,
+          "scale": 50
+        },
+        {
+          "pref": "岩手県",
+          "addr": "一関市大東町",
+          "is_area": false,
+          "scale": 50
+        },
+        {
+          "pref": "岩手県",
+          "addr": "大船渡市大船渡町",
+          "is_area": false,
+          "scale": 45
+        },
+        {
+          "pref": "福島県",
+          "addr": "福島市五老内町",
+          "is_area": false,
+          "scale": 45
+        },
+        {
+          "pref": "山形県",
+          "addr": "山形市緑町",
+          "is_area": false,
+          "scale": 40
+        },
+        {
+          "pref": "秋田県",
+          "addr": "横手市中央町",
+          "is_area": false,
+          "scale": 30
+        },
+        {
+          "pref": "青森県",
+          "addr": "八戸市内丸",
+          "is_area": false,
+          "scale": 30
+        },
+        {
+          "pref": "茨城県",
+          "addr": "日立市助川小学校",
+          "is_area": false,
+          "scale": 30
+        },
+        {
+          "pref": "栃木県",
+          "addr": "大田原市湯津上",
+          "is_area": false,
+          "scale": 20
+        },
+        {
+          "pref": "新潟県",
+          "addr": "村上市岩船",
+          "is_area": false,
+          "scale": 20
+        },
+        {
+          "pref": "東京都",
+          "addr": "東京千代田区大手町",
+          "is_area": false,
+          "scale": 10
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "宮城県",
+          "scale": 55
+        },
+        {
+          "pref": "岩手県",
+          "scale": 50
+        },
+        {
+          "pref": "福島県",
+          "scale": 45
+        },
+        {
+          "pref": "山形県",
+          "scale": 40
+        },
+        {
+          "pref": "秋田県",
+          "scale": 30
+        },
+        {
+          "pref": "青森県",
+          "scale": 30
+        },
+        {
+          "pref": "茨城県",
+          "scale": 30
+        },
+        {
+          "pref": "栃木県",
+          "scale": 20
+        },
+        {
+          "pref": "新潟県",
+          "scale": 20
+        },
+        {
+          "pref": "東京都",
+          "scale": 10
+        }
+      ],
+      "comment": "【デモデータ】これは画面確認用の架空の情報です。"
+    }
+  ]
+}

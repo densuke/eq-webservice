@@ -6,16 +6,19 @@
 .area { fill: none; stroke: rgba(255, 255, 255, 0.1); stroke-width: 0.5; vector-effect: non-scaling-stroke; fill-rule: evenodd; }
 .area.hit { stroke: rgba(0, 0, 0, 0.6); fill-opacity: 0.55; }
 .area.forecast { stroke: #fff; stroke-dasharray: 4 3; stroke-width: 1; }
-.dot, .dot-bg { fill: none; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.dot, .dot-bg { pointer-events: none; fill: none; stroke-linecap: round; vector-effect: non-scaling-stroke; }
 .dot { stroke-width: 7px; }
 .dot-bg { stroke: #000; stroke-width: 9.5px; }
 .tsunami-line { fill: none; stroke: none; vector-effect: non-scaling-stroke; stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 0 1.5px #000) drop-shadow(0 0 1px #000); }
 .tsunami-line[data-grade="watch"] { stroke: var(--t-watch); }
 .tsunami-line[data-grade="warning"] { stroke: var(--t-warning); }
 .tsunami-line[data-grade="major_warning"] { stroke: var(--t-major); stroke-width: 7; }
-.wave { fill: none; vector-effect: non-scaling-stroke; stroke-width: 2.5; }
+.wave { pointer-events: none; fill: none; vector-effect: non-scaling-stroke; stroke-width: 2.5; }
 .wave-p { stroke: var(--p-wave); }
 .wave-s { stroke: var(--s-wave); fill: rgba(255, 82, 82, 0.05); }
+.home-marker { pointer-events: none; }
+.home-ring { fill: none; stroke: #fff; stroke-width: 2.5; }
+.home-dot { fill: #58a6ff; stroke: #fff; stroke-width: 1.5; }
 .epicenter-x { stroke: #ff1744; stroke-width: 4; stroke-linecap: round; fill: none; }
 .epicenter-x-bg { stroke: #fff; stroke-width: 8; stroke-linecap: round; fill: none; }
 .epicenter.sub { opacity: 0.8; }

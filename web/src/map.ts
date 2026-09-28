@@ -1,7 +1,7 @@
 // SVG による日本地図。外部タイルに依存せず、都道府県の塗り分け・震央・P波/S波を描く。
 
 import type { PrefScale, TsunamiArea } from "./types.ts";
-import { scaleColor } from "./scale.ts";
+import { scaleColor, scaleLabel } from "./scale.ts";
 import { geoCircle } from "./waves.ts";
 import { union, type Box } from "./camera.ts";
 import mapCss from "./map.css";
@@ -52,6 +52,11 @@ export function project(lon: number, lat: number): [number, number] {
   return [(lon - LON0) * KX, -(lat - LAT0) * KY];
 }
 
+/** project の逆 (地図座標 → 経度・緯度) */
+export function unproject(x: number, y: number): { lat: number; lon: number } {
+  return { lon: x / KX + LON0, lat: LAT0 - y / KY };
+}
+
 function el<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number> = {}) {
   const e = document.createElementNS(SVG_NS, tag);
   for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v));
@@ -80,6 +85,15 @@ export class JapanMap {
   private areas = new Map<string, SVGPathElement>();
   /** 塗り分け中の細分区域と色 */
   private areaColors = new Map<string, string>();
+  /** ツールチップ用: 都道府県・細分区域の震度と、観測点の位置・震度 */
+  private prefScales = new Map<string, number>();
+  private areaScales = new Map<string, number>();
+  private dotItems: { name: string; x: number; y: number; scale: number }[] = [];
+  private tip = document.createElement("div");
+  /** 自分の地点の印 */
+  private home: SVGGElement | null = null;
+  /** 地図で地点を選ぶ間は、次のタップ (クリック) の位置を渡す */
+  private picking: ((p: { lat: number; lon: number }) => void) | null = null;
   private tsunamiAreas = new Map<string, { path: SVGPathElement; box: Box }>();
   /** 塗り分け中の都道府県と色 (薄くするときに使う) */
   private hitColors = new Map<string, string>();
@@ -128,6 +142,10 @@ export class JapanMap {
       this.insets.push({ ...ins, box, svg, markers, bounds: { x0, y0, x1, y1 } });
     }
     this.waveLayer.append(this.sWave, this.pWave);
+    this.tip.className = "map-tip";
+    this.tip.hidden = true;
+    container.append(this.tip);
+    this.installTooltip();
     this.offscreen.className = "offscreen-layer";
     this.offscreen.addEventListener("click", (e) => {
       const key = (e.target as HTMLElement).closest<HTMLElement>("[data-key]")?.dataset.key;
@@ -171,7 +189,12 @@ export class JapanMap {
   }
 
   /** 寄ったときの細かい表示: 細分区域の塗り分けと、震度観測点の点。forecast は緊急地震速報の予測 */
-  setDetail(areas: { name: string; scale: number }[], forecast: boolean, dots: { lat: number; lon: number; scale: number }[]): void {
+  setDetail(areas: { name: string; scale: number }[], forecast: boolean, dots: { name: string; lat: number; lon: number; scale: number }[]): void {
+    this.areaScales = new Map(areas.map(({ name, scale }) => [name, scale]));
+    this.dotItems = dots.map(({ name, lat, lon, scale }) => {
+      const [x, y] = project(lon, lat);
+      return { name, x, y, scale };
+    });
     for (const name of this.areaColors.keys()) {
       const p = this.areas.get(name)!;
       p.style.fill = "";
@@ -292,6 +315,7 @@ export class JapanMap {
       p.classList.remove("forecast", "hit");
     }
     this.hitColors = new Map(items.filter(({ pref }) => this.prefs.has(pref)).map(({ pref, scale }) => [pref, scaleColor(scale)]));
+    this.prefScales = new Map(items.map(({ pref, scale }) => [pref, scale]));
     for (const pref of this.hitColors.keys()) this.prefs.get(pref)!.classList.toggle("forecast", forecast);
     this.paintFade();
   }
@@ -479,6 +503,8 @@ export class JapanMap {
       this.view = { x: cur.x + (cur.w - w) / 2, y: cur.y + (cur.h - h) / 2, w, h };
     }
     const v = this.view;
+    // 地図が動いたらツールチップの位置がずれるので消す
+    this.tip.hidden = true;
     this.svg.setAttribute("viewBox", `${v.x} ${v.y} ${v.w} ${v.h}`);
     this.svg.classList.toggle("zoomed", this.areas.size > 0 && v.h < DETAIL_MAX_H);
     this.updateInsets();
@@ -493,9 +519,31 @@ export class JapanMap {
     return Math.max(this.view.w / r.width, this.view.h / r.height);
   }
 
+  /** 自分の地点の印。null で消す */
+  setHome(p: { lat: number; lon: number } | null): void {
+    this.home?.remove();
+    this.home = null;
+    if (!p) return;
+    const [x, y] = project(p.lon, p.lat);
+    const g = el("g", { class: "home-marker" });
+    g.dataset.x = String(x);
+    g.dataset.y = String(y);
+    g.dataset.k = "1";
+    g.append(el("circle", { r: 9, class: "home-ring" }), el("circle", { r: 3.5, class: "home-dot" }));
+    this.markerLayer.prepend(g);
+    this.home = g;
+    this.updateMarkerScale();
+  }
+
+  /** 次に地図をタップ (クリック) した位置を cb に渡す */
+  pickPoint(cb: (p: { lat: number; lon: number }) => void): void {
+    this.picking = cb;
+    this.svg.classList.add("picking");
+  }
+
   private updateMarkerScale(): void {
     const k = this.unitsPerPixel();
-    for (const g of this.epicenters) {
+    for (const g of this.home ? [...this.epicenters, this.home] : this.epicenters) {
       const { x, y, k: size } = g.dataset;
       g.setAttribute("transform", `translate(${x} ${y}) scale(${k * Number(size)})`);
     }
@@ -521,6 +569,58 @@ export class JapanMap {
       h: this.view.h * f,
     };
     this.applyView();
+  }
+
+  /** カーソルを当てた (スマホではタップした) 場所の名前と震度 */
+  private tipText(target: Element, cx: number, cy: number): string | null {
+    const label = (s: number | undefined) => (s != null && s > 0 ? ` 震度${scaleLabel(s)}` : "");
+    const zoomed = this.svg.classList.contains("zoomed");
+    // 観測点の点は震度ごとに 1 本の path なので、近い点を探す
+    if (zoomed && this.dotItems.length) {
+      const [mx, my] = this.clientToMap(cx, cy);
+      const r = 8 * this.unitsPerPixel();
+      let best: (typeof this.dotItems)[number] | null = null;
+      let bestD = r;
+      for (const d of this.dotItems) {
+        const dist = Math.hypot(d.x - mx, d.y - my);
+        if (dist < bestD) [best, bestD] = [d, dist];
+      }
+      if (best) return `${best.name}${label(best.scale)}`;
+    }
+    const el = target.closest<SVGElement>("[data-name], .tsunami-line");
+    if (!el) return null;
+    if (el.classList.contains("tsunami-line")) {
+      const grade = { watch: "津波注意報", warning: "津波警報", major_warning: "大津波警報" }[el.dataset.grade ?? ""];
+      return grade ? `${el.textContent} ${grade}` : null;
+    }
+    const name = el.dataset.name ?? "";
+    if (el.classList.contains("area")) return zoomed ? `${name}${label(this.areaScales.get(name))}` : null;
+    if (el.classList.contains("pref")) return zoomed ? name : `${name}${label(this.prefScales.get(name))}`;
+    return null;
+  }
+
+  private installTooltip(): void {
+    const show = (e: PointerEvent) => {
+      const text = this.tipText(e.target as Element, e.clientX, e.clientY);
+      this.tip.hidden = !text;
+      if (!text) return;
+      const r = this.svg.getBoundingClientRect();
+      this.tip.textContent = text;
+      this.tip.style.left = `${e.clientX - r.left + 12}px`;
+      this.tip.style.top = `${e.clientY - r.top + 12}px`;
+    };
+    // マウス: 動かしたとき (ボタンを押していない間)。タッチ: 動かさずに指を離したとき
+    let down: { x: number; y: number } | null = null;
+    this.svg.addEventListener("pointermove", (e) => {
+      if (e.pointerType === "mouse" && e.buttons === 0) show(e);
+      else this.tip.hidden = true;
+    });
+    this.svg.addEventListener("pointerleave", () => (this.tip.hidden = true));
+    this.svg.addEventListener("pointerdown", (e) => (down = { x: e.clientX, y: e.clientY }));
+    this.svg.addEventListener("pointerup", (e) => {
+      if (e.pointerType !== "mouse" && down && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 6) show(e);
+      down = null;
+    });
   }
 
   private installPanZoom(): void {
@@ -562,9 +662,20 @@ export class JapanMap {
         pinchDist = d;
       }
     });
+    let downAt: { x: number; y: number } | null = null;
+    this.svg.addEventListener("pointerdown", (e) => (downAt = { x: e.clientX, y: e.clientY }));
     const up = (e: PointerEvent) => {
       pointers.delete(e.pointerId);
       pinchDist = 0;
+      // 地点を選んでいる間は、動かさずに離した位置を渡す
+      if (this.picking && e.type === "pointerup" && downAt && Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) < 6) {
+        const [mx, my] = this.clientToMap(e.clientX, e.clientY);
+        const cb = this.picking;
+        this.picking = null;
+        this.svg.classList.remove("picking");
+        cb(unproject(mx, my));
+      }
+      downAt = null;
     };
     this.svg.addEventListener("pointerup", up);
     this.svg.addEventListener("pointercancel", up);

@@ -61,6 +61,12 @@ body {
 .c-time { font-weight: 700; }
 .c-hm { font-size: 34px; letter-spacing: 0.02em; }
 .c-sec { font-size: 18px; margin-left: 4px; color: var(--muted); }
+/* 秒ごとに拍動する印。緑=オンライン / 赤=切断中 / 黄=接続中 (切断中・接続中は拍動しない) */
+.c-beat { display: inline-block; width: 10px; height: 10px; margin-left: 6px; border-radius: 50%; background: #d29922; vertical-align: 0.15em; }
+.clock-panel[data-status="open"] .c-beat { background: #3fb950; }
+.clock-panel[data-status="closed"] .c-beat { background: #f85149; }
+.clock-panel[data-status="open"] .c-beat.beat { animation: beat 0.9s ease-out; }
+@keyframes beat { from { box-shadow: 0 0 0 0 rgba(63, 185, 80, 0.8); transform: scale(1.35); } to { box-shadow: 0 0 0 8px rgba(63, 185, 80, 0); transform: scale(1); } }
 
 .eew-banner {
   background: var(--alert); color: #fff; padding: 8px 16px; font-size: 15px;
@@ -80,6 +86,21 @@ body {
 .tsunami-banner[data-grade="warning"] { color: #fff; background: var(--t-warning); }
 .tsunami-banner[data-grade="major_warning"] { color: #fff; background: var(--t-major); }
 .num { display: inline-block; min-width: 1.4em; padding: 0 3px; margin-right: 4px; border-radius: 4px; background: #fff; color: #111; font-size: 0.85em; font-weight: 700; text-align: center; }
+
+/* 音の設定は ON だが、ブラウザの制限でまだ鳴らせないときの案内 */
+.sound-hint {
+  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 2;
+  background: #b35900; color: #fff; border: 0; border-radius: 999px; padding: 8px 16px;
+  font: 600 14px/1.2 system-ui, sans-serif; cursor: pointer; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+#sound.waiting { border-color: #d29922; color: #d29922; }
+
+/* 地図のツールチップ (名前と震度) */
+.map-tip {
+  position: absolute; z-index: 3; pointer-events: none; white-space: nowrap;
+  background: rgba(13, 17, 23, 0.92); border: 1px solid var(--line); border-radius: 4px;
+  padding: 3px 8px; font-size: 12px; color: var(--text);
+}
 
 /* 離島の別枠 (日本全体を表示しているときだけ) */
 .inset {
@@ -150,7 +171,37 @@ body {
 .list-head h2 { font-size: 13px; margin: 0; color: var(--muted); font-weight: 600; }
 .follow { background: none; border: 1px solid var(--line); color: var(--muted); border-radius: 999px; padding: 2px 10px; font: inherit; font-size: 12px; cursor: pointer; }
 .follow.active { border-color: #3fb950; color: #3fb950; }
-#follow:not(.active) { border-color: #58a6ff; color: #fff; background: #1f6feb; }
+/* 表示モード: リアルタイム=緑 / リプレイ中=青 / デモモード中=橙 */
+.mode { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; color: #fff; background: #238636; white-space: nowrap; }
+.mode[data-mode="replay"] { background: #1f6feb; }
+.mode[data-mode="demo"] { background: #b35900; }
+.back-live { background: #1f6feb; border: 1px solid #58a6ff; color: #fff; border-radius: 999px; padding: 2px 10px; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+/* 自分の地点と通知の設定 */
+.settings-panel { padding: 10px 16px; border-bottom: 1px solid var(--line); background: #10202f; font-size: 13px; }
+.settings-row { display: flex; gap: 10px; align-items: center; margin: 4px 0; }
+.settings-actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 8px; }
+.settings-panel select { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 4px; padding: 2px 6px; font: inherit; }
+.settings-panel .muted { font-size: 11px; margin: 4px 0 0; }
+.map.picking { cursor: crosshair; }
+/* 自分の地点に主要動が届くまで (緊急地震速報を受けているとき) */
+.countdown {
+  position: absolute; left: 50%; top: 12px; transform: translateX(-50%); z-index: 2; pointer-events: none;
+  background: rgba(90, 10, 16, 0.92); border: 2px solid #f85149; border-radius: 8px; padding: 6px 14px;
+  font-weight: 700; text-align: center; white-space: nowrap;
+}
+.countdown .cd-sec { font-size: 28px; font-variant-numeric: tabular-nums; }
+.countdown .cd-sub { font-size: 11px; font-weight: 400; color: #ffb3ad; }
+.countdown.arrived { border-color: #d29922; background: rgba(60, 40, 5, 0.92); }
+
+/* デモモードの場面一覧 */
+.demo-panel { padding: 10px 16px; border-bottom: 1px solid var(--line); background: #2a1d0e; }
+.demo-head { font-size: 12px; color: #f0b36e; margin-bottom: 6px; }
+.demo-head b { color: #fff; margin-right: 6px; }
+.demo-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 40vh; overflow: auto; }
+.demo-list li { display: flex; gap: 10px; align-items: center; }
+.demo-text { flex: 1; min-width: 0; font-size: 13px; }
+.demo-text .muted { font-size: 11px; }
+.demo-list li.running .follow { border-color: #d29922; color: #d29922; }
 .list { list-style: none; margin: 0; padding: 0 8px; overflow: auto; flex: 1; }
 .list li { display: flex; gap: 10px; align-items: center; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
 .list li:hover { background: #1c2430; }
@@ -164,14 +215,18 @@ body {
 @media (max-width: 800px) {
   /* スマホでは地図の下に詳細・履歴を並べ、ページ全体をスクロールさせる */
   html, body { height: auto; }
-  .topbar { position: sticky; top: 0; z-index: 2; gap: 8px; }
+  /* ボタンが収まらないので折り返す (上部バーの高さが変わるので、バナーは固定しない) */
+  .topbar { position: sticky; top: 0; z-index: 2; gap: 6px 8px; flex-wrap: wrap; padding: 6px 10px; }
+  .topbar > .telop { order: 10; flex-basis: 100%; }
   .topbar h1 { font-size: 14px; }
   .version { display: none; }
+  .mode { font-size: 11px; padding: 2px 6px; }
   .clock-panel { top: 6px; right: 6px; padding: 3px 8px 4px; }
   .inset-okinawa, .inset-ogasawara { height: 100px; }
   .c-hm { font-size: 26px; }
   .c-day { font-size: 20px; }
-  .eew-banner { position: sticky; top: 37px; z-index: 2; font-size: 14px; }
+  .eew-banner { font-size: 14px; }
+  .countdown { top: auto; bottom: 64px; }
   .layout { display: block; }
   .map-wrap { height: 60vh; height: 60svh; }
   .side { border-left: none; border-top: 1px solid var(--line); }

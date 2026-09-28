@@ -13,8 +13,8 @@ export type AlertLevel = "strong" | "medium" | "low" | "info";
  */
 export function alertLevel(e: EqEvent, firstOfGroup: boolean, eewActive: boolean): AlertLevel | null {
   if (e.kind === "eew") {
-    // 訓練報は鳴らさない。ただしデモ (再生データ) の訓練報は確認のため鳴らす
-    if (!firstOfGroup || e.cancelled || (e.test && e.source !== "replay")) return null;
+    // 訓練報は鳴らさない。ただしデモ (サーバの再生データ・画面のデモモード) の訓練報は確認のため鳴らす
+    if (!firstOfGroup || e.cancelled || (e.test && e.source !== "replay" && e.source !== "demo")) return null;
     // 予報は地震情報と同じく予測震度で分ける
     return e.warning ? "strong" : byScale(e.max_scale);
   }

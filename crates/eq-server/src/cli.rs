@@ -6,6 +6,7 @@ use anyhow::Context;
 
 pub const USAGE: &str = "\
 usage: eq-server [options]
+       eq-server convert <samples/scenarios> <web/public/demo>   (デモモード用の JSON を作る)
 
 options:
   -c, --config <path>      設定ファイル (省略時は ./config.toml、無ければ既定値)

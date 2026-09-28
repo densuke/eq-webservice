@@ -1,0 +1,663 @@
+{
+  "id": "swarm",
+  "name": "群発: 能登で 8 件",
+  "description": "石川県能登地方で 15 秒おきに 8 件。震央のまとめ表示と番号の確認",
+  "events": [
+    {
+      "id": "sw-eew-0",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "eew",
+      "event_id": "sw0",
+      "serial": "1",
+      "cancelled": false,
+      "test": true,
+      "warning": true,
+      "issued_at": "2026/01/01 12:00:05",
+      "origin_time": "2026/01/01 12:00:00",
+      "origin_time_ms": 1767236400000,
+      "hypocenter": {
+        "name": "石川県能登地方",
+        "latitude": 37.3,
+        "longitude": 137.0,
+        "depth_km": 10,
+        "magnitude": 5.5
+      },
+      "areas": [
+        {
+          "pref": "石川県",
+          "name": "石川県能登",
+          "scale_from": 55,
+          "scale_to": 55,
+          "arrival_time": null,
+          "arrived": false
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "石川県",
+          "scale": 55
+        }
+      ],
+      "max_scale": 55
+    },
+    {
+      "id": "sw-eew-1",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "eew",
+      "event_id": "sw1",
+      "serial": "1",
+      "cancelled": false,
+      "test": true,
+      "warning": true,
+      "issued_at": "2026/01/01 12:00:20",
+      "origin_time": "2026/01/01 12:00:15",
+      "origin_time_ms": 1767236415000,
+      "hypocenter": {
+        "name": "石川県能登地方",
+        "latitude": 37.349999999999994,
+        "longitude": 137.05,
+        "depth_km": 10,
+        "magnitude": 5.5
+      },
+      "areas": [
+        {
+          "pref": "石川県",
+          "name": "石川県能登",
+          "scale_from": 45,
+          "scale_to": 45,
+          "arrival_time": null,
+          "arrived": false
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "石川県",
+          "scale": 45
+        }
+      ],
+      "max_scale": 45
+    },
+    {
+      "id": "sw-eew-2",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "eew",
+      "event_id": "sw2",
+      "serial": "1",
+      "cancelled": false,
+      "test": true,
+      "warning": true,
+      "issued_at": "2026/01/01 12:00:35",
+      "origin_time": "2026/01/01 12:00:30",
+      "origin_time_ms": 1767236430000,
+      "hypocenter": {
+        "name": "石川県能登地方",
+        "latitude": 37.4,
+        "longitude": 137.1,
+        "depth_km": 10,
+        "magnitude": 5.5
+      },
+      "areas": [
+        {
+          "pref": "石川県",
+          "name": "石川県能登",
+          "scale_from": 50,
+          "scale_to": 50,
+          "arrival_time": null,
+          "arrived": false
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "石川県",
+          "scale": 50
+        }
+      ],
+      "max_scale": 50
+    },
+    {
+      "id": "sw-eew-3",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "eew",
+      "event_id": "sw3",
+      "serial": "1",
+      "cancelled": false,
+      "test": true,
+      "warning": true,
+      "issued_at": "2026/01/01 12:00:50",
+      "origin_time": "2026/01/01 12:00:45",
+      "origin_time_ms": 1767236445000,
+      "hypocenter": {
+        "name": "石川県能登地方",
+        "latitude": 37.45,
+        "longitude": 137.15,
+        "depth_km": 10,
+        "magnitude": 5.5
+      },
+      "areas": [
+        {
+          "pref": "石川県",
+          "name": "石川県能登",
+          "scale_from": 40,
+          "scale_to": 40,
+          "arrival_time": null,
+          "arrived": false
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "石川県",
+          "scale": 40
+        }
+      ],
+      "max_scale": 40
+    },
+    {
+      "id": "sw-q-0",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "quake",
+      "info_type": "scale_and_destination",
+      "origin_time": "2026/01/01 12:00:00",
+      "origin_time_ms": 1767236400000,
+      "issued_at": "2026/01/01 12:01:00",
+      "hypocenter": {
+        "name": "石川県能登地方",
+        "latitude": 37.3,
+        "longitude": 137.0,
+        "depth_km": 10,
+        "magnitude": 5.5
+      },
+      "max_scale": 55,
+      "domestic_tsunami": "None",
+      "points": [
+        {
+          "pref": "石川県",
+          "addr": "石川県能登",
+          "is_area": true,
+          "scale": 55
+        },
+        {
+          "pref": "富山県",
+          "addr": "富山県東部",
+          "is_area": true,
+          "scale": 30
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "石川県",
+          "scale": 55
+        },
+        {
+          "pref": "富山県",
+          "scale": 30
+        }
+      ],
+      "comment": "負荷確認"
+    },
+    {
+      "id": "sw-eew-4",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "eew",
+      "event_id": "sw4",
+      "serial": "1",
+      "cancelled": false,
+      "test": true,
+      "warning": true,
+      "issued_at": "2026/01/01 12:01:05",
+      "origin_time": "2026/01/01 12:01:00",
+      "origin_time_ms": 1767236460000,
+      "hypocenter": {
+        "name": "石川県能登地方",
+        "latitude": 37.5,
+        "longitude": 137.2,
+        "depth_km": 10,
+        "magnitude": 5.5
+      },
+      "areas": [
+        {
+          "pref": "石川県",
+          "name": "石川県能登",
+          "scale_from": 60,
+          "scale_to": 60,
+          "arrival_time": null,
+          "arrived": false
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "石川県",
+          "scale": 60
+        }
+      ],
+      "max_scale": 60
+    },
+    {
+      "id": "sw-q-1",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "quake",
+      "info_type": "scale_and_destination",
+      "origin_time": "2026/01/01 12:00:00",
+      "origin_time_ms": 1767236400000,
+      "issued_at": "2026/01/01 12:01:15",
+      "hypocenter": {
+        "name": "石川県能登地方",
+        "latitude": 37.349999999999994,
+        "longitude": 137.05,
+        "depth_km": 10,
+        "magnitude": 5.5
+      },
+      "max_scale": 45,
+      "domestic_tsunami": "None",
+      "points": [
+        {
+          "pref": "石川県",
+          "addr": "石川県能登",
+          "is_area": true,
+          "scale": 45
+        },
+        {
+          "pref": "富山県",
+          "addr": "富山県東部",
+          "is_area": true,
+          "scale": 30
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "石川県",
+          "scale": 45
+        },
+        {
+          "pref": "富山県",
+          "scale": 30
+        }
+      ],
+      "comment": "負荷確認"
+    },
+    {
+      "id": "sw-eew-5",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "eew",
+      "event_id": "sw5",
+      "serial": "1",
+      "cancelled": false,
+      "test": true,
+      "warning": true,
+      "issued_at": "2026/01/01 12:01:20",
+      "origin_time": "2026/01/01 12:01:15",
+      "origin_time_ms": 1767236475000,
+      "hypocenter": {
+        "name": "石川県能登地方",
+        "latitude": 37.55,
+        "longitude": 137.25,
+        "depth_km": 10,
+        "magnitude": 5.5
+      },
+      "areas": [
+        {
+          "pref": "石川県",
+          "name": "石川県能登",
+          "scale_from": 45,
+          "scale_to": 45,
+          "arrival_time": null,
+          "arrived": false
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "石川県",
+          "scale": 45
+        }
+      ],
+      "max_scale": 45
+    },
+    {
+      "id": "sw-q-2",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "quake",
+      "info_type": "scale_and_destination",
+      "origin_time": "2026/01/01 12:00:00",
+      "origin_time_ms": 1767236400000,
+      "issued_at": "2026/01/01 12:01:30",
+      "hypocenter": {
+        "name": "石川県能登地方",
+        "latitude": 37.4,
+        "longitude": 137.1,
+        "depth_km": 10,
+        "magnitude": 5.5
+      },
+      "max_scale": 50,
+      "domestic_tsunami": "None",
+      "points": [
+        {
+          "pref": "石川県",
+          "addr": "石川県能登",
+          "is_area": true,
+          "scale": 50
+        },
+        {
+          "pref": "富山県",
+          "addr": "富山県東部",
+          "is_area": true,
+          "scale": 30
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "石川県",
+          "scale": 50
+        },
+        {
+          "pref": "富山県",
+          "scale": 30
+        }
+      ],
+      "comment": "負荷確認"
+    },
+    {
+      "id": "sw-eew-6",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "eew",
+      "event_id": "sw6",
+      "serial": "1",
+      "cancelled": false,
+      "test": true,
+      "warning": true,
+      "issued_at": "2026/01/01 12:01:35",
+      "origin_time": "2026/01/01 12:01:30",
+      "origin_time_ms": 1767236490000,
+      "hypocenter": {
+        "name": "石川県能登地方",
+        "latitude": 37.599999999999994,
+        "longitude": 137.3,
+        "depth_km": 10,
+        "magnitude": 5.5
+      },
+      "areas": [
+        {
+          "pref": "石川県",
+          "name": "石川県能登",
+          "scale_from": 40,
+          "scale_to": 40,
+          "arrival_time": null,
+          "arrived": false
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "石川県",
+          "scale": 40
+        }
+      ],
+      "max_scale": 40
+    },
+    {
+      "id": "sw-q-3",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "quake",
+      "info_type": "scale_and_destination",
+      "origin_time": "2026/01/01 12:00:00",
+      "origin_time_ms": 1767236400000,
+      "issued_at": "2026/01/01 12:01:45",
+      "hypocenter": {
+        "name": "石川県能登地方",
+        "latitude": 37.45,
+        "longitude": 137.15,
+        "depth_km": 10,
+        "magnitude": 5.5
+      },
+      "max_scale": 40,
+      "domestic_tsunami": "None",
+      "points": [
+        {
+          "pref": "石川県",
+          "addr": "石川県能登",
+          "is_area": true,
+          "scale": 40
+        },
+        {
+          "pref": "富山県",
+          "addr": "富山県東部",
+          "is_area": true,
+          "scale": 30
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "石川県",
+          "scale": 40
+        },
+        {
+          "pref": "富山県",
+          "scale": 30
+        }
+      ],
+      "comment": "負荷確認"
+    },
+    {
+      "id": "sw-eew-7",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "eew",
+      "event_id": "sw7",
+      "serial": "1",
+      "cancelled": false,
+      "test": true,
+      "warning": true,
+      "issued_at": "2026/01/01 12:01:50",
+      "origin_time": "2026/01/01 12:01:45",
+      "origin_time_ms": 1767236505000,
+      "hypocenter": {
+        "name": "石川県能登地方",
+        "latitude": 37.65,
+        "longitude": 137.35,
+        "depth_km": 10,
+        "magnitude": 5.5
+      },
+      "areas": [
+        {
+          "pref": "石川県",
+          "name": "石川県能登",
+          "scale_from": 50,
+          "scale_to": 50,
+          "arrival_time": null,
+          "arrived": false
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "石川県",
+          "scale": 50
+        }
+      ],
+      "max_scale": 50
+    },
+    {
+      "id": "sw-q-4",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "quake",
+      "info_type": "scale_and_destination",
+      "origin_time": "2026/01/01 12:01:00",
+      "origin_time_ms": 1767236460000,
+      "issued_at": "2026/01/01 12:02:00",
+      "hypocenter": {
+        "name": "石川県能登地方",
+        "latitude": 37.5,
+        "longitude": 137.2,
+        "depth_km": 10,
+        "magnitude": 5.5
+      },
+      "max_scale": 60,
+      "domestic_tsunami": "None",
+      "points": [
+        {
+          "pref": "石川県",
+          "addr": "石川県能登",
+          "is_area": true,
+          "scale": 60
+        },
+        {
+          "pref": "富山県",
+          "addr": "富山県東部",
+          "is_area": true,
+          "scale": 30
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "石川県",
+          "scale": 60
+        },
+        {
+          "pref": "富山県",
+          "scale": 30
+        }
+      ],
+      "comment": "負荷確認"
+    },
+    {
+      "id": "sw-q-5",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "quake",
+      "info_type": "scale_and_destination",
+      "origin_time": "2026/01/01 12:01:00",
+      "origin_time_ms": 1767236460000,
+      "issued_at": "2026/01/01 12:02:15",
+      "hypocenter": {
+        "name": "石川県能登地方",
+        "latitude": 37.55,
+        "longitude": 137.25,
+        "depth_km": 10,
+        "magnitude": 5.5
+      },
+      "max_scale": 45,
+      "domestic_tsunami": "None",
+      "points": [
+        {
+          "pref": "石川県",
+          "addr": "石川県能登",
+          "is_area": true,
+          "scale": 45
+        },
+        {
+          "pref": "富山県",
+          "addr": "富山県東部",
+          "is_area": true,
+          "scale": 30
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "石川県",
+          "scale": 45
+        },
+        {
+          "pref": "富山県",
+          "scale": 30
+        }
+      ],
+      "comment": "負荷確認"
+    },
+    {
+      "id": "sw-q-6",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "quake",
+      "info_type": "scale_and_destination",
+      "origin_time": "2026/01/01 12:01:00",
+      "origin_time_ms": 1767236460000,
+      "issued_at": "2026/01/01 12:02:30",
+      "hypocenter": {
+        "name": "石川県能登地方",
+        "latitude": 37.599999999999994,
+        "longitude": 137.3,
+        "depth_km": 10,
+        "magnitude": 5.5
+      },
+      "max_scale": 40,
+      "domestic_tsunami": "None",
+      "points": [
+        {
+          "pref": "石川県",
+          "addr": "石川県能登",
+          "is_area": true,
+          "scale": 40
+        },
+        {
+          "pref": "富山県",
+          "addr": "富山県東部",
+          "is_area": true,
+          "scale": 30
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "石川県",
+          "scale": 40
+        },
+        {
+          "pref": "富山県",
+          "scale": 30
+        }
+      ],
+      "comment": "負荷確認"
+    },
+    {
+      "id": "sw-q-7",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "quake",
+      "info_type": "scale_and_destination",
+      "origin_time": "2026/01/01 12:01:00",
+      "origin_time_ms": 1767236460000,
+      "issued_at": "2026/01/01 12:02:45",
+      "hypocenter": {
+        "name": "石川県能登地方",
+        "latitude": 37.65,
+        "longitude": 137.35,
+        "depth_km": 10,
+        "magnitude": 5.5
+      },
+      "max_scale": 50,
+      "domestic_tsunami": "None",
+      "points": [
+        {
+          "pref": "石川県",
+          "addr": "石川県能登",
+          "is_area": true,
+          "scale": 50
+        },
+        {
+          "pref": "富山県",
+          "addr": "富山県東部",
+          "is_area": true,
+          "scale": 30
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "石川県",
+          "scale": 50
+        },
+        {
+          "pref": "富山県",
+          "scale": 30
+        }
+      ],
+      "comment": "負荷確認"
+    }
+  ]
+}

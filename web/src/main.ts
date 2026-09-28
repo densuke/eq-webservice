@@ -7,12 +7,14 @@ import { JapanMap, project } from "./map.ts";
 import { isKnownScale, scaleColor, scaleLabel, scaleTextColor } from "./scale.ts";
 import { activeAreas, latestTsunami, tsunamiAlert } from "./tsunami.ts";
 import type { EewEvent, EqEvent, Hypocenter, Scale, TsunamiEvent } from "./types.ts";
-import { play, setSoundEnabled, soundEnabled, soundReady, unlock } from "./sound.ts";
+import { onSoundStateChange, play, setSoundEnabled, soundEnabled, soundReady, unlock } from "./sound.ts";
 import { surfaceRadiusKm, VP_KM_S, VS_KM_S } from "./waves.ts";
 import { byPriority, sameQuake, type Place } from "./priority.ts";
 import { assignNumbers } from "./numbering.ts";
 import { clockParts } from "./clock.ts";
 import { eewAreaScales, quakeDetail, type Station } from "./detail.ts";
+import { schedule, type Scenario, type ScenarioSummary } from "./demo.ts";
+import { countdown, loadSettings, nearestArea, notifyScale, saveSettings, shouldNotify, type NotifyLevel } from "./personal.ts";
 
 /** 発生からこの秒数を過ぎたら P波・S波の表示を止める */
 const WAVE_MAX_SEC = 180;
@@ -29,12 +31,17 @@ const REPLAY_SPEED = 3;
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as T;
 
-const store = new GroupStore();
+/** 表示するデータ一式。デモモードでは実際のデータと入れ替える (実際のデータは裏で受け続ける) */
+interface World {
+  store: GroupStore;
+  /** 受け取った最新の津波予報 (解除を含む)。一覧の整理で消えないよう別に持つ */
+  tsunami: TsunamiEvent | null;
+}
+const liveWorld: World = { store: new GroupStore(), tsunami: null };
+let world = liveWorld;
 const map = new JapanMap($("#map"));
 let selectedKey: string | null = null; // null は「最新に自動追従」
 let selectedAt = 0; // 履歴を選んだ時刻 (再生の起点)
-/** 受け取った最新の津波予報 (解除を含む)。一覧の整理で消えないよう別に持つ */
-let tsunami: TsunamiEvent | null = null;
 /** 直近の地震の一時的な番号 (グループのキー → 番号) */
 let numbers = new Map<string, number>();
 let conn: Connection;
@@ -112,22 +119,25 @@ function groupRow(g: Group): string {
 
 function renderList(): void {
   const list = $("#list");
-  const groups = store.list().filter((g) => g.kind !== "eew_detection");
+  const groups = world.store.list().filter((g) => g.kind !== "eew_detection");
   const current = currentGroup();
   list.innerHTML = groups
     .slice(0, 100)
     .map((g) => `<li data-key="${esc(g.key)}" class="${g.key === current?.key ? "selected" : ""}">${groupRow(g)}</li>`)
     .join("");
-  renderFollow();
+  renderMode();
 }
 
-function renderFollow(): void {
-  const following = selectedKey === null && !map.userMoved;
-  const btn = $("#follow");
-  const text = following ? "リアルタイム表示中" : "リアルタイムに戻る";
-  if (btn.textContent === text) return;
-  btn.textContent = text;
-  btn.classList.toggle("active", following);
+/** 今の表示モード (リアルタイム / リプレイ中 / デモモード中) と「リアルタイムに戻る」ボタン */
+function renderMode(): void {
+  const mode = demo ? "demo" : selectedKey ? "replay" : "live";
+  const el = $("#mode");
+  if (el.dataset.mode !== mode) {
+    el.dataset.mode = mode;
+    el.textContent = { live: "リアルタイム", replay: "リプレイ中", demo: "デモモード中" }[mode];
+  }
+  $("#back-live").hidden = mode === "live" && !map.userMoved;
+  $("#demo-open").hidden = demo != null;
 }
 
 // ---------- 詳細 ----------
@@ -135,7 +145,7 @@ function renderFollow(): void {
 /** 津波予報などに対応する地震 (その情報より前に届いた直近の地震情報・EEW) */
 function relatedQuake(g: Group): Group | undefined {
   if (g.kind === "quake" || g.kind === "eew") return g;
-  return store.list().find((q) => (q.kind === "quake" || q.kind === "eew") && q.updatedAt <= g.updatedAt);
+  return world.store.list().find((q) => (q.kind === "quake" || q.kind === "eew") && q.updatedAt <= g.updatedAt);
 }
 
 /** 地図の塗り分けと震央 */
@@ -158,7 +168,7 @@ function paintMap(g: Group | undefined): void {
 /** 直近の地震 (起きた順) */
 function recentQuakes(now: number): Group[] {
   const origin = (g: Group) => geoOf(g)?.origin ?? g.updatedAt;
-  return store
+  return world.store
     .list()
     .filter((g) => (g.kind === "quake" || g.kind === "eew") && geoOf(g) && now - g.updatedAt <= FULL_MS)
     .sort((a, b) => origin(a) - origin(b));
@@ -216,8 +226,8 @@ function displayedOriginMs(): number {
 }
 
 function currentGroup(): Group | undefined {
-  if (selectedKey) return store.get(selectedKey);
-  return priorityGroups(now())[0] ?? store.list().find((g) => g.kind === "quake" || g.kind === "eew" || g.kind === "tsunami");
+  if (selectedKey) return world.store.get(selectedKey);
+  return priorityGroups(now())[0] ?? world.store.list().find((g) => g.kind === "quake" || g.kind === "eew" || g.kind === "tsunami");
 }
 
 function renderDetail(): void {
@@ -296,7 +306,7 @@ function now(): number {
 
 /** バナーを出している EEW (新しい順) */
 function activeEews(now: number): EewEvent[] {
-  return store
+  return world.store
     .list()
     .filter((g) => g.kind === "eew")
     .map((g) => latestEew(g))
@@ -323,7 +333,7 @@ function groupScale(g: Group): Scale {
  * 地震情報が届いた EEW はその地震情報に任せる (予測の震度で居座らないように)
  */
 function priorityGroups(now: number): Group[] {
-  const recent = store.list().filter((g) => (g.kind === "quake" || g.kind === "eew") && geoOf(g) && now - g.updatedAt <= FULL_MS);
+  const recent = world.store.list().filter((g) => (g.kind === "quake" || g.kind === "eew") && geoOf(g) && now - g.updatedAt <= FULL_MS);
   const quakes = recent.filter((g) => g.kind === "quake").map(groupPlace);
   return recent
     .filter((g) => g.kind === "quake" || !quakes.some((q) => sameQuake(groupPlace(g), q)))
@@ -363,7 +373,7 @@ type WaveSource = Center & { origin: number; group: Group };
  */
 function waveSources(now: number): WaveSource[] {
   const out: WaveSource[] = [];
-  const groups = store.list().filter((g) => g.kind === "eew" || g.kind === "quake");
+  const groups = world.store.list().filter((g) => g.kind === "eew" || g.kind === "quake");
   for (const g of [...groups.filter((g) => g.kind === "eew"), ...groups.filter((g) => g.kind === "quake")]) {
     const geo = geoOf(g);
     if (!geo?.center || geo.origin == null || now - geo.origin > WAVE_MAX_SEC * 1000) continue;
@@ -390,7 +400,7 @@ interface Scene {
 /** いま地図で見せる地震。null なら日本全体 */
 function scene(now: number): Scene | null {
   if (selectedKey) {
-    const g = store.get(selectedKey);
+    const g = world.store.get(selectedKey);
     const geo = g && relatedQuake(g) && geoOf(relatedQuake(g)!);
     if (!geo) return null;
     return { center: geo.center, others: [], t: ((now - selectedAt) / 1000) * REPLAY_SPEED, shaken: map.prefBox(geo.prefs), replay: true };
@@ -398,7 +408,7 @@ function scene(now: number): Scene | null {
   // カメラは揺れの大きい方に合わせる
   const [src, ...others] = waveSources(now);
   // 波が終わったら、津波予報が出ていれば予報区全体を見せる
-  const tsunamiBox = map.tsunamiBox(activeAreas(tsunami).map((a) => a.name));
+  const tsunamiBox = map.tsunamiBox(activeAreas(world.tsunami).map((a) => a.name));
   if (!src && tsunamiBox) return { center: null, others: [], t: null, shaken: tsunamiBox, replay: false };
   const g = src?.group ?? priorityGroups(now)[0];
   if (!g) return null;
@@ -429,7 +439,7 @@ function renderScene(sc: Scene | null): { box: Box | null; waving: boolean } {
 }
 
 function renderTsunamiBanner(): void {
-  const areas = activeAreas(tsunami);
+  const areas = activeAreas(world.tsunami);
   const banner = $("#tsunami-banner");
   banner.hidden = areas.length === 0;
   if (areas.length === 0) return;
@@ -494,15 +504,16 @@ function tick(): void {
     renderDetail();
   }
   $("#legend-wave").hidden = !waving;
-  renderTelop(now, waving || activeEews(now).length > 0 || priorityGroups(now).length > 0 || activeAreas(tsunami).length > 0);
+  renderTelop(now, waving || activeEews(now).length > 0 || priorityGroups(now).length > 0 || activeAreas(world.tsunami).length > 0 || demo != null);
   if (!waving) {
     map.setWaves([]);
     $("#wave-info").textContent = "";
   }
   map.setTarget(box);
   map.setFade(selectedKey ? 1 : fadeOpacity(now - displayedOriginMs()));
-  renderFollow();
+  renderMode();
   renderSound();
+  renderCountdown(now);
   // 波の表示中は滑らかに、そうでなければ時計の更新だけ
   if (waving) raf = requestAnimationFrame(tick);
   else timer = window.setTimeout(tick, 1000);
@@ -510,16 +521,33 @@ function tick(): void {
 
 // ---------- イベント受信 ----------
 
-function onEvents(events: EqEvent[], live: boolean): void {
+/** 実際の情報のうち、デモモードを直ちに終えて見せるべきもの */
+function urgent(e: EqEvent): boolean {
+  if (e.kind === "eew") return !e.test && !e.cancelled;
+  if (e.kind === "quake") return e.max_scale >= 30;
+  return e.kind === "tsunami" && !e.cancelled && e.areas.length > 0;
+}
+
+/** target は情報を入れる先。デモモード中も実際の情報は liveWorld に入れ続ける */
+function onEvents(events: EqEvent[], live: boolean, target: World = liveWorld): void {
   const rank: Record<AlertLevel, number> = { info: 0, low: 1, medium: 2, strong: 3 };
   let alert: AlertLevel | null = null;
+  // デモを見ている間に届いた実際の情報: 裏で蓄えるだけ。大事な情報ならデモを終えて表示する
+  if (target !== world) {
+    for (const e of events) {
+      if (!target.store.add(e)) continue;
+      if (e.kind === "tsunami") target.tsunami = latestTsunami(target.tsunami, e);
+    }
+    if (live && events.some(urgent)) exitDemo();
+    return;
+  }
   for (const e of events) {
-    const g = store.add(e);
+    const g = world.store.add(e);
     if (!g) continue;
     if (e.kind === "tsunami") {
-      const prev = activeAreas(tsunami);
-      tsunami = latestTsunami(tsunami, e);
-      const lv = live ? tsunamiAlert(prev, activeAreas(tsunami)) : null;
+      const prev = activeAreas(world.tsunami);
+      world.tsunami = latestTsunami(world.tsunami, e);
+      const lv = live ? tsunamiAlert(prev, activeAreas(world.tsunami)) : null;
       if (lv && (!alert || rank[lv] > rank[alert])) alert = lv;
     }
     if (!live) continue;
@@ -532,18 +560,222 @@ function onEvents(events: EqEvent[], live: boolean): void {
     const lv = alertLevel(e, isNew, eewActive);
     if (lv && (!alert || rank[lv] > rank[alert])) alert = lv;
   }
-  renderList();
-  renderDetail();
   // Wolfx 経由の情報を受けたら出典を出す
   if (events.some((e) => e.source === "wolfx")) $("#credit-wolfx").hidden = false;
-  map.setTsunami(activeAreas(tsunami));
-  $("#legend-tsunami").hidden = activeAreas(tsunami).length === 0;
-  renderTsunamiBanner();
+  // ブラウザ通知は実際の情報だけ (デモは通知しない)
+  if (live && target === liveWorld) events.forEach(notify);
+  renderAll();
   if (alert && !(now() - lastAlert.at < ALERT_MERGE_MS && rank[alert] <= rank[lastAlert.level])) {
     play(alert);
     lastAlert = { level: alert, at: now() };
   }
+}
+
+/** 表示中のデータで画面全体を描き直す */
+function renderAll(): void {
+  renderList();
+  renderDetail();
+  map.setTsunami(activeAreas(world.tsunami));
+  $("#legend-tsunami").hidden = activeAreas(world.tsunami).length === 0;
+  renderTsunamiBanner();
+  renderDemoPanel();
   tick();
+}
+
+// ---------- 自分の地点・通知・到達カウントダウン ----------
+
+let settings = loadSettings();
+/** 自分の地点が属する細分区域 (地点に最も近い震度観測点の区域) */
+let homeArea: string | null = null;
+/** 通知済みの地震 (グループのキー → 通知したときの深刻さ)。深刻さが上がったときだけまた通知する */
+const notified = new Map<string, number>();
+
+function updateHome(): void {
+  homeArea = settings.home ? nearestArea(settings.home, stations) : null;
+  map.setHome(settings.home);
+  renderSettings();
+}
+
+function renderSettings(): void {
+  const h = settings.home;
+  $("#home-label").textContent = h ? `${homeArea ?? "地点"} (北緯${h.lat.toFixed(2)} 東経${h.lon.toFixed(2)})` : "未設定";
+  $<HTMLSelectElement>("#notify-level").value = settings.notify;
+}
+
+function setSettings(next: typeof settings): void {
+  settings = next;
+  saveSettings(settings);
+  updateHome();
+}
+
+/** 自分の地点の震度 (緊急地震速報は予測、地震情報は観測) */
+function homeScaleOf(e: EqEvent): number | null {
+  if (!homeArea) return null;
+  if (e.kind === "eew") return eewAreaScales(e.areas).find((a) => a.name === homeArea)?.scale ?? null;
+  if (e.kind === "quake") return quakeDetail(e.points, stations).areas.find((a) => a.name === homeArea)?.scale ?? null;
+  return null;
+}
+
+function notify(e: EqEvent): void {
+  if (!("Notification" in window) || Notification.permission !== "granted" || document.visibilityState === "visible") return;
+  if ((e.kind === "eew" && (e.test || e.cancelled)) || (e.kind === "tsunami" && e.cancelled)) return;
+  let warning = false;
+  let maxScale = 0;
+  let title = "";
+  let body = "";
+  if (e.kind === "eew") {
+    [warning, maxScale] = [e.warning, e.max_scale];
+    title = `緊急地震速報 (${e.warning ? "警報" : "予報"})`;
+    body = `${e.hypocenter?.name ?? "震源不明"} で地震 ・ 予測最大震度${scaleLabel(e.max_scale)}`;
+  } else if (e.kind === "quake") {
+    maxScale = e.max_scale;
+    title = "地震情報";
+    body = `${e.hypocenter?.name || "震源調査中"} ・ 最大震度${scaleLabel(e.max_scale)}`;
+  } else if (e.kind === "tsunami") {
+    maxScale = Math.max(0, ...e.areas.map((a) => notifyScale.tsunami(a.grade)));
+    warning = maxScale >= notifyScale.tsunami("warning");
+    title = GRADE_LABEL[e.areas.find((a) => notifyScale.tsunami(a.grade) === maxScale)?.grade ?? "unknown"];
+    body = e.areas.map((a) => a.name).join("・");
+  } else return;
+  const homeScale = homeScaleOf(e);
+  if (!shouldNotify(settings.notify, { warning, maxScale, homeScale })) return;
+  const key = world.store.list().find((g) => g.events.some((x) => x.id === e.id))?.key ?? e.id;
+  const severity = Math.max(maxScale, homeScale ?? 0) + (warning ? 100 : 0);
+  if ((notified.get(key) ?? -1) >= severity) return;
+  notified.set(key, severity);
+  if (homeScale != null) body += ` ・ ${homeArea}: 震度${scaleLabel(homeScale)}`;
+  const n = new Notification(title, { body, tag: key });
+  n.onclick = () => window.focus();
+}
+
+/** 自分の地点に主要動が届くまで。緊急地震速報を受けている間だけ出す */
+function renderCountdown(now: number): void {
+  const el = $("#countdown");
+  const h = settings.home;
+  const cands = h
+    ? activeEews(now).filter((e) => e.hypocenter?.latitude != null && e.hypocenter.longitude != null && e.origin_time_ms != null)
+    : [];
+  // 自分の地点の予測震度が大きいもの、同じなら先に揺れが届くものを出す
+  const best = cands
+    .map((x) => ({
+      e: x,
+      s: homeScaleOf(x),
+      c: countdown(h!, { lat: x.hypocenter!.latitude!, lon: x.hypocenter!.longitude!, depth: x.hypocenter!.depth_km ?? 10 }, x.origin_time_ms!, now),
+    }))
+    .sort((a, b) => (b.s ?? -1) - (a.s ?? -1) || a.c.remainingSec - b.c.remainingSec)[0];
+  el.hidden = !best;
+  if (!best) return;
+  const { c, s } = best;
+  const scaleText = s != null ? `予測震度${scaleLabel(s)}` : "予測震度 不明";
+  el.classList.toggle("arrived", c.arrived);
+  const html = `${esc(homeArea ?? "自分の地点")} ・ ${scaleText}<div class="cd-sec">${
+    c.arrived ? "揺れが到達したと推定" : `あと ${Math.ceil(c.remainingSec)} 秒`
+  }</div><div class="cd-sub">主要動 (S波) の到達までの概算 ・ 震央から ${c.distKm.toFixed(0)} km</div>`;
+  if (el.innerHTML !== html) el.innerHTML = html;
+}
+
+$("#settings-open").addEventListener("click", () => {
+  const p = $("#settings-panel");
+  p.hidden = !p.hidden;
+  renderSettings();
+});
+$("#home-pick").addEventListener("click", () => {
+  $("#settings-note").textContent = "地図をタップ (クリック) して、自分の地点を選んでください。";
+  map.pickPoint((p) => {
+    $("#settings-note").textContent = "地点と設定はこの端末の中だけに保存されます。通知はこの画面が裏にあるときに出ます。";
+    setSettings({ ...settings, home: p });
+  });
+});
+$("#home-geo").addEventListener("click", () => {
+  if (!navigator.geolocation) return;
+  navigator.geolocation.getCurrentPosition(
+    (pos) => setSettings({ ...settings, home: { lat: pos.coords.latitude, lon: pos.coords.longitude } }),
+    () => ($("#settings-note").textContent = "位置情報を取得できませんでした。地図で選んでください。"),
+    { timeout: 10_000 },
+  );
+});
+$("#home-clear").addEventListener("click", () => setSettings({ ...settings, home: null }));
+$("#notify-level").addEventListener("change", (e) => {
+  const level = (e.target as HTMLSelectElement).value as NotifyLevel;
+  setSettings({ ...settings, notify: level });
+  // 通知を使うなら、この操作の中で許可を求める
+  if (level !== "off" && "Notification" in window && Notification.permission === "default") void Notification.requestPermission();
+});
+
+// ---------- デモモード ----------
+
+/** デモモードの状態。null ならデモモードではない */
+let demo: { scenarios: ScenarioSummary[]; running: string | null; timers: number[]; run: number } | null = null;
+
+function showWorld(w: World): void {
+  world = w;
+  numbers = new Map();
+  selectedKey = null;
+  map.release();
+}
+
+async function enterDemo(): Promise<void> {
+  if (demo) return;
+  const res = await fetch("demo/index.json");
+  const scenarios: ScenarioSummary[] = res.ok ? await res.json() : [];
+  demo = { scenarios, running: null, timers: [], run: 0 };
+  showWorld({ store: new GroupStore(), tsunami: null });
+  renderAll();
+}
+
+function exitDemo(): void {
+  if (!demo) return;
+  demo.timers.forEach(clearTimeout);
+  demo = null;
+  showWorld(liveWorld);
+  renderAll();
+}
+
+async function runScenario(id: string): Promise<void> {
+  if (!demo) await enterDemo();
+  const d = demo;
+  if (!d) return;
+  d.timers.forEach(clearTimeout);
+  const res = await fetch(`demo/${encodeURIComponent(id)}.json`);
+  if (!res.ok || demo !== d) return;
+  const scenario: Scenario = await res.json();
+  // 場面ごとにまっさらな状態から再生する
+  const w: World = { store: new GroupStore(), tsunami: null };
+  showWorld(w);
+  d.running = id;
+  const plan = schedule(scenario.events, now(), ++d.run);
+  d.timers = plan.map(({ at, event }) =>
+    window.setTimeout(() => {
+      if (world === w) onEvents([event], true, w);
+    }, at),
+  );
+  // 最後の情報が届いたら一覧を「再生済み」に戻す
+  const last = plan.length ? plan[plan.length - 1].at : 0;
+  d.timers.push(
+    window.setTimeout(() => {
+      if (demo === d && world === w) {
+        d.running = null;
+        renderDemoPanel();
+      }
+    }, last + 1000),
+  );
+  renderAll();
+}
+
+function renderDemoPanel(): void {
+  const panel = $("#demo-panel");
+  panel.hidden = !demo;
+  if (!demo) return;
+  const d = demo;
+  const html = d.scenarios
+    .map(
+      (s) => `<li class="${s.id === d.running ? "running" : ""}"><div class="demo-text"><b>${esc(s.name)}</b><div class="muted">${esc(
+        s.description,
+      )}</div></div><button type="button" class="follow" data-id="${esc(s.id)}">${s.id === d.running ? "再生中" : "実行"}</button></li>`,
+    )
+    .join("");
+  const list = $("#demo-list");
+  if (list.innerHTML !== html) list.innerHTML = html;
 }
 
 let telopMessages: string[] = [];
@@ -593,7 +825,14 @@ function renderClock(now: number): void {
   set("#c-day", `${c.day}日`);
   set("#c-wd", `(${c.weekday})`);
   set("#c-hm", c.hm);
-  set("#c-sec", c.sec);
+  if ($("#c-sec").textContent !== c.sec) {
+    set("#c-sec", c.sec);
+    // 秒が変わるたびに拍動させる (アニメーションを最初からやり直す)
+    const beat = $("#c-beat");
+    beat.classList.remove("beat");
+    void beat.offsetWidth;
+    beat.classList.add("beat");
+  }
 }
 
 function setStatus(s: Status): void {
@@ -616,31 +855,53 @@ $("#list").addEventListener("click", (e) => {
 });
 // 画面外の地震の矢印からも選べる
 map.onSelect = select;
-$("#follow").addEventListener("click", () => {
-  selectedKey = null;
-  map.release();
-  renderList();
-  renderDetail();
-  tick();
+$("#back-live").addEventListener("click", () => {
+  if (demo) exitDemo();
+  else {
+    selectedKey = null;
+    map.release();
+    renderAll();
+  }
+});
+$("#demo-open").addEventListener("click", () => void enterDemo());
+$("#demo-list").addEventListener("click", (e) => {
+  const id = (e.target as HTMLElement).closest<HTMLElement>("button[data-id]")?.dataset.id;
+  if (id) void runScenario(id);
 });
 
 function renderSound(): void {
+  const waiting = soundEnabled() && !soundReady();
+  // 設定は ON だがブラウザの制限でまだ鳴らせないときは、地図の上に案内を出す
+  $("#sound-hint").hidden = !waiting;
   const btn = $("#sound");
-  const text = !soundEnabled() ? "音 OFF" : soundReady() ? "音 ON" : "音 ON (タップで有効化)";
+  const text = !soundEnabled() ? "音 OFF" : waiting ? "音 ON (タップで有効化)" : "音 ON";
   if (btn.textContent === text) return;
   btn.textContent = text;
-  btn.classList.toggle("active", soundEnabled() && soundReady());
+  btn.classList.toggle("active", soundEnabled() && !waiting);
+  btn.classList.toggle("waiting", waiting);
+}
+function enableSound(): void {
+  unlock();
+  play("low"); // 確認用
 }
 $("#sound").addEventListener("click", () => {
-  setSoundEnabled(!soundEnabled());
-  if (soundEnabled()) {
-    unlock();
-    play("low"); // 確認用
+  // 「タップで有効化」の状態で押したら、OFF にせず有効化する
+  if (soundEnabled() && !soundReady()) enableSound();
+  else {
+    setSoundEnabled(!soundEnabled());
+    if (soundEnabled()) enableSound();
   }
   renderSound();
 });
-// 前回 ON にしていた場合、ブラウザの制約で最初の操作までは鳴らせない
-if (soundEnabled()) document.addEventListener("pointerdown", unlock, { once: true });
+$("#sound-hint").addEventListener("click", enableSound);
+onSoundStateChange(renderSound);
+if (soundEnabled()) {
+  // サイトの設定で音声を許可していれば、操作なしでこのまま鳴らせるようになる
+  unlock();
+  // だめなら最初の操作で有効化する
+  document.addEventListener("pointerdown", unlock, { once: true });
+  document.addEventListener("keydown", unlock, { once: true });
+}
 
 loadTelop();
 Promise.all([
@@ -661,6 +922,10 @@ Promise.all([
       onEvent: (event) => onEvents([event], true),
       onStatus: setStatus,
     });
+    updateHome();
     conn.start();
     tick();
+    // ?demo=場面の名前 で開いたらデモを再生する (見守りモニタの動作確認用)
+    const demoId = new URLSearchParams(location.search).get("demo");
+    if (demoId != null) void (demoId ? runScenario(demoId) : enterDemo());
   });

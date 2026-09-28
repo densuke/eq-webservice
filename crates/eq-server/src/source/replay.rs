@@ -34,7 +34,7 @@ pub async fn run(path: &Path, opts: &Options, hub: &Hub) -> anyhow::Result<()> {
     }
 }
 
-fn load(text: &str) -> anyhow::Result<Vec<Event>> {
+pub fn load(text: &str) -> anyhow::Result<Vec<Event>> {
     let mut out = Vec::new();
     for (i, line) in text.lines().enumerate() {
         let line = line.trim();

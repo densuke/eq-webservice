@@ -13,9 +13,9 @@ const pt = (addr: string, scale: number, is_area = false): ObservationPoint => (
 test("stations become dots and the max per area colors the area", () => {
   const d = quakeDetail([pt("常総市新石下", 30), pt("筑西市舟生", 40), pt("さいたま中央区下落合", 20), pt("未登録の観測点", 50)], stations);
   assert.deepEqual(d.dots, [
-    { lat: 36.1, lon: 139.9, scale: 30 },
-    { lat: 36.3, lon: 139.9, scale: 40 },
-    { lat: 35.9, lon: 139.6, scale: 20 },
+    { name: "常総市新石下", lat: 36.1, lon: 139.9, scale: 30 },
+    { name: "筑西市舟生", lat: 36.3, lon: 139.9, scale: 40 },
+    { name: "さいたま中央区下落合", lat: 35.9, lon: 139.6, scale: 20 },
   ]);
   assert.deepEqual(d.areas, [
     { name: "茨城県南部", scale: 40 },

@@ -23,7 +23,7 @@ eew_url = ""
 # 地震が起きていないときの画面確認用: 記録データを「今」の時刻にずらして再生する
 # [source]
 # type = "replay"
-# path = "samples/demo.jsonl"
+# path = "samples/scenarios/standard.jsonl"
 # speed = 1.0
 # max_gap_ms = 10000
 # rebase_time = true
