@@ -34,11 +34,28 @@ body {
 .topbar h1 { font-size: 15px; margin: 0; font-weight: 600; white-space: nowrap; }
 .topbar > * { flex: none; }
 .version { font-size: 12px; font-weight: 400; color: var(--muted); }
-.clock { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--muted); }
 .wave-info { color: var(--s-wave); font-variant-numeric: tabular-nums; }
-.status { width: 10px; height: 10px; border-radius: 50%; background: #d29922; flex: none; }
-.status[data-status="open"] { background: #3fb950; }
-.status[data-status="closed"] { background: #f85149; }
+#sound { margin-left: auto; }
+
+/* 日時表示 (地図の右上)。枠の色で接続状態を示す: 緑=オンライン / 赤=切断中 */
+.clock-panel {
+  position: absolute; top: 10px; right: 10px; z-index: 1; pointer-events: none;
+  background: rgba(13, 17, 23, 0.85); border: 2px solid #d29922; border-radius: 8px;
+  padding: 4px 10px 6px; line-height: 1.1; font-variant-numeric: tabular-nums;
+}
+.clock-panel[data-status="open"] { border-color: #3fb950; }
+.clock-panel[data-status="closed"] { border-color: #f85149; background: rgba(90, 10, 16, 0.9); }
+.c-top { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--muted); }
+.c-status::before { content: "●"; margin-right: 3px; color: #d29922; }
+.clock-panel[data-status="open"] .c-status::before { color: #3fb950; }
+.clock-panel[data-status="closed"] .c-status { color: #ff7b72; font-weight: 700; }
+.clock-panel[data-status="closed"] .c-status::before { color: #f85149; }
+.c-date { font-weight: 700; }
+.c-small { font-size: 15px; }
+.c-day { font-size: 24px; }
+.c-time { font-weight: 700; }
+.c-hm { font-size: 34px; letter-spacing: 0.02em; }
+.c-sec { font-size: 18px; margin-left: 4px; color: var(--muted); }
 
 .eew-banner {
   background: var(--alert); color: #fff; padding: 8px 16px; font-size: 15px;
@@ -61,10 +78,6 @@ body {
 .tsunami-banner { color: #111; background: var(--t-watch); padding: 6px 16px; font-size: 14px; }
 .tsunami-banner[data-grade="warning"] { color: #fff; background: var(--t-warning); }
 .tsunami-banner[data-grade="major_warning"] { color: #fff; background: var(--t-major); }
-.legend-tsunami { background: none !important; margin-left: 6px; }
-.legend-tsunami.watch { border-bottom: 3px solid var(--t-watch); }
-.legend-tsunami.warning { border-bottom: 3px solid var(--t-warning); }
-.legend-tsunami.major_warning { border-bottom: 3px solid var(--t-major); }
 .wave { fill: none; vector-effect: non-scaling-stroke; stroke-width: 2.5; }
 .wave-p { stroke: var(--p-wave); }
 .wave-s { stroke: var(--s-wave); fill: rgba(255, 82, 82, 0.05); }
@@ -76,14 +89,21 @@ body {
 .epicenter-pulse { fill: none; stroke: #ff1744; stroke-width: 2; animation: pulse 1.6s ease-out infinite; transform-box: fill-box; transform-origin: center; }
 @keyframes pulse { from { transform: scale(0.4); opacity: 1; } to { transform: scale(2.2); opacity: 0; } }
 
+/* 凡例 (地図の左下)。震度は細いゲージ、津波と P波・S波は必要なときだけ行を足す */
 .legend {
-  position: absolute; left: 12px; bottom: 12px; display: flex; gap: 2px; font-size: 11px; z-index: 1;
-  background: rgba(13, 17, 23, 0.8); padding: 4px; border-radius: 6px; pointer-events: none;
+  position: absolute; left: 10px; bottom: 10px; z-index: 1; pointer-events: none; width: 180px;
+  background: rgba(13, 17, 23, 0.8); padding: 5px 6px; border-radius: 6px; font-size: 10px; color: var(--muted);
 }
-.legend span { min-width: 22px; text-align: center; padding: 1px 3px; border-radius: 3px; color: #fff; }
-.legend-wave { background: none !important; margin-left: 6px; }
-.legend-wave.p { border-bottom: 2px solid var(--p-wave); }
-.legend-wave.s { border-bottom: 2px solid var(--s-wave); }
+.gauge, .gauge-labels { display: grid; grid-template-columns: repeat(9, 1fr); }
+.gauge { height: 6px; border-radius: 3px; overflow: hidden; }
+.gauge-labels { text-align: center; line-height: 1.4; }
+.legend-row { display: flex; gap: 8px; margin-top: 3px; }
+.lt, .lw { padding-bottom: 1px; }
+.lt.watch { border-bottom: 3px solid var(--t-watch); }
+.lt.warning { border-bottom: 3px solid var(--t-warning); }
+.lt.major_warning { border-bottom: 3px solid var(--t-major); }
+.lw.p { border-bottom: 2px solid var(--p-wave); }
+.lw.s { border-bottom: 2px solid var(--s-wave); }
 
 .side { display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--panel); min-height: 0; }
 .detail { padding: 12px 16px; border-bottom: 1px solid var(--line); max-height: 55%; overflow: auto; }
@@ -132,7 +152,9 @@ body {
   html, body { height: auto; }
   .topbar { position: sticky; top: 0; z-index: 2; gap: 8px; }
   .topbar h1 { font-size: 14px; }
-  .clock-date { display: none; }
+  .clock-panel { top: 6px; right: 6px; padding: 3px 8px 4px; }
+  .c-hm { font-size: 26px; }
+  .c-day { font-size: 20px; }
   .eew-banner { position: sticky; top: 37px; z-index: 2; font-size: 14px; }
   .layout { display: block; }
   .map-wrap { height: 60vh; height: 60svh; }

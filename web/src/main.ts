@@ -11,6 +11,7 @@ import { play, setSoundEnabled, soundEnabled, soundReady, unlock } from "./sound
 import { surfaceRadiusKm, VP_KM_S, VS_KM_S } from "./waves.ts";
 import { byPriority, sameQuake, type Place } from "./priority.ts";
 import { assignNumbers } from "./numbering.ts";
+import { clockParts } from "./clock.ts";
 
 /** 発生からこの秒数を過ぎたら P波・S波の表示を止める */
 const WAVE_MAX_SEC = 180;
@@ -465,9 +466,7 @@ function tick(): void {
   cancelAnimationFrame(raf);
   clearTimeout(timer);
   const now = conn.now();
-  const d = new Date(now);
-  $("#clock-date").textContent = d.toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo" });
-  $("#clock-time").textContent = d.toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour12: false });
+  renderClock(now);
   if (updateNumbers(now)) {
     renderList();
     renderDetail();
@@ -487,6 +486,7 @@ function tick(): void {
     renderList();
     renderDetail();
   }
+  $("#legend-wave").hidden = !waving;
   if (!waving) {
     map.setWaves([]);
     $("#wave-info").textContent = "";
@@ -529,6 +529,7 @@ function onEvents(events: EqEvent[], live: boolean): void {
   // Wolfx 経由の情報を受けたら出典を出す
   if (events.some((e) => e.source === "wolfx")) $("#credit-wolfx").hidden = false;
   map.setTsunami(activeAreas(tsunami));
+  $("#legend-tsunami").hidden = activeAreas(tsunami).length === 0;
   renderTsunamiBanner();
   if (alert && !(now() - lastAlert.at < ALERT_MERGE_MS && rank[alert] <= rank[lastAlert.level])) {
     play(alert);
@@ -537,10 +538,23 @@ function onEvents(events: EqEvent[], live: boolean): void {
   tick();
 }
 
+function renderClock(now: number): void {
+  const c = clockParts(now);
+  const set = (id: string, text: string) => {
+    const el = $(id);
+    if (el.textContent !== text) el.textContent = text;
+  };
+  set("#c-year", `${c.year}年`);
+  set("#c-month", `${c.month}月`);
+  set("#c-day", `${c.day}日`);
+  set("#c-wd", `(${c.weekday})`);
+  set("#c-hm", c.hm);
+  set("#c-sec", c.sec);
+}
+
 function setStatus(s: Status): void {
-  const el = $("#status");
-  el.dataset.status = s;
-  el.title = { connecting: "接続中", open: "接続済み", closed: "切断 (再接続します)" }[s];
+  $("#clock").dataset.status = s;
+  $("#c-status").textContent = { connecting: "接続中", open: "時刻同期", closed: "切断中" }[s];
 }
 
 // ---------- 起動 ----------
