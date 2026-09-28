@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -71,30 +72,84 @@ jobs:
         with:
           name: web-dist
           path: web/dist
-      - name: smoke test (demo replay)
-        shell: bash
-        run: |
-          bin=target/${{ matrix.target }}/release/eq-server
-          "$bin" --config samples/demo.toml > server.log 2>&1 &
-          pid=$!
-          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8080/healthz && break; sleep 1; done
-          sleep 3
-          curl -fsS http://127.0.0.1:8080/ | grep -q '地震情報マップ'
-          curl -fsS http://127.0.0.1:8080/api/events | grep -q '"kind":"eew"'
-          curl -fsS http://127.0.0.1:8080/feed.xml | grep -q '<rss'
-          kill $pid
-          cat server.log
       - name: package
+        id: package
         shell: bash
         run: |
-          name=eq-server-${{ matrix.target }}
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME}"
+            # タグと Cargo.toml のバージョンが一致しているか
+            cargo_version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+            if [[ "v${cargo_version}" != "${version%%-*}" ]]; then
+              echo "::error::tag ${version} does not match Cargo.toml version ${cargo_version}"; exit 1
+            fi
+          else
+            version="dev-${GITHUB_SHA::7}"
+          fi
+          name="eq-server-${version}-${{ matrix.target }}"
           mkdir -p "$name/web"
           cp target/${{ matrix.target }}/release/eq-server "$name/"
           cp -R web/dist "$name/web/dist"
-          cp -R samples "$name/"
+          cp -R samples deploy "$name/"
           cp config.example.toml README.md LICENSE "$name/"
           tar czf "$name.tar.gz" "$name"
+          if command -v sha256sum >/dev/null; then sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
+          else shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"; fi
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+      - name: smoke test (packaged, demo replay)
+        shell: bash
+        run: |
+          # 展開したパッケージを、別のディレクトリから --port 付きで起動して確かめる
+          work=$(mktemp -d)
+          tar xzf "${{ steps.package.outputs.name }}.tar.gz" -C "$work"
+          pkg="$work/${{ steps.package.outputs.name }}"
+          cd "$work"
+          "$pkg/eq-server" --version
+          (cd "$pkg" && ./eq-server --config samples/demo.toml --port 18080) > server.log 2>&1 &
+          pid=$!
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:18080/healthz && break; sleep 1; done
+          sleep 3
+          curl -fsS http://127.0.0.1:18080/ | grep -q '地震情報マップ'
+          curl -fsS http://127.0.0.1:18080/japan.geojson | grep -q 'FeatureCollection'
+          curl -fsS http://127.0.0.1:18080/api/events | grep -q '"kind":"eew"'
+          curl -fsS http://127.0.0.1:18080/feed.xml | grep -q '<rss'
+          kill $pid
+          # 実行ファイルの隣の web/dist を見つけられるか (作業ディレクトリ外から起動)
+          EQ_PORT=18081 "$pkg/eq-server" --config "$pkg/config.example.toml" > server2.log 2>&1 &
+          pid=$!
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:18081/healthz && break; sleep 1; done
+          curl -fsS http://127.0.0.1:18081/ | grep -q '地震情報マップ'
+          kill $pid
+          cat server.log server2.log
       - uses: actions/upload-artifact@v4
         with:
-          name: eq-server-${{ matrix.target }}
-          path: eq-server-${{ matrix.target }}.tar.gz
+          name: package-${{ matrix.target }}
+          path: |
+            ${{ steps.package.outputs.name }}.tar.gz
+            ${{ steps.package.outputs.name }}.tar.gz.sha256
+          if-no-files-found: error
+
+  release:
+    name: GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: rust
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: package-*
+          merge-multiple: true
+          path: dist
+      - name: create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la dist
+          prerelease=""
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then prerelease="--prerelease"; fi
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes $prerelease

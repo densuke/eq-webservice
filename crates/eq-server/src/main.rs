@@ -1,20 +1,19 @@
+mod cli;
 mod config;
 mod http;
 mod hub;
 mod plugins;
 mod source;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Context;
 use tracing_subscriber::EnvFilter;
 
+use crate::cli::{Cli, USAGE};
 use crate::config::Config;
 use crate::hub::Hub;
-
-const USAGE: &str = "usage: eq-server [--config <path>]\n\n\
-設定ファイルを省略した場合は ./config.toml を探し、無ければ既定値 (P2P地震情報に接続、127.0.0.1:8080 で待受) で起動します。";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -22,7 +21,17 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
         .init();
 
-    let cfg = load_config()?;
+    let cli = Cli::parse(std::env::args().skip(1))?.with_env(|k| std::env::var(k).ok())?;
+    if cli.help {
+        println!("{USAGE}");
+        return Ok(());
+    }
+    if cli.version {
+        println!("eq-server {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+    let cfg = load_config(&cli)?;
+    tracing::info!(static_dir = %cfg.server.static_dir.display(), "eq-server {}", env!("CARGO_PKG_VERSION"));
     let hub = Hub::new(cfg.server.recent_capacity);
 
     // プラグインは取得元より先に購読させる (起動直後のイベントを取りこぼさないため)
@@ -62,25 +71,41 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn load_config() -> anyhow::Result<Config> {
-    let mut args = std::env::args().skip(1);
-    let mut path: Option<PathBuf> = None;
-    while let Some(a) = args.next() {
-        match a.as_str() {
-            "-c" | "--config" => path = Some(args.next().context("--config needs a path")?.into()),
-            "-h" | "--help" => {
-                println!("{USAGE}");
-                std::process::exit(0);
-            }
-            other => anyhow::bail!("unknown argument {other:?}\n{USAGE}"),
-        }
-    }
-    match path {
-        Some(p) => Config::load(&p),
-        None if std::path::Path::new("config.toml").exists() => Config::load("config.toml".as_ref()),
+fn load_config(cli: &Cli) -> anyhow::Result<Config> {
+    let mut cfg = match &cli.config {
+        Some(p) => Config::load(p)?,
+        None if Path::new("config.toml").exists() => Config::load("config.toml".as_ref())?,
         None => {
             tracing::info!("no config file, using defaults");
-            Config::parse("")
+            Config::parse("")?
+        }
+    };
+    cfg.server.listen = cli.apply_listen(&cfg.server.listen);
+    if let Some(dir) = &cli.static_dir {
+        cfg.server.static_dir = dir.clone();
+    }
+    cfg.server.static_dir = resolve_static_dir(&cfg.server.static_dir);
+    Ok(cfg)
+}
+
+/// 相対パスが作業ディレクトリに無ければ、実行ファイルの隣を探す
+/// (リリース版を展開した場所以外から起動した場合でもページを配信できるように)。
+fn resolve_static_dir(dir: &Path) -> PathBuf {
+    if dir.as_os_str().is_empty() || dir.is_absolute() || dir.is_dir() {
+        return dir.to_path_buf();
+    }
+    let beside_exe = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|d| d.join(dir)))
+        .filter(|p| p.is_dir());
+    match beside_exe {
+        Some(p) => p,
+        None => {
+            tracing::warn!(
+                "static_dir {} not found; the map page will not be served",
+                dir.display()
+            );
+            dir.to_path_buf()
         }
     }
 }

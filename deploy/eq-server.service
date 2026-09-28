@@ -1,0 +1,30 @@
+# systemd ユニット例。/opt/eq-server にリリースを展開した場合。
+#   sudo useradd --system --home /opt/eq-server --shell /usr/sbin/nologin eq
+#   sudo cp deploy/eq-server.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now eq-server
+[Unit]
+Description=eq-server (地震情報マップ)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=eq
+WorkingDirectory=/opt/eq-server
+ExecStart=/opt/eq-server/eq-server --config /opt/eq-server/config.toml
+# 待ち受けポート (リバースプロキシの転送先に合わせる)。config.toml の listen より優先
+Environment=EQ_PORT=8080
+Environment=RUST_LOG=info
+# DISCORD_WEBHOOK_URL などの秘密情報はこちらに
+EnvironmentFile=-/etc/default/eq-server
+Restart=always
+RestartSec=5
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/eq-server/data
+
+[Install]
+WantedBy=multi-user.target

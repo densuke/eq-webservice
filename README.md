@@ -33,6 +33,31 @@ P2P地震情報 (wss) ──▶ eq-server (Rust) ──▶ ブラウザ (静的�
 
 ## 使い方
 
+### ビルド済みのリリースを使う (サーバへの配置)
+
+[Releases](https://github.com/densuke/eq-webservice/releases) から次のどちらかをダウンロードして展開します。
+サーバ側で Rust や Node.js を使ってビルドする必要はありません。
+
+- `eq-server-<version>-x86_64-unknown-linux-gnu.tar.gz` (Linux / amd64)
+- `eq-server-<version>-aarch64-apple-darwin.tar.gz` (macOS / Apple Silicon)
+
+バイナリ・地図ページ (`web/dist`)・設定例・systemd ユニット例が 1 つのディレクトリに入っています。
+配置手順は [deploy/INSTALL.md](deploy/INSTALL.md) を見てください。
+
+### 起動オプション
+
+| オプション | 環境変数 | 内容 |
+| --- | --- | --- |
+| `-c, --config <path>` | | 設定ファイル (省略時は `./config.toml`、無ければ既定値) |
+| `-p, --port <port>` | `EQ_PORT` | 待ち受けポートだけ変える |
+| `-l, --listen <addr:port>` | `EQ_LISTEN` | 待ち受けアドレスとポート |
+| `--static-dir <path>` | | 地図ページの場所 (既定は `web/dist`。無ければ実行ファイルの隣を探す) |
+| `-V, --version` | | バージョン表示 |
+
+優先順位は 起動オプション > 環境変数 > 設定ファイル (`[server] listen`) です。
+
+### ソースからビルドする
+
 必要なもの: Rust (stable)、Node.js 22 以降
 
 ```sh
@@ -72,6 +97,17 @@ HTTP の口:
 `plugins::build()` に `type` 名を登録します。Rust 以外で書きたい場合は `webhook` プラグインで
 正規化済みの JSON を受け取れます。
 
+## リリースの作り方
+
+`Cargo.toml` の `version` を上げてから、同じ番号のタグを push します。
+
+```sh
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+CI がビルド・テストのあと、両ターゲットの tar.gz と sha256 を GitHub Releases に添付します。
+`v0.2.0-rc1` のように `-` を含むタグはプレリリースになります。
+
 ## リバースプロキシ (Caddy) の例
 
 ページは相対パスで WebSocket・地図データを読むので、サブパスの下にも置けます。
@@ -89,6 +125,7 @@ example.jp {
 }
 ```
 
+設定例は [deploy/Caddyfile.example](deploy/Caddyfile.example) にもあります。
 Caddy の `reverse_proxy` は WebSocket をそのまま通します。サーバは 30 秒ごとに ping を送るので、
 アイドル状態での切断は起きにくいはずです。
 
@@ -98,7 +135,8 @@ GitHub Actions（`.github/workflows/ci.yml`）で次をビルド・テストし�
 
 - web: 型チェック、テスト、ビルド
 - rust: `x86_64-unknown-linux-gnu`（ubuntu）と `aarch64-apple-darwin`（macOS arm64）で
-  fmt / clippy / test / release ビルド、デモ再生での動作確認、配布用 tar.gz の作成（Artifacts から取得）
+  fmt / clippy / test / release ビルド、配布用 tar.gz の作成、展開した tar.gz を使ったデモ再生での動作確認
+- release: `v*` タグのときだけ GitHub Releases を作成
 
 ## 今後の拡張候補
 

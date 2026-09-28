@@ -1,0 +1,15 @@
+# Caddy 設定例。eq-server は 127.0.0.1:8080 (EQ_PORT / --port で変更可) で待ち受ける想定。
+
+# 専用のホスト名で公開する場合
+eq.example.jp {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8080
+}
+
+# 既存サイトのサブパス (/eq/) の下に置く場合
+# example.jp {
+# 	redir /eq /eq/
+# 	handle_path /eq/* {
+# 		reverse_proxy 127.0.0.1:8080
+# 	}
+# }
