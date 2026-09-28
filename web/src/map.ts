@@ -51,6 +51,9 @@ export class JapanMap {
   private waveLayer = el("g", { class: "waves" });
   private markerLayer = el("g", { class: "markers" });
   private prefs = new Map<string, SVGPathElement>();
+  /** 塗り分け中の都道府県と色 (薄くするときに使う) */
+  private hitColors = new Map<string, string>();
+  private fade = 1;
   private view: View;
   private epicenter: SVGGElement | null = null;
   private pWave = el("path", { class: "wave wave-p" });
@@ -93,13 +96,26 @@ export class JapanMap {
       p.style.fill = "";
       p.classList.remove("forecast", "hit");
     }
-    for (const { pref, scale } of items) {
-      const p = this.prefs.get(pref);
-      if (!p) continue;
-      p.style.fill = scaleColor(scale);
-      p.classList.add("hit");
-      if (forecast) p.classList.add("forecast");
+    this.hitColors = new Map(items.filter(({ pref }) => this.prefs.has(pref)).map(({ pref, scale }) => [pref, scaleColor(scale)]));
+    for (const pref of this.hitColors.keys()) this.prefs.get(pref)!.classList.toggle("forecast", forecast);
+    this.paintFade();
+  }
+
+  /** 塗り分けと震央の濃さ (1 = はっきり, 0 = 消える) */
+  setFade(alpha: number): void {
+    if (Math.abs(alpha - this.fade) < 0.005) return;
+    this.fade = alpha;
+    this.paintFade();
+  }
+
+  private paintFade(): void {
+    const a = this.fade;
+    for (const [pref, color] of this.hitColors) {
+      const p = this.prefs.get(pref)!;
+      p.style.fill = a >= 1 ? color : `color-mix(in srgb, ${color} ${(a * 100).toFixed(1)}%, var(--land))`;
+      p.classList.toggle("hit", a > 0);
     }
+    if (this.epicenter) this.epicenter.style.opacity = String(a);
   }
 
   setEpicenter(lat: number | null, lon: number | null): void {
@@ -118,6 +134,7 @@ export class JapanMap {
     );
     this.markerLayer.append(g);
     this.epicenter = g;
+    g.style.opacity = String(this.fade);
     this.updateMarkerScale();
   }
 

@@ -2,6 +2,7 @@ import { Connection, type Status } from "./connection.ts";
 import { GroupStore, latestEew, summarizeQuake, type Group } from "./groups.ts";
 import { alertLevel, type AlertLevel } from "./alert.ts";
 import { followRadiusKm, pad, pointBox, stopRadiusKm, union, type Box } from "./camera.ts";
+import { fadeOpacity, FULL_MS } from "./fade.ts";
 import { JapanMap, project } from "./map.ts";
 import { isKnownScale, scaleColor, scaleLabel, scaleTextColor } from "./scale.ts";
 import type { EewEvent, EqEvent, Hypocenter, Scale, TsunamiEvent } from "./types.ts";
@@ -14,8 +15,6 @@ const WAVE_MAX_SEC = 180;
 const EEW_BANNER_MS = 3 * 60_000;
 /** 履歴を選んだときの P波・S波の再生速度 */
 const REPLAY_SPEED = 3;
-/** 最新の地震はこの時間まで寄って表示し、過ぎたら日本全体に戻す */
-const AUTO_FIT_MS = 10 * 60_000;
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as T;
 
@@ -133,6 +132,14 @@ function paintMap(g: Group | undefined): void {
     map.setPrefScales([]);
     map.setEpicenter(null, null);
   }
+}
+
+/** 地図に塗っている地震の発生時刻 (無ければ受信時刻) */
+function displayedOriginMs(): number {
+  const g = currentGroup();
+  const q = g && relatedQuake(g);
+  if (!q) return 0;
+  return geoOf(q)?.origin ?? q.updatedAt;
 }
 
 function currentGroup(): Group | undefined {
@@ -271,7 +278,7 @@ function scene(now: number): Scene | null {
   }
   const src = waveSource(now);
   const g = store.list().find((g) => g.kind === "quake" || g.kind === "eew");
-  if (!src && (!g || now - g.updatedAt > AUTO_FIT_MS)) return null;
+  if (!src && (!g || now - g.updatedAt > FULL_MS)) return null;
   const geo = g && geoOf(g);
   return {
     center: src ?? geo?.center ?? null,
@@ -327,6 +334,7 @@ function tick(): void {
     $("#wave-info").textContent = "";
   }
   map.setTarget(box);
+  map.setFade(selectedKey ? 1 : fadeOpacity(now - displayedOriginMs()));
   renderFollow();
   renderSound();
   // 波の表示中は滑らかに、そうでなければ時計の更新だけ
