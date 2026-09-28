@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>地震情報マップ</title>
+  <meta name="description" content="P2P地震情報をもとに、震源・震度・P波/S波をリアルタイムに地図表示します">
+  <link rel="stylesheet" href="style.css">
+  <link rel="alternate" type="application/rss+xml" title="地震情報" href="feed.xml">
+</head>
+<body>
+  <header class="topbar">
+    <span id="status" class="status" data-status="connecting" title="接続中"></span>
+    <h1>地震情報マップ</h1>
+    <span id="wave-info" class="wave-info"></span>
+    <span class="clock"><span id="clock-date" class="clock-date"></span> <span id="clock-time"></span></span>
+  </header>
+  <div id="eew-banner" class="eew-banner" role="alert" hidden></div>
+  <main class="layout">
+    <section id="map" class="map-wrap" aria-label="日本地図">
+      <div class="legend" aria-hidden="true">
+        <span style="background:#f2f2ff;color:#111">1</span><span style="background:#00aaff">2</span><span style="background:#0041ff">3</span><span style="background:#faf500;color:#111">4</span><span style="background:#ffe600;color:#111">5-</span><span style="background:#ff9900">5+</span><span style="background:#ff2800">6-</span><span style="background:#a50021">6+</span><span style="background:#b40068">7</span>
+        <span class="legend-wave p">P波</span><span class="legend-wave s">S波</span>
+      </div>
+    </section>
+    <aside class="side">
+      <section id="detail" class="detail" aria-live="polite"><p class="muted">接続しています…</p></section>
+      <div class="list-head">
+        <h2>履歴</h2>
+        <button id="follow" class="follow active" type="button" title="最新の情報を自動で表示します">最新に追従</button>
+      </div>
+      <ul id="list" class="list"></ul>
+      <footer class="credit">
+        情報: <a href="https://www.p2pquake.net/" target="_blank" rel="noopener">P2P地震情報</a> (気象庁発表)<br>
+        地図: 地球地図日本 (国土地理院) を加工<br>
+        P波・S波の円は一様速度による概算です。
+      </footer>
+    </aside>
+  </main>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

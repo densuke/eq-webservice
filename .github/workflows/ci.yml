@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  web:
+    name: web (TypeScript)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+          if-no-files-found: error
+
+  rust:
+    name: rust (${{ matrix.target }})
+    needs: web
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest # Apple Silicon (arm64)
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: fmt
+        if: runner.os == 'Linux'
+        run: cargo fmt --all --check
+      - name: clippy
+        run: cargo clippy --all-targets --target ${{ matrix.target }} -- -D warnings
+      - name: test
+        run: cargo test --target ${{ matrix.target }}
+      - name: build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+      - name: smoke test (demo replay)
+        shell: bash
+        run: |
+          bin=target/${{ matrix.target }}/release/eq-server
+          "$bin" --config samples/demo.toml > server.log 2>&1 &
+          pid=$!
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8080/healthz && break; sleep 1; done
+          sleep 3
+          curl -fsS http://127.0.0.1:8080/ | grep -q '地震情報マップ'
+          curl -fsS http://127.0.0.1:8080/api/events | grep -q '"kind":"eew"'
+          curl -fsS http://127.0.0.1:8080/feed.xml | grep -q '<rss'
+          kill $pid
+          cat server.log
+      - name: package
+        shell: bash
+        run: |
+          name=eq-server-${{ matrix.target }}
+          mkdir -p "$name/web"
+          cp target/${{ matrix.target }}/release/eq-server "$name/"
+          cp -R web/dist "$name/web/dist"
+          cp -R samples "$name/"
+          cp config.example.toml README.md LICENSE "$name/"
+          tar czf "$name.tar.gz" "$name"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eq-server-${{ matrix.target }}
+          path: eq-server-${{ matrix.target }}.tar.gz

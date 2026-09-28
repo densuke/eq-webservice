@@ -1,0 +1,10 @@
+[package]
+name = "eq-core"
+description = "地震情報のデータモデルと P2P地震情報 API のパーサ (tokio 非依存・WASM ビルド可能に保つ)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
