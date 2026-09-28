@@ -234,7 +234,9 @@ export class JapanMap {
 
   /** 別枠の表示。日本全体を見ているときだけ出し、always でないものはその範囲に何かあるときだけ */
   private updateInsets(): void {
-    const overview = this.view.h >= this.homeView().h * 0.8;
+    // 細分区域で塗っている (寄っている) ときは出さない。別枠の複製は .map の下に無いので
+    // .map.zoomed で都道府県の塗りを消すなどの CSS が効かず、塗りが二重になるため
+    const overview = !this.svg.classList.contains("zoomed") && this.view.h >= this.homeView().h * 0.8;
     for (const ins of this.insets) {
       ins.box.hidden = !overview || !(ins.always || this.hasContentIn(ins.bounds));
       if (!ins.box.hidden) this.renderInsetMarkers(ins);
