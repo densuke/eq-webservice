@@ -190,7 +190,7 @@ function renderMarkers(now: number): void {
   const cur = currentGroup();
   const shown = cur && relatedQuake(cur);
   const groups = selectedKey ? (shown ? [shown] : []) : [...recentQuakes(now), ...(shown ? [shown] : [])];
-  const byNum = new Map<string, { lat: number; lon: number; label: number | null; primary: boolean; quake: boolean }>();
+  const byNum = new Map<string, { lat: number; lon: number; label: number | null; primary: boolean; scale: number; quake: boolean }>();
   for (const g of groups) {
     const c = geoOf(g)?.center;
     if (!c) continue;
@@ -202,7 +202,7 @@ function renderMarkers(now: number): void {
       prev.primary ||= primary;
       continue;
     }
-    byNum.set(id, { lat: c.lat, lon: c.lon, label, primary: primary || (prev?.primary ?? false), quake: g.kind === "quake" });
+    byNum.set(id, { lat: c.lat, lon: c.lon, label, primary: primary || (prev?.primary ?? false), scale: groupScale(g), quake: g.kind === "quake" });
   }
   map.setEpicenters([...byNum.values()].map(({ quake: _, ...m }) => m));
 }

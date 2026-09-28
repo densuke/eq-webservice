@@ -4,12 +4,16 @@ import type { PrefScale, TsunamiArea } from "./types.ts";
 import { scaleColor } from "./scale.ts";
 import { geoCircle } from "./waves.ts";
 import { union, type Box } from "./camera.ts";
+import { clusterMarkers, labelSize, type Cluster, type Marker } from "./cluster.ts";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const LON0 = 137;
 const LAT0 = 37;
 const KX = Math.cos((LAT0 * Math.PI) / 180) * 100;
 const KY = 100;
+
+/** 震央の印をまとめる距離 (画面上の px) */
+const MARKER_MERGE_PX = 18;
 
 /** 表示範囲の高さがこれより小さい (寄っている) ときは、細分区域と観測点で描く (1 度 ≒ 100) */
 const DETAIL_MAX_H = 1300;
@@ -72,6 +76,7 @@ export class JapanMap {
   private view: View;
   private epicenters: SVGGElement[] = [];
   private epicenterSig = "";
+  private markerItems: { x: number; y: number; label: number | null; primary: boolean; scale: number }[] = [];
   private pWave = el("path", { class: "wave wave-p" });
   private sWave = el("path", { class: "wave wave-s" });
   private target: View | null = null;
@@ -216,17 +221,30 @@ export class JapanMap {
     this.dotLayer.style.opacity = String(a);
   }
 
-  /** 震央の印。primary (表示中の地震) は大きく、ほかは小さく。label は一時的な番号 */
-  setEpicenters(items: { lat: number; lon: number; label: number | null; primary: boolean }[]): void {
-    const sig = JSON.stringify(items);
+  /** 震央の印。primary (表示中の地震) は大きく、ほかは小さく。label は一時的な番号、scale は最大震度 */
+  setEpicenters(items: { lat: number; lon: number; label: number | null; primary: boolean; scale: number }[]): void {
+    this.markerItems = items.map(({ lat, lon, ...rest }) => {
+      const [x, y] = project(lon, lat);
+      return { x, y, ...rest };
+    });
+    this.renderMarkers();
+  }
+
+  /** 画面上で重なる印をまとめて描く。まとまり方はズームで変わるので、表示範囲が変わるたびに呼ぶ */
+  private renderMarkers(): void {
+    const labeled = this.markerItems.filter((m): m is Marker => m.label != null);
+    const clusters: Cluster[] = [
+      ...clusterMarkers(labeled, MARKER_MERGE_PX * this.unitsPerPixel()),
+      ...this.markerItems.filter((m) => m.label == null).map(({ x, y, primary }) => ({ x, y, primary, labels: [] })),
+    ];
+    const sig = JSON.stringify(clusters.map((c) => [c.x, c.y, c.primary, c.labels]));
     if (sig === this.epicenterSig) return;
     this.epicenterSig = sig;
     this.epicenters.forEach((g) => g.remove());
     // 表示中の地震を最前面に
-    this.epicenters = [...items]
+    this.epicenters = clusters
       .sort((a, b) => Number(a.primary) - Number(b.primary))
-      .map(({ lat, lon, label, primary }) => {
-        const [x, y] = project(lon, lat);
+      .map(({ x, y, primary, labels }) => {
         const g = el("g", { class: primary ? "epicenter" : "epicenter sub" });
         g.dataset.x = String(x);
         g.dataset.y = String(y);
@@ -235,9 +253,15 @@ export class JapanMap {
         const x9 = `M${-r} ${-r}L${r} ${r}M${r} ${-r}L${-r} ${r}`;
         if (primary) g.append(el("circle", { r: 16, class: "epicenter-pulse" }));
         g.append(el("path", { d: x9, class: "epicenter-x-bg" }), el("path", { d: x9, class: "epicenter-x" }));
-        if (label != null) {
+        if (labels.length > 0) {
+          // 番号を時系列順に並べ、揺れの大きい地震ほど大きな文字にする
           const t = el("text", { x: 11, y: -9, class: "epicenter-label" });
-          t.textContent = String(label);
+          labels.forEach(({ label, scale }, i) => {
+            if (i > 0) t.append(",");
+            const s = el("tspan", { "font-size": labelSize(scale) });
+            s.textContent = String(label);
+            t.append(s);
+          });
           g.append(t);
         }
         this.markerLayer.append(g);
@@ -330,6 +354,7 @@ export class JapanMap {
     const v = this.view;
     this.svg.setAttribute("viewBox", `${v.x} ${v.y} ${v.w} ${v.h}`);
     this.svg.classList.toggle("detail", this.areas.size > 0 && v.h < DETAIL_MAX_H);
+    this.renderMarkers();
     this.updateMarkerScale();
   }
 
