@@ -95,6 +95,13 @@ body {
 }
 #sound.waiting { border-color: #d29922; color: #d29922; }
 
+/* 地図のツールチップ (名前と震度) */
+.map-tip {
+  position: absolute; z-index: 3; pointer-events: none; white-space: nowrap;
+  background: rgba(13, 17, 23, 0.92); border: 1px solid var(--line); border-radius: 4px;
+  padding: 3px 8px; font-size: 12px; color: var(--text);
+}
+
 /* 離島の別枠 (日本全体を表示しているときだけ) */
 .inset {
   position: absolute; z-index: 1; pointer-events: none; background: var(--sea);

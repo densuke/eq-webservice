@@ -15,7 +15,7 @@ export interface AreaScale {
 }
 
 export interface QuakeDetail {
-  dots: { lat: number; lon: number; scale: Scale }[];
+  dots: { name: string; lat: number; lon: number; scale: Scale }[];
   areas: AreaScale[];
   /** 位置が分からない観測点 (一覧に無い新しい観測点など) */
   missing: string[];
@@ -43,7 +43,7 @@ export function quakeDetail(points: ObservationPoint[], stations: Map<string, St
       missing.push(p.addr);
       continue;
     }
-    dots.push({ lat: s.lat, lon: s.lon, scale: p.scale });
+    dots.push({ name: p.addr, lat: s.lat, lon: s.lon, scale: p.scale });
     areas.push({ name: s.area, scale: p.scale });
   }
   return { dots, areas: maxByArea(areas), missing };
