@@ -199,7 +199,8 @@ function updateNumbers(now: number): boolean {
 function renderMarkers(now: number): void {
   const cur = currentGroup();
   const shown = cur && relatedQuake(cur);
-  const groups = selectedKey ? (shown ? [shown] : []) : [...recentQuakes(now), ...(shown ? [shown] : [])];
+  // 履歴や矢印で別の地震を選んでいる間も、直近のほかの地震の印と矢印は出す (元の地震へ戻れるように)
+  const groups = [...recentQuakes(now), ...(shown ? [shown] : [])];
   const byNum = new Map<string, { key: string; lat: number; lon: number; label: number | null; primary: boolean; scale: number; quake: boolean }>();
   for (const g of groups) {
     const c = geoOf(g)?.center;
