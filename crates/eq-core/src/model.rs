@@ -284,24 +284,27 @@ impl Event {
         lines.join("\n")
     }
 
-    /// 時刻をすべて delta ミリ秒ずらす (過去データを「今」の出来事として再生するため)。
-    pub fn shift_times(&mut self, delta_ms: i64) {
-        let shift_ms = |v: &mut Option<i64>| *v = v.map(|t| t + delta_ms);
+    /// 過去データを「今」の出来事として再生するために時刻をずらす。
+    /// 発表時刻は issued_delta_ms、発生時刻と到達予想時刻は origin_delta_ms だけずらす
+    /// (再生で待ち時間を詰めても、同じ地震の情報どうしで発生時刻がそろうように分けてある)。
+    pub fn shift_times(&mut self, issued_delta_ms: i64, origin_delta_ms: i64) {
+        let shift_origin = |s: &str| jst::shift_str(s, origin_delta_ms);
+        let shift_origin_ms = |v: &mut Option<i64>| *v = v.map(|t| t + origin_delta_ms);
         match &mut self.body {
             EventBody::Quake(q) => {
-                q.origin_time = jst::shift_str(&q.origin_time, delta_ms);
-                q.issued_at = jst::shift_str(&q.issued_at, delta_ms);
-                shift_ms(&mut q.origin_time_ms);
+                q.origin_time = shift_origin(&q.origin_time);
+                q.issued_at = jst::shift_str(&q.issued_at, issued_delta_ms);
+                shift_origin_ms(&mut q.origin_time_ms);
             }
             EventBody::Eew(e) => {
-                e.issued_at = jst::shift_str(&e.issued_at, delta_ms);
-                e.origin_time = e.origin_time.as_deref().map(|t| jst::shift_str(t, delta_ms));
-                shift_ms(&mut e.origin_time_ms);
+                e.issued_at = jst::shift_str(&e.issued_at, issued_delta_ms);
+                e.origin_time = e.origin_time.as_deref().map(shift_origin);
+                shift_origin_ms(&mut e.origin_time_ms);
                 for a in &mut e.areas {
-                    a.arrival_time = a.arrival_time.as_deref().map(|t| jst::shift_str(t, delta_ms));
+                    a.arrival_time = a.arrival_time.as_deref().map(shift_origin);
                 }
             }
-            EventBody::Tsunami(t) => t.issued_at = jst::shift_str(&t.issued_at, delta_ms),
+            EventBody::Tsunami(t) => t.issued_at = jst::shift_str(&t.issued_at, issued_delta_ms),
             EventBody::EewDetection(_) => {}
         }
     }

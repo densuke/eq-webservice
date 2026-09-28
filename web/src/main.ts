@@ -113,6 +113,28 @@ function renderFollow(): void {
 
 // ---------- 詳細 ----------
 
+/** 津波予報などに対応する地震 (その情報より前に届いた直近の地震情報・EEW) */
+function relatedQuake(g: Group): Group | undefined {
+  if (g.kind === "quake" || g.kind === "eew") return g;
+  return store.list().find((q) => (q.kind === "quake" || q.kind === "eew") && q.updatedAt <= g.updatedAt);
+}
+
+/** 地図の塗り分けと震央 */
+function paintMap(g: Group | undefined): void {
+  if (g?.kind === "quake") {
+    const q = summarizeQuake(g);
+    map.setPrefScales(q.prefMax);
+    map.setEpicenter(q.hypocenter?.latitude ?? null, q.hypocenter?.longitude ?? null);
+  } else if (g?.kind === "eew") {
+    const e = latestEew(g);
+    map.setPrefScales(e.cancelled ? [] : e.pref_max, true);
+    map.setEpicenter(e.hypocenter?.latitude ?? null, e.hypocenter?.longitude ?? null);
+  } else {
+    map.setPrefScales([]);
+    map.setEpicenter(null, null);
+  }
+}
+
 function currentGroup(): Group | undefined {
   if (selectedKey) return store.get(selectedKey);
   return store.list().find((g) => g.kind === "quake" || g.kind === "eew" || g.kind === "tsunami");
@@ -121,16 +143,13 @@ function currentGroup(): Group | undefined {
 function renderDetail(): void {
   const g = currentGroup();
   const box = $("#detail");
+  paintMap(g && relatedQuake(g));
   if (!g) {
     box.innerHTML = `<p class="muted">受信した情報はまだありません。</p>`;
-    map.setPrefScales([]);
-    map.setEpicenter(null, null);
     return;
   }
   if (g.kind === "quake") {
     const q = summarizeQuake(g);
-    map.setPrefScales(q.prefMax);
-    map.setEpicenter(q.hypocenter?.latitude ?? null, q.hypocenter?.longitude ?? null);
     // 震度の大きい順に観測点をまとめる
     const byScale = new Map<Scale, Map<string, string[]>>();
     for (const p of q.points) {
@@ -159,8 +178,6 @@ function renderDetail(): void {
         .join("")}</div>`;
   } else if (g.kind === "eew") {
     const e = latestEew(g);
-    map.setPrefScales(e.cancelled ? [] : e.pref_max, true);
-    map.setEpicenter(e.hypocenter?.latitude ?? null, e.hypocenter?.longitude ?? null);
     box.innerHTML = `
       <div class="detail-head">${badge(e.max_scale, true)}
         <div><div class="detail-kind eew-title">緊急地震速報 (警報)${e.test ? " [テスト]" : ""} 第${esc(e.serial)}報</div>
@@ -177,8 +194,6 @@ function renderDetail(): void {
         .join("")}</div>`;
   } else if (g.kind === "tsunami") {
     const t = g.events[0] as TsunamiEvent;
-    map.setPrefScales([]);
-    map.setEpicenter(null, null);
     box.innerHTML = `<div class="detail-head"><span class="badge big tsunami ${t.areas[0]?.grade ?? "unknown"}">津</span>
       <div><div class="detail-kind">津波予報</div><div class="detail-title">${t.cancelled ? "解除" : GRADE_LABEL[t.areas[0]?.grade ?? "unknown"]}</div>
       <div class="detail-sub">${esc(t.issued_at)} 発表</div></div></div>
@@ -250,7 +265,7 @@ interface Scene {
 function scene(now: number): Scene | null {
   if (selectedKey) {
     const g = store.get(selectedKey);
-    const geo = g && geoOf(g);
+    const geo = g && relatedQuake(g) && geoOf(relatedQuake(g)!);
     if (!geo) return null;
     return { center: geo.center, t: ((now - selectedAt) / 1000) * REPLAY_SPEED, shaken: map.prefBox(geo.prefs), replay: true };
   }
@@ -291,6 +306,7 @@ function renderBanner(now: number): void {
 }
 
 let raf = 0;
+let lastPip = -1;
 let timer = 0;
 function tick(): void {
   cancelAnimationFrame(raf);
@@ -300,7 +316,12 @@ function tick(): void {
   $("#clock-date").textContent = d.toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo" });
   $("#clock-time").textContent = d.toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour12: false });
   renderBanner(now);
-  const { box, waving } = renderScene(scene(now));
+  const sc = scene(now);
+  const { box, waving } = renderScene(sc);
+  // 波の広がり中 (ライブのみ) は 2 秒ごとに短い音で警戒中を知らせる
+  const pip = waving && !sc!.replay ? Math.floor(sc!.t! / 2) : -1;
+  if (pip > lastPip) play("pip");
+  lastPip = pip;
   if (!waving) {
     map.setWaves(null, null, null);
     $("#wave-info").textContent = "";
@@ -316,7 +337,7 @@ function tick(): void {
 // ---------- イベント受信 ----------
 
 function onEvents(events: EqEvent[], live: boolean): void {
-  const rank: Record<AlertLevel, number> = { low: 1, medium: 2, strong: 3 };
+  const rank: Record<AlertLevel, number> = { info: 0, low: 1, medium: 2, strong: 3 };
   let alert: AlertLevel | null = null;
   for (const e of events) {
     const g = store.add(e);

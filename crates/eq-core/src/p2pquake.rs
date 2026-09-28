@@ -481,6 +481,19 @@ mod tests {
     }
 
     #[test]
+    fn shifts_issued_and_origin_times_separately() {
+        let mut ev = parse(QUAKE).unwrap().unwrap();
+        let issued = ev.issued_at_ms().unwrap();
+        let EventBody::Quake(q) = &ev.body else { panic!() };
+        let origin = q.origin_time_ms.unwrap();
+        ev.shift_times(1_000, 60_000);
+        assert_eq!(ev.issued_at_ms(), Some(issued + 1_000));
+        let EventBody::Quake(q) = &ev.body else { panic!() };
+        assert_eq!(q.origin_time_ms, Some(origin + 60_000));
+        assert_eq!(q.origin_time, "2026/09/28 16:25:00");
+    }
+
+    #[test]
     fn roundtrips_normalized_json() {
         let ev = parse(QUAKE).unwrap().unwrap();
         let s = serde_json::to_string(&ev).unwrap();
