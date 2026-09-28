@@ -7,13 +7,15 @@ export interface Marker {
   label: number;
   scale: number;
   primary: boolean;
+  /** 地震のグループのキー (印を押したときに選ぶ) */
+  key?: string;
 }
 
 export interface Cluster {
   x: number;
   y: number;
   primary: boolean;
-  labels: { label: number; scale: number }[];
+  labels: { label: number; scale: number; key?: string }[];
 }
 
 /** dist (地図座標) より近い印をまとめる。先に置いた印を基準に、近いものを吸収していく */
@@ -29,7 +31,7 @@ export function clusterMarkers(markers: Marker[], dist: number): Cluster[] {
     x: anchor.x,
     y: anchor.y,
     primary: members.some((m) => m.primary),
-    labels: members.map((m) => ({ label: m.label, scale: m.scale })).sort((a, b) => a.label - b.label),
+    labels: members.map((m) => ({ label: m.label, scale: m.scale, key: m.key })).sort((a, b) => a.label - b.label),
   }));
 }
 

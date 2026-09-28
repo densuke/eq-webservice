@@ -200,6 +200,8 @@ body {
   background: rgba(90, 10, 16, 0.92); border: 2px solid #f85149; border-radius: 8px; padding: 6px 14px;
   font-weight: 700; text-align: center; white-space: nowrap;
 }
+/* 全体図で南西諸島の別枠が出ているときは、その下に置く */
+.map-wrap:has(.inset-okinawa:not([hidden])) .countdown { top: 172px; }
 .countdown .cd-sec { font-size: 28px; font-variant-numeric: tabular-nums; }
 .countdown .cd-sub { font-size: 11px; font-weight: 400; color: #ffb3ad; }
 .countdown.arrived { border-color: #d29922; background: rgba(60, 40, 5, 0.92); }

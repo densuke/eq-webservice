@@ -124,6 +124,8 @@ export class JapanMap {
   private lastFrame = 0;
   /** 利用者が手で動かしたら自動カメラを止める */
   userMoved = false;
+  /** 「全体図」のように、自動カメラを止めたうえで決まった表示へ動かしている */
+  private manual = false;
 
   constructor(container: HTMLElement) {
     this.svg = el("svg", { class: "map", preserveAspectRatio: "xMidYMid meet" });
@@ -431,6 +433,12 @@ export class JapanMap {
       .sort((a, b) => Number(a.primary) - Number(b.primary))
       .map(({ x, y, primary, labels }) => {
         const g = el("g", { class: primary ? "epicenter" : "epicenter sub" });
+        // 押したら、まとめた中で揺れの大きい地震を選ぶ
+        const key = [...labels].sort((a, b) => b.scale - a.scale)[0]?.key;
+        if (key) {
+          g.dataset.key = key;
+          g.append(el("circle", { r: 16, class: "epicenter-hit" }));
+        }
         g.dataset.x = String(x);
         g.dataset.y = String(y);
         g.dataset.k = primary ? "1" : "0.65";
@@ -500,6 +508,19 @@ export class JapanMap {
   /** 自動カメラに戻す */
   release(): void {
     this.userMoved = false;
+    this.manual = false;
+  }
+
+  /** 日本全体を表示する (自動カメラは止める。release() で戻る) */
+  showOverview(): void {
+    this.userMoved = true;
+    this.manual = true;
+    this.target = this.homeView();
+    if (!this.moving) {
+      this.moving = true;
+      this.lastFrame = performance.now();
+      requestAnimationFrame(this.step);
+    }
   }
 
   /** 都道府県の外接矩形 (地図座標) */
@@ -515,7 +536,7 @@ export class JapanMap {
   /** 目標へ指数的に近づける (目標が毎フレーム動いても滑らかに追う) */
   private step = (now: number): void => {
     const target = this.target;
-    if (this.userMoved || !target) {
+    if ((this.userMoved && !this.manual) || !target) {
       this.moving = false;
       return;
     }
@@ -693,6 +714,7 @@ export class JapanMap {
       (e) => {
         e.preventDefault();
         this.userMoved = true;
+        this.manual = false;
         this.zoomAt(e.clientX, e.clientY, Math.exp(e.deltaY * 0.0015));
       },
       { passive: false },
@@ -709,6 +731,7 @@ export class JapanMap {
       const prev = pointers.get(e.pointerId);
       if (!prev) return;
       this.userMoved = true;
+        this.manual = false;
       if (pointers.size === 1) {
         const k = this.unitsPerPixel();
         this.view.x -= (e.clientX - prev.x) * k;
@@ -735,6 +758,10 @@ export class JapanMap {
         this.picking = null;
         this.svg.classList.remove("picking");
         cb(unproject(mx, my));
+      } else if (e.type === "pointerup" && downAt && Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) < 6) {
+        // 震央の印を押したらその地震を選ぶ (地図が指を捕まえているので、位置から要素を探す)
+        const key = document.elementFromPoint(e.clientX, e.clientY)?.closest<SVGElement>(".epicenter[data-key]")?.dataset.key;
+        if (key) this.onSelect?.(key);
       }
       downAt = null;
     };

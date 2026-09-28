@@ -156,6 +156,11 @@ $("#list").addEventListener("click", (e) => {
 // 画面外の地震の矢印からも選べる
 map.onSelect = select;
 
+// 全体図: 日本全体を表示する。震央を押すとその地震へ寄る (「リアルタイムに戻る」で自動に戻る)
+$("#overview").addEventListener("click", () => {
+  map.showOverview();
+  renderMode();
+});
 // 観測点の一覧を自分で開閉したら、その地震は自動で畳まない
 $("#detail").addEventListener("click", (e) => {
   const summary = (e.target as HTMLElement).closest("summary");

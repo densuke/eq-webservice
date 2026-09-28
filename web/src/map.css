@@ -23,6 +23,8 @@
 .home-marker { pointer-events: none; }
 .home-ring { fill: none; stroke: #fff; stroke-width: 2.5; }
 .home-dot { fill: #58a6ff; stroke: #fff; stroke-width: 1.5; }
+.epicenter[data-key] { cursor: pointer; }
+.epicenter-hit { fill: transparent; stroke: none; pointer-events: all; }
 .epicenter-x { stroke: #ff1744; stroke-width: 4; stroke-linecap: round; fill: none; }
 .epicenter-x-bg { stroke: #fff; stroke-width: 8; stroke-linecap: round; fill: none; }
 .epicenter.sub { opacity: 0.8; }
