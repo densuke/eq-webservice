@@ -300,7 +300,8 @@ function waveSources(now: number): WaveSource[] {
   for (const g of [...groups.filter((g) => g.kind === "eew"), ...groups.filter((g) => g.kind === "quake")]) {
     const geo = geoOf(g);
     if (!geo?.center || geo.origin == null || now - geo.origin > WAVE_MAX_SEC * 1000) continue;
-    if (out.some((s) => sameQuake(groupPlace(s.group), groupPlace(g)))) continue;
+    // EEW どうしは event_id で別の地震と分かっているので、重ねて消すのは地震情報だけ
+    if (g.kind === "quake" && out.some((s) => s.group.kind === "eew" && sameQuake(groupPlace(s.group), groupPlace(g)))) continue;
     out.push({ ...geo.center, origin: geo.origin, group: g });
   }
   return out
