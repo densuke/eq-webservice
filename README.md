@@ -22,6 +22,7 @@ Wolfx EEW (wss, 任意)─┘
 | `samples/` | 地震が起きていないときの確認用デモデータと設定 |
 | `tools/simplify_geojson.py` | 都道府県境界データを軽量化するスクリプト |
 | `tools/tsunami_areas.py` | 津波予報区の沿岸線データを軽量化するスクリプト |
+| `tools/neighbors.py` | 周辺国の陸地 (背景) を切り出して軽量化するスクリプト |
 | `tools/jma_areas.py` | 地震情報細分区域の境界と、震度観測点の位置 (属する細分区域つき) を作るスクリプト |
 
 ### 扱う情報
@@ -168,5 +169,6 @@ GitHub Actions（`.github/workflows/ci.yml`）で次をビルド・テストし�
 - 地図: 地球地図日本（国土地理院）を [dataofjapan/land](https://github.com/dataofjapan/land) 経由で加工。
   営利目的で使う場合は、国土地理院の利用規約に従って利用報告が必要です。
 - 津波予報区・地震情報細分区域: [気象庁「予報区等GISデータ」](https://www.data.jma.go.jp/developer/gis.html)を加工して作成
+- 周辺国の陸地: [Natural Earth](https://www.naturalearthdata.com/)（パブリックドメイン）を加工
 - 震度観測点の位置: [気象庁の震度観測点の一覧](https://www.data.jma.go.jp/eqev/data/intens-st/)を加工して作成
 - ソースコード: GPL-3.0-or-later（[LICENSE](LICENSE)）

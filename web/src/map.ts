@@ -59,6 +59,7 @@ function ringPath(coords: [number, number][]): string {
 
 export class JapanMap {
   readonly svg: SVGSVGElement;
+  private neighborLayer = el("g", { class: "neighbors" });
   private prefLayer = el("g", { class: "prefs" });
   private areaLayer = el("g", { class: "areas" });
   private dotLayer = el("g", { class: "dots" });
@@ -91,7 +92,7 @@ export class JapanMap {
 
   constructor(container: HTMLElement) {
     this.svg = el("svg", { class: "map", preserveAspectRatio: "xMidYMid meet" });
-    this.svg.append(this.prefLayer, this.areaLayer, this.tsunamiLayer, this.waveLayer, this.dotLayer, this.markerLayer);
+    this.svg.append(this.neighborLayer, this.prefLayer, this.areaLayer, this.tsunamiLayer, this.waveLayer, this.dotLayer, this.markerLayer);
     this.waveLayer.append(this.sWave, this.pWave);
     this.offscreen.className = "offscreen-layer";
     this.offscreen.addEventListener("click", (e) => {
@@ -107,6 +108,11 @@ export class JapanMap {
 
   async load(url: string): Promise<void> {
     await this.loadPolygons(url, "pref", this.prefLayer, this.prefs);
+  }
+
+  /** 周辺国の陸地 (観測範囲外。背景として描くだけ) */
+  async loadNeighbors(url: string): Promise<void> {
+    await this.loadPolygons(url, "neighbor", this.neighborLayer, new Map());
   }
 
   /** 地震情報細分区域 (寄ったときに使う) */

@@ -649,6 +649,7 @@ Promise.all([
   map.loadTsunami("tsunami.geojson").catch(() => {}),
   // 無ければ寄っても都道府県で塗る
   map.loadAreas("areas.geojson").catch(() => {}),
+  map.loadNeighbors("neighbors.geojson").catch(() => {}),
   loadStations().catch(() => {}),
 ])
   .catch((err) => {
