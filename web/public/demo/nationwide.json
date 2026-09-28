@@ -362,6 +362,408 @@
         }
       ],
       "comment": "全国同時多発の確認用"
+    },
+    {
+      "id": "na-q-0-d",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "quake",
+      "info_type": "detail_scale",
+      "origin_time": "2026/01/01 12:00:00",
+      "origin_time_ms": 1767236400000,
+      "issued_at": "2026/01/01 12:02:10",
+      "hypocenter": {
+        "name": "宮城県沖",
+        "latitude": 38.3,
+        "longitude": 142.0,
+        "depth_km": 40,
+        "magnitude": 6.8
+      },
+      "max_scale": 50,
+      "domestic_tsunami": "None",
+      "points": [
+        {
+          "pref": "宮城県",
+          "addr": "気仙沼市赤岩",
+          "is_area": false,
+          "scale": 50
+        },
+        {
+          "pref": "宮城県",
+          "addr": "登米市東和町",
+          "is_area": false,
+          "scale": 45
+        },
+        {
+          "pref": "宮城県",
+          "addr": "大崎市田尻",
+          "is_area": false,
+          "scale": 40
+        },
+        {
+          "pref": "岩手県",
+          "addr": "大船渡市大船渡町",
+          "is_area": false,
+          "scale": 45
+        },
+        {
+          "pref": "岩手県",
+          "addr": "釜石市只越町",
+          "is_area": false,
+          "scale": 40
+        },
+        {
+          "pref": "岩手県",
+          "addr": "大槌町上町",
+          "is_area": false,
+          "scale": 30
+        },
+        {
+          "pref": "福島県",
+          "addr": "福島市花園町",
+          "is_area": false,
+          "scale": 40
+        },
+        {
+          "pref": "福島県",
+          "addr": "泉崎村泉崎",
+          "is_area": false,
+          "scale": 30
+        },
+        {
+          "pref": "福島県",
+          "addr": "本宮市白岩",
+          "is_area": false,
+          "scale": 20
+        },
+        {
+          "pref": "山形県",
+          "addr": "山形市緑町",
+          "is_area": false,
+          "scale": 30
+        },
+        {
+          "pref": "山形県",
+          "addr": "山辺町緑ケ丘",
+          "is_area": false,
+          "scale": 20
+        },
+        {
+          "pref": "山形県",
+          "addr": "大石田町緑町",
+          "is_area": false,
+          "scale": 10
+        },
+        {
+          "pref": "秋田県",
+          "addr": "横手市雄物川町今宿",
+          "is_area": false,
+          "scale": 20
+        },
+        {
+          "pref": "秋田県",
+          "addr": "東成瀬村田子内",
+          "is_area": false,
+          "scale": 10
+        },
+        {
+          "pref": "秋田県",
+          "addr": "仙北市西木町上荒井",
+          "is_area": false,
+          "scale": 10
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "宮城県",
+          "scale": 50
+        },
+        {
+          "pref": "岩手県",
+          "scale": 45
+        },
+        {
+          "pref": "福島県",
+          "scale": 40
+        },
+        {
+          "pref": "山形県",
+          "scale": 30
+        },
+        {
+          "pref": "秋田県",
+          "scale": 20
+        }
+      ],
+      "comment": ""
+    },
+    {
+      "id": "na-q-1-d",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "quake",
+      "info_type": "detail_scale",
+      "origin_time": "2026/01/01 12:00:00",
+      "origin_time_ms": 1767236400000,
+      "issued_at": "2026/01/01 12:02:16",
+      "hypocenter": {
+        "name": "石川県能登地方",
+        "latitude": 37.5,
+        "longitude": 137.2,
+        "depth_km": 10,
+        "magnitude": 7.0
+      },
+      "max_scale": 60,
+      "domestic_tsunami": "None",
+      "points": [
+        {
+          "pref": "石川県",
+          "addr": "七尾市本府中町",
+          "is_area": false,
+          "scale": 60
+        },
+        {
+          "pref": "石川県",
+          "addr": "羽咋市旭町",
+          "is_area": false,
+          "scale": 55
+        },
+        {
+          "pref": "石川県",
+          "addr": "能登町松波",
+          "is_area": false,
+          "scale": 50
+        },
+        {
+          "pref": "富山県",
+          "addr": "富山市石坂",
+          "is_area": false,
+          "scale": 50
+        },
+        {
+          "pref": "富山県",
+          "addr": "滑川市寺家町",
+          "is_area": false,
+          "scale": 45
+        },
+        {
+          "pref": "富山県",
+          "addr": "富山朝日町境",
+          "is_area": false,
+          "scale": 40
+        },
+        {
+          "pref": "新潟県",
+          "addr": "糸魚川市一の宮",
+          "is_area": false,
+          "scale": 45
+        },
+        {
+          "pref": "新潟県",
+          "addr": "上越市頸城区百間町",
+          "is_area": false,
+          "scale": 40
+        },
+        {
+          "pref": "新潟県",
+          "addr": "妙高市田口",
+          "is_area": false,
+          "scale": 30
+        },
+        {
+          "pref": "福井県",
+          "addr": "福井市豊島",
+          "is_area": false,
+          "scale": 30
+        },
+        {
+          "pref": "福井県",
+          "addr": "越前町織田",
+          "is_area": false,
+          "scale": 20
+        },
+        {
+          "pref": "福井県",
+          "addr": "福井坂井市春江町随応寺",
+          "is_area": false,
+          "scale": 10
+        },
+        {
+          "pref": "岐阜県",
+          "addr": "高山市丹生川町森部",
+          "is_area": false,
+          "scale": 30
+        },
+        {
+          "pref": "岐阜県",
+          "addr": "白川村鳩谷",
+          "is_area": false,
+          "scale": 20
+        },
+        {
+          "pref": "岐阜県",
+          "addr": "下呂市萩原町",
+          "is_area": false,
+          "scale": 10
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "石川県",
+          "scale": 60
+        },
+        {
+          "pref": "富山県",
+          "scale": 50
+        },
+        {
+          "pref": "新潟県",
+          "scale": 45
+        },
+        {
+          "pref": "福井県",
+          "scale": 30
+        },
+        {
+          "pref": "岐阜県",
+          "scale": 30
+        }
+      ],
+      "comment": ""
+    },
+    {
+      "id": "na-q-2-d",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "quake",
+      "info_type": "detail_scale",
+      "origin_time": "2026/01/01 12:00:00",
+      "origin_time_ms": 1767236400000,
+      "issued_at": "2026/01/01 12:02:22",
+      "hypocenter": {
+        "name": "熊本県熊本地方",
+        "latitude": 32.7,
+        "longitude": 130.8,
+        "depth_km": 10,
+        "magnitude": 6.5
+      },
+      "max_scale": 55,
+      "domestic_tsunami": "None",
+      "points": [
+        {
+          "pref": "熊本県",
+          "addr": "八代市平山新町",
+          "is_area": false,
+          "scale": 55
+        },
+        {
+          "pref": "熊本県",
+          "addr": "大津町大津",
+          "is_area": false,
+          "scale": 50
+        },
+        {
+          "pref": "熊本県",
+          "addr": "熊本北区植木町",
+          "is_area": false,
+          "scale": 45
+        },
+        {
+          "pref": "大分県",
+          "addr": "日田市中津江村合瀬",
+          "is_area": false,
+          "scale": 40
+        },
+        {
+          "pref": "大分県",
+          "addr": "竹田市竹田小学校",
+          "is_area": false,
+          "scale": 30
+        },
+        {
+          "pref": "大分県",
+          "addr": "玖珠町帆足",
+          "is_area": false,
+          "scale": 20
+        },
+        {
+          "pref": "宮崎県",
+          "addr": "延岡市天神小路",
+          "is_area": false,
+          "scale": 30
+        },
+        {
+          "pref": "宮崎県",
+          "addr": "日向市東郷町山陰",
+          "is_area": false,
+          "scale": 20
+        },
+        {
+          "pref": "宮崎県",
+          "addr": "木城町高城",
+          "is_area": false,
+          "scale": 10
+        },
+        {
+          "pref": "福岡県",
+          "addr": "大牟田市笹林",
+          "is_area": false,
+          "scale": 30
+        },
+        {
+          "pref": "福岡県",
+          "addr": "筑後市山ノ井",
+          "is_area": false,
+          "scale": 20
+        },
+        {
+          "pref": "福岡県",
+          "addr": "みやま市高田町",
+          "is_area": false,
+          "scale": 10
+        },
+        {
+          "pref": "佐賀県",
+          "addr": "佐賀市駅前中央",
+          "is_area": false,
+          "scale": 20
+        },
+        {
+          "pref": "佐賀県",
+          "addr": "江北町山口",
+          "is_area": false,
+          "scale": 10
+        },
+        {
+          "pref": "佐賀県",
+          "addr": "神埼市神埼",
+          "is_area": false,
+          "scale": 10
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "熊本県",
+          "scale": 55
+        },
+        {
+          "pref": "大分県",
+          "scale": 40
+        },
+        {
+          "pref": "宮崎県",
+          "scale": 30
+        },
+        {
+          "pref": "福岡県",
+          "scale": 30
+        },
+        {
+          "pref": "佐賀県",
+          "scale": 20
+        }
+      ],
+      "comment": ""
     }
   ]
 }
