@@ -53,6 +53,19 @@
             <option value="3">震度3以上</option>
           </select>
         </div>
+        <div class="settings-row"><b>観測点の一覧</b>
+          <select id="collapse-min">
+            <option value="0">最初から畳む</option>
+            <option value="5">最後の発表から5分で畳む</option>
+            <option value="10">最後の発表から10分で畳む</option>
+            <option value="30">最後の発表から30分で畳む</option>
+            <option value="60">最後の発表から60分で畳む</option>
+            <option value="-1">自動で畳まない</option>
+          </select>
+        </div>
+        <div class="settings-row"><b>離れた地震の巡回</b>
+          <select id="tour-sec"></select>
+        </div>
         <p id="settings-note" class="muted">地点と設定はこの端末の中だけに保存されます。通知はこの画面が裏にあるときに出ます。</p>
       </section>
       <section id="demo-panel" class="demo-panel" hidden>

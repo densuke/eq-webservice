@@ -15,7 +15,7 @@ import { $, map } from "./dom.ts";
 import { type World, app, hooks, liveWorld, now, now as serverNow } from "./state.ts";
 import { activeAreas, latestTsunami, tsunamiAlert } from "./tsunami.ts";
 import type { EewEvent, EqEvent } from "./types.ts";
-import { renderBanner, renderDetail, renderList, renderMode, renderTsunamiBanner } from "./view.ts";
+import { renderBanner, renderDetail, renderList, renderMode, renderTsunamiBanner, updatePointsOpen } from "./view.ts";
 
 /** この時間内に続けて届いた情報では、前より強い音のときだけ鳴らす */
 export const ALERT_MERGE_MS = 3000;
@@ -66,6 +66,7 @@ export function tick(): void {
   renderMode();
   renderSound();
   renderCountdown(now);
+  updatePointsOpen();
   // 波の表示中は滑らかに、そうでなければ時計の更新だけ
   if (waving) raf = requestAnimationFrame(tick);
   else timer = window.setTimeout(tick, 1000);
@@ -155,6 +156,12 @@ $("#list").addEventListener("click", (e) => {
 // 画面外の地震の矢印からも選べる
 map.onSelect = select;
 
+// 観測点の一覧を自分で開閉したら、その地震は自動で畳まない
+$("#detail").addEventListener("click", (e) => {
+  const summary = (e.target as HTMLElement).closest("summary");
+  const box = summary?.parentElement as HTMLDetailsElement | undefined;
+  if (box?.dataset.key) app.listOpen.set(box.dataset.key, !box.open);
+});
 $("#back-live").addEventListener("click", () => {
   if (app.demo) exitDemo();
   else {

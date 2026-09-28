@@ -150,6 +150,16 @@ body {
 .facts dt { color: var(--muted); }
 .facts dd { margin: 0; }
 .comment { font-size: 12px; color: var(--muted); white-space: pre-wrap; }
+/* 観測点の一覧 (要約を押すと開く) */
+.points-box { margin-top: 8px; }
+.points-box > summary { cursor: pointer; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; font-size: 13px; list-style: none; }
+.points-box > summary::-webkit-details-marker { display: none; }
+.points-box > summary .badge { min-width: 30px; height: 22px; font-size: 12px; margin-right: 3px; }
+.sum-item { display: inline-flex; align-items: center; }
+.sum-more { margin-left: auto; color: #58a6ff; font-size: 12px; }
+.sum-more::after { content: " ▼"; font-size: 10px; }
+.points-box[open] .sum-more::after { content: " ▲"; }
+.points-box[open] > .points { margin-top: 8px; }
 .points { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
 .point-row { display: flex; gap: 8px; align-items: flex-start; }
 .arrived { color: #ff7b72; font-size: 12px; }

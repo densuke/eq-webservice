@@ -2,7 +2,7 @@
 
 import { eewAreaScales, quakeDetail } from "./detail.ts";
 import { esc } from "./html.ts";
-import { type NotifyLevel, countdown, countdownWorthShowing, estimateIntensity, intensityToScale, loadSettings, nearestArea, notifyScale, saveSettings, shouldNotify } from "./personal.ts";
+import { type NotifyLevel, TOUR_CHOICES, countdown, countdownWorthShowing, estimateIntensity, intensityToScale, nearestArea, notifyScale, saveSettings, shouldNotify } from "./personal.ts";
 import { activeEews } from "./quakes.ts";
 import { scaleLabel } from "./scale.ts";
 import { $, map } from "./dom.ts";
@@ -10,7 +10,6 @@ import { app } from "./state.ts";
 import type { EqEvent } from "./types.ts";
 import { GRADE_LABEL } from "./view.ts";
 
-export let settings = loadSettings();
 
 /** 自分の地点が属する細分区域 (地点に最も近い震度観測点の区域) */
 export let homeArea: string | null = null;
@@ -19,20 +18,22 @@ export let homeArea: string | null = null;
 export const notified = new Map<string, number>();
 
 export function updateHome(): void {
-  homeArea = settings.home ? nearestArea(settings.home, app.stations) : null;
-  map.setHome(settings.home);
+  homeArea = app.settings.home ? nearestArea(app.settings.home, app.stations) : null;
+  map.setHome(app.settings.home);
   renderSettings();
 }
 
 export function renderSettings(): void {
-  const h = settings.home;
+  const h = app.settings.home;
   $("#home-label").textContent = h ? `${homeArea ?? "地点"} (北緯${h.lat.toFixed(2)} 東経${h.lon.toFixed(2)})` : "未設定";
-  $<HTMLSelectElement>("#notify-level").value = settings.notify;
+  $<HTMLSelectElement>("#notify-level").value = app.settings.notify;
+  $<HTMLSelectElement>("#collapse-min").value = String(app.settings.collapseMin);
+  $<HTMLSelectElement>("#tour-sec").value = String(app.settings.tourSec);
 }
 
-export function setSettings(next: typeof settings): void {
-  settings = next;
-  saveSettings(settings);
+export function setSettings(next: typeof app.settings): void {
+  app.settings = next;
+  saveSettings(app.settings);
   updateHome();
 }
 
@@ -66,7 +67,7 @@ export function notify(e: EqEvent): void {
     body = e.areas.map((a) => a.name).join("・");
   } else return;
   const homeScale = homeScaleOf(e);
-  if (!shouldNotify(settings.notify, { warning, maxScale, homeScale })) return;
+  if (!shouldNotify(app.settings.notify, { warning, maxScale, homeScale })) return;
   const key = app.world.store.list().find((g) => g.events.some((x) => x.id === e.id))?.key ?? e.id;
   const severity = Math.max(maxScale, homeScale ?? 0) + (warning ? 100 : 0);
   if ((notified.get(key) ?? -1) >= severity) return;
@@ -79,7 +80,7 @@ export function notify(e: EqEvent): void {
 /** 自分の地点に主要動が届くまで。緊急地震速報を受けている間だけ出す */
 export function renderCountdown(now: number): void {
   const el = $("#countdown");
-  const h = settings.home;
+  const h = app.settings.home;
   const cands = h
     ? activeEews(now).filter((e) => e.hypocenter?.latitude != null && e.hypocenter.longitude != null && e.origin_time_ms != null)
     : [];
@@ -116,24 +117,31 @@ $("#home-pick").addEventListener("click", () => {
   $("#settings-note").textContent = "地図をタップ (クリック) して、自分の地点を選んでください。";
   map.pickPoint((p) => {
     $("#settings-note").textContent = "地点と設定はこの端末の中だけに保存されます。通知はこの画面が裏にあるときに出ます。";
-    setSettings({ ...settings, home: p });
+    setSettings({ ...app.settings, home: p });
   });
 });
 
 $("#home-geo").addEventListener("click", () => {
   if (!navigator.geolocation) return;
   navigator.geolocation.getCurrentPosition(
-    (pos) => setSettings({ ...settings, home: { lat: pos.coords.latitude, lon: pos.coords.longitude } }),
+    (pos) => setSettings({ ...app.settings, home: { lat: pos.coords.latitude, lon: pos.coords.longitude } }),
     () => ($("#settings-note").textContent = "位置情報を取得できませんでした。地図で選んでください。"),
     { timeout: 10_000 },
   );
 });
 
-$("#home-clear").addEventListener("click", () => setSettings({ ...settings, home: null }));
+$("#home-clear").addEventListener("click", () => setSettings({ ...app.settings, home: null }));
 
 $("#notify-level").addEventListener("change", (e) => {
   const level = (e.target as HTMLSelectElement).value as NotifyLevel;
-  setSettings({ ...settings, notify: level });
+  setSettings({ ...app.settings, notify: level });
   // 通知を使うなら、この操作の中で許可を求める
   if (level !== "off" && "Notification" in window && Notification.permission === "default") void Notification.requestPermission();
 });
+
+// 巡回の間隔の選択肢 (5 秒刻み)
+$("#tour-sec").innerHTML = TOUR_CHOICES.map((s) => `<option value="${s}">${s === 0 ? "巡回しない" : `${s}秒ごと`}</option>`).join("");
+$("#collapse-min").addEventListener("change", (e) =>
+  setSettings({ ...app.settings, collapseMin: Number((e.target as HTMLSelectElement).value) }),
+);
+$("#tour-sec").addEventListener("change", (e) => setSettings({ ...app.settings, tourSec: Number((e.target as HTMLSelectElement).value) }));
