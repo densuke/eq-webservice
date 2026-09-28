@@ -107,6 +107,8 @@ git tag v0.1.0 && git push origin v0.1.0
 
 CI がビルド・テストのあと、両ターゲットの tar.gz と sha256 を GitHub Releases に添付します。
 `v0.2.0-rc1` のように `-` を含むタグはプレリリースになります。
+GitHub の画面の「Draft a new release」で新しいタグを作って公開しても構いません
+(CI が完了すると、そのリリースに tar.gz が追加されます)。
 
 ## リバースプロキシ (Caddy) の例
 
