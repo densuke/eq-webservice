@@ -52,6 +52,11 @@ export function project(lon: number, lat: number): [number, number] {
   return [(lon - LON0) * KX, -(lat - LAT0) * KY];
 }
 
+/** project の逆 (地図座標 → 経度・緯度) */
+export function unproject(x: number, y: number): { lat: number; lon: number } {
+  return { lon: x / KX + LON0, lat: LAT0 - y / KY };
+}
+
 function el<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number> = {}) {
   const e = document.createElementNS(SVG_NS, tag);
   for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v));
@@ -85,6 +90,10 @@ export class JapanMap {
   private areaScales = new Map<string, number>();
   private dotItems: { name: string; x: number; y: number; scale: number }[] = [];
   private tip = document.createElement("div");
+  /** 自分の地点の印 */
+  private home: SVGGElement | null = null;
+  /** 地図で地点を選ぶ間は、次のタップ (クリック) の位置を渡す */
+  private picking: ((p: { lat: number; lon: number }) => void) | null = null;
   private tsunamiAreas = new Map<string, { path: SVGPathElement; box: Box }>();
   /** 塗り分け中の都道府県と色 (薄くするときに使う) */
   private hitColors = new Map<string, string>();
@@ -510,9 +519,31 @@ export class JapanMap {
     return Math.max(this.view.w / r.width, this.view.h / r.height);
   }
 
+  /** 自分の地点の印。null で消す */
+  setHome(p: { lat: number; lon: number } | null): void {
+    this.home?.remove();
+    this.home = null;
+    if (!p) return;
+    const [x, y] = project(p.lon, p.lat);
+    const g = el("g", { class: "home-marker" });
+    g.dataset.x = String(x);
+    g.dataset.y = String(y);
+    g.dataset.k = "1";
+    g.append(el("circle", { r: 9, class: "home-ring" }), el("circle", { r: 3.5, class: "home-dot" }));
+    this.markerLayer.prepend(g);
+    this.home = g;
+    this.updateMarkerScale();
+  }
+
+  /** 次に地図をタップ (クリック) した位置を cb に渡す */
+  pickPoint(cb: (p: { lat: number; lon: number }) => void): void {
+    this.picking = cb;
+    this.svg.classList.add("picking");
+  }
+
   private updateMarkerScale(): void {
     const k = this.unitsPerPixel();
-    for (const g of this.epicenters) {
+    for (const g of this.home ? [...this.epicenters, this.home] : this.epicenters) {
       const { x, y, k: size } = g.dataset;
       g.setAttribute("transform", `translate(${x} ${y}) scale(${k * Number(size)})`);
     }
@@ -631,9 +662,20 @@ export class JapanMap {
         pinchDist = d;
       }
     });
+    let downAt: { x: number; y: number } | null = null;
+    this.svg.addEventListener("pointerdown", (e) => (downAt = { x: e.clientX, y: e.clientY }));
     const up = (e: PointerEvent) => {
       pointers.delete(e.pointerId);
       pinchDist = 0;
+      // 地点を選んでいる間は、動かさずに離した位置を渡す
+      if (this.picking && e.type === "pointerup" && downAt && Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) < 6) {
+        const [mx, my] = this.clientToMap(e.clientX, e.clientY);
+        const cb = this.picking;
+        this.picking = null;
+        this.svg.classList.remove("picking");
+        cb(unproject(mx, my));
+      }
+      downAt = null;
     };
     this.svg.addEventListener("pointerup", up);
     this.svg.addEventListener("pointercancel", up);

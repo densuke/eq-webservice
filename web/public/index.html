@@ -15,6 +15,7 @@
     <button id="back-live" class="back-live" type="button" hidden>リアルタイムに戻る</button>
     <span id="wave-info" class="wave-info"></span>
     <span id="telop" class="telop" aria-live="off"></span>
+    <button id="settings-open" class="follow" type="button" title="自分の地点と通知の設定">設定</button>
     <button id="demo-open" class="follow" type="button" title="いくつかの場面を再生して表示を確かめます">デモ</button>
     <button id="sound" class="follow" type="button" title="新しい地震情報で警戒音を鳴らします">音 OFF</button>
   </header>
@@ -22,6 +23,7 @@
   <div id="tsunami-banner" class="tsunami-banner" role="status" hidden></div>
   <main class="layout">
     <section id="map" class="map-wrap" aria-label="日本地図">
+      <div id="countdown" class="countdown" role="status" hidden></div>
       <button id="sound-hint" class="sound-hint" type="button" hidden>タップすると警戒音が鳴るようになります</button>
       <div id="clock" class="clock-panel" data-status="connecting" role="timer" aria-live="off">
         <div class="c-top"><span id="c-year" class="c-year"></span><span id="c-status" class="c-status">接続中</span></div>
@@ -36,6 +38,23 @@
       </div>
     </section>
     <aside class="side">
+      <section id="settings-panel" class="settings-panel" hidden>
+        <div class="settings-row"><b>自分の地点</b><span id="home-label" class="muted">未設定</span></div>
+        <div class="settings-actions">
+          <button id="home-pick" class="follow" type="button">地図で選ぶ</button>
+          <button id="home-geo" class="follow" type="button">現在地を使う</button>
+          <button id="home-clear" class="follow" type="button">解除</button>
+        </div>
+        <div class="settings-row"><b>通知</b>
+          <select id="notify-level">
+            <option value="off">通知しない</option>
+            <option value="warning">警報のみ</option>
+            <option value="4">震度4以上</option>
+            <option value="3">震度3以上</option>
+          </select>
+        </div>
+        <p id="settings-note" class="muted">地点と設定はこの端末の中だけに保存されます。通知はこの画面が裏にあるときに出ます。</p>
+      </section>
       <section id="demo-panel" class="demo-panel" hidden>
         <div class="demo-head"><b>デモモード</b> 実際の地震ではありません。場面を選んで実行してください</div>
         <ul id="demo-list" class="demo-list"></ul>

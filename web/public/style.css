@@ -176,6 +176,23 @@ body {
 .mode[data-mode="replay"] { background: #1f6feb; }
 .mode[data-mode="demo"] { background: #b35900; }
 .back-live { background: #1f6feb; border: 1px solid #58a6ff; color: #fff; border-radius: 999px; padding: 2px 10px; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+/* 自分の地点と通知の設定 */
+.settings-panel { padding: 10px 16px; border-bottom: 1px solid var(--line); background: #10202f; font-size: 13px; }
+.settings-row { display: flex; gap: 10px; align-items: center; margin: 4px 0; }
+.settings-actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 8px; }
+.settings-panel select { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 4px; padding: 2px 6px; font: inherit; }
+.settings-panel .muted { font-size: 11px; margin: 4px 0 0; }
+.map.picking { cursor: crosshair; }
+/* 自分の地点に主要動が届くまで (緊急地震速報を受けているとき) */
+.countdown {
+  position: absolute; left: 50%; top: 12px; transform: translateX(-50%); z-index: 2; pointer-events: none;
+  background: rgba(90, 10, 16, 0.92); border: 2px solid #f85149; border-radius: 8px; padding: 6px 14px;
+  font-weight: 700; text-align: center; white-space: nowrap;
+}
+.countdown .cd-sec { font-size: 28px; font-variant-numeric: tabular-nums; }
+.countdown .cd-sub { font-size: 11px; font-weight: 400; color: #ffb3ad; }
+.countdown.arrived { border-color: #d29922; background: rgba(60, 40, 5, 0.92); }
+
 /* デモモードの場面一覧 */
 .demo-panel { padding: 10px 16px; border-bottom: 1px solid var(--line); background: #2a1d0e; }
 .demo-head { font-size: 12px; color: #f0b36e; margin-bottom: 6px; }
