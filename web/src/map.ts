@@ -183,14 +183,17 @@ export class JapanMap {
     this.updateMarkerScale();
   }
 
-  /** P波・S波の到達範囲 (km)。null は非表示 */
-  setWaves(center: { lat: number; lon: number } | null, pKm: number | null, sKm: number | null): void {
-    const circle = (km: number | null) => {
-      if (!center || km == null || km <= 0) return "";
-      return ringPath(geoCircle(center.lat, center.lon, km));
-    };
-    this.pWave.setAttribute("d", circle(pKm));
-    this.sWave.setAttribute("d", circle(sKm));
+  /** P波・S波の到達範囲 (km)。複数の地震の円をまとめて描く。空配列で非表示 */
+  setWaves(waves: { lat: number; lon: number; pKm: number | null; sKm: number | null }[]): void {
+    const circles = (km: (w: (typeof waves)[number]) => number | null) =>
+      waves
+        .map((w) => {
+          const r = km(w);
+          return r != null && r > 0 ? ringPath(geoCircle(w.lat, w.lon, r)) : "";
+        })
+        .join("");
+    this.pWave.setAttribute("d", circles((w) => w.pKm));
+    this.sWave.setAttribute("d", circles((w) => w.sKm));
   }
 
   /** 自動カメラの目標。null は日本全体。利用者が手で動かしている間は何もしない */

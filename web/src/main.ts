@@ -9,11 +9,14 @@ import { activeAreas, latestTsunami, tsunamiAlert } from "./tsunami.ts";
 import type { EewEvent, EqEvent, Hypocenter, Scale, TsunamiEvent } from "./types.ts";
 import { play, setSoundEnabled, soundEnabled, soundReady, unlock } from "./sound.ts";
 import { surfaceRadiusKm, VP_KM_S, VS_KM_S } from "./waves.ts";
+import { byPriority, sameQuake, type Place } from "./priority.ts";
 
 /** 発生からこの秒数を過ぎたら P波・S波の表示を止める */
 const WAVE_MAX_SEC = 180;
 /** EEW 警報バナーを出し続ける時間 */
 const EEW_BANNER_MS = 3 * 60_000;
+/** この時間内に続けて届いた情報では、前より強い音のときだけ鳴らす */
+const ALERT_MERGE_MS = 3000;
 /** 履歴を選んだときの P波・S波の再生速度 */
 const REPLAY_SPEED = 3;
 
@@ -147,7 +150,7 @@ function displayedOriginMs(): number {
 
 function currentGroup(): Group | undefined {
   if (selectedKey) return store.get(selectedKey);
-  return store.list().find((g) => g.kind === "quake" || g.kind === "eew" || g.kind === "tsunami");
+  return priorityGroups(now())[0] ?? store.list().find((g) => g.kind === "quake" || g.kind === "eew" || g.kind === "tsunami");
 }
 
 function renderDetail(): void {
@@ -220,13 +223,46 @@ function renderDetail(): void {
 
 // ---------- 緊急地震速報のバナーと P波・S波 ----------
 
-function activeEew(now: number): EewEvent | null {
-  for (const g of store.list()) {
-    if (g.kind !== "eew") continue;
-    const e = latestEew(g);
-    if (!e.cancelled && now - e.received_at_ms < EEW_BANNER_MS) return e;
-  }
-  return null;
+function now(): number {
+  return conn ? conn.now() : Date.now();
+}
+
+/** バナーを出している EEW (新しい順) */
+function activeEews(now: number): EewEvent[] {
+  return store
+    .list()
+    .filter((g) => g.kind === "eew")
+    .map((g) => latestEew(g))
+    .filter((e) => !e.cancelled && now - e.received_at_ms < EEW_BANNER_MS);
+}
+
+function placeOf(origin: number | null, h: Hypocenter | null): Place {
+  return { originMs: origin, lat: h?.latitude ?? null, lon: h?.longitude ?? null };
+}
+
+function groupPlace(g: Group): Place {
+  const geo = geoOf(g);
+  return { originMs: geo?.origin ?? null, lat: geo?.center?.lat ?? null, lon: geo?.center?.lon ?? null };
+}
+
+function groupScale(g: Group): Scale {
+  if (g.kind === "quake") return summarizeQuake(g).maxScale;
+  if (g.kind === "eew") return latestEew(g).max_scale;
+  return -1;
+}
+
+/**
+ * 最近 (FULL_MS 以内) の地震を優先度順に。揺れの大きい方 (EEW は予測、地震情報は観測) が先、同じなら新しい方。
+ * 地震情報が届いた EEW はその地震情報に任せる (予測の震度で居座らないように)
+ */
+function priorityGroups(now: number): Group[] {
+  const recent = store.list().filter((g) => (g.kind === "quake" || g.kind === "eew") && geoOf(g) && now - g.updatedAt <= FULL_MS);
+  const quakes = recent.filter((g) => g.kind === "quake").map(groupPlace);
+  return recent
+    .filter((g) => g.kind === "quake" || !quakes.some((q) => sameQuake(groupPlace(g), q)))
+    .map((g) => ({ g, scale: groupScale(g), at: g.updatedAt }))
+    .sort(byPriority)
+    .map((c) => c.g);
 }
 
 interface Center {
@@ -252,19 +288,31 @@ function geoOf(g: Group): { center: Center | null; origin: number | null; prefs:
   return { center, origin, prefs };
 }
 
-/** P波・S波を描く対象 (直近の EEW、なければ直近の地震情報) */
-function waveSource(now: number): (Center & { origin: number }) | null {
-  for (const g of store.list()) {
+type WaveSource = Center & { origin: number; group: Group };
+
+/**
+ * P波・S波を描く地震 (優先度順)。同じ地震の EEW と地震情報は EEW を使う
+ * (地震情報の発生時刻は分単位なので、円が遅れて見える)
+ */
+function waveSources(now: number): WaveSource[] {
+  const out: WaveSource[] = [];
+  const groups = store.list().filter((g) => g.kind === "eew" || g.kind === "quake");
+  for (const g of [...groups.filter((g) => g.kind === "eew"), ...groups.filter((g) => g.kind === "quake")]) {
     const geo = geoOf(g);
-    if (!geo || geo.origin == null) continue;
-    if (now - geo.origin > WAVE_MAX_SEC * 1000) return null; // 新しい順なのでこれより前は不要
-    if (geo.center) return { ...geo.center, origin: geo.origin };
+    if (!geo?.center || geo.origin == null || now - geo.origin > WAVE_MAX_SEC * 1000) continue;
+    if (out.some((s) => sameQuake(groupPlace(s.group), groupPlace(g)))) continue;
+    out.push({ ...geo.center, origin: geo.origin, group: g });
   }
-  return null;
+  return out
+    .map((s) => ({ s, scale: groupScale(s.group), at: s.group.updatedAt }))
+    .sort(byPriority)
+    .map((c) => c.s);
 }
 
 interface Scene {
   center: Center | null;
+  /** カメラの対象以外で波を描く地震 (ライブで複数の地震が重なったとき) */
+  others: WaveSource[];
   /** 発生からの秒数。null なら波は描かない */
   t: number | null;
   shaken: Box | null;
@@ -277,17 +325,19 @@ function scene(now: number): Scene | null {
     const g = store.get(selectedKey);
     const geo = g && relatedQuake(g) && geoOf(relatedQuake(g)!);
     if (!geo) return null;
-    return { center: geo.center, t: ((now - selectedAt) / 1000) * REPLAY_SPEED, shaken: map.prefBox(geo.prefs), replay: true };
+    return { center: geo.center, others: [], t: ((now - selectedAt) / 1000) * REPLAY_SPEED, shaken: map.prefBox(geo.prefs), replay: true };
   }
-  const src = waveSource(now);
-  const g = store.list().find((g) => g.kind === "quake" || g.kind === "eew");
+  // カメラは揺れの大きい方に合わせる
+  const [src, ...others] = waveSources(now);
   // 波が終わったら、津波予報が出ていれば予報区全体を見せる
   const tsunamiBox = map.tsunamiBox(activeAreas(tsunami).map((a) => a.name));
-  if (!src && tsunamiBox) return { center: null, t: null, shaken: tsunamiBox, replay: false };
-  if (!src && (!g || now - g.updatedAt > FULL_MS)) return null;
-  const geo = g && geoOf(g);
+  if (!src && tsunamiBox) return { center: null, others: [], t: null, shaken: tsunamiBox, replay: false };
+  const g = src?.group ?? priorityGroups(now)[0];
+  if (!g) return null;
+  const geo = geoOf(g);
   return {
     center: src ?? geo?.center ?? null,
+    others,
     t: src ? (now - src.origin) / 1000 : null,
     shaken: geo ? map.prefBox(geo.prefs) : null,
     replay: false,
@@ -304,7 +354,8 @@ function renderScene(sc: Scene | null): { box: Box | null; waving: boolean } {
   // 再生は揺れた地域を覆い終えたら打ち切る (早回しでも 180 秒分は長い)
   const waving = sc.t != null && sc.t < WAVE_MAX_SEC && !(sc.replay && (s ?? 0) > stop);
   if (!waving) return { box: pad(union(sc.shaken, pointBox(x, y, 0))!), waving };
-  map.setWaves(c, surfaceRadiusKm(VP_KM_S, c.depth, sc.t!), s);
+  const wave = (w: Center, t: number) => ({ ...w, pKm: surfaceRadiusKm(VP_KM_S, w.depth, t), sKm: surfaceRadiusKm(VS_KM_S, w.depth, t) });
+  map.setWaves([wave(c, sc.t!), ...sc.others.map((o) => wave(o, (now() - o.origin) / 1000))]);
   $("#wave-info").textContent = sc.replay ? `再生中 ${sc.t!.toFixed(0)}秒 (×${REPLAY_SPEED})` : `発生から${sc.t!.toFixed(0)}秒`;
   return { box: pad(pointBox(x, y, followRadiusKm(s, stop))), waving };
 }
@@ -322,16 +373,22 @@ function renderTsunamiBanner(): void {
 }
 
 function renderBanner(now: number): void {
-  const e = activeEew(now);
+  const eews = activeEews(now);
   const banner = $("#eew-banner");
-  banner.hidden = !e;
-  if (!e) return;
-  const prefs = e.pref_max.map((p) => p.pref).join("・");
-  banner.innerHTML = `<b>${e.test ? "【テスト】" : ""}緊急地震速報 (警報)</b> ${esc(e.hypocenter?.name ?? "")} で地震 ・ 強い揺れに警戒: ${esc(prefs || "—")}`;
+  banner.hidden = eews.length === 0;
+  banner.innerHTML = eews
+    .map((e) => {
+      const prefs = e.pref_max.map((p) => p.pref).join("・");
+      return `<div><b>${e.test ? "【テスト】" : ""}緊急地震速報 (警報)</b> ${esc(e.hypocenter?.name ?? "")} で地震 ・ 強い揺れに警戒: ${esc(prefs || "—")}</div>`;
+    })
+    .join("");
 }
 
 let raf = 0;
 let lastPip = -1;
+let lastCurrentKey: string | undefined;
+/** 直前に鳴らした警戒音 (数秒以内に重なったら強い方だけ鳴らす) */
+let lastAlert = { level: "info" as AlertLevel, at: 0 };
 let timer = 0;
 function tick(): void {
   cancelAnimationFrame(raf);
@@ -343,12 +400,19 @@ function tick(): void {
   renderBanner(now);
   const sc = scene(now);
   const { box, waving } = renderScene(sc);
-  // 波の広がり中 (ライブのみ) は 2 秒ごとに短い音で警戒中を知らせる
-  const pip = waving && !sc!.replay ? Math.floor(sc!.t! / 2) : -1;
-  if (pip > lastPip) play("pip");
+  // 波の広がり中 (ライブのみ) は 2 秒ごとに短い音で警戒中を知らせる (地震が重なっても 1 本)
+  const pip = waving && !sc!.replay ? Math.floor(now / 2000) : -1;
+  if (pip > lastPip && lastPip !== -1) play("pip");
   lastPip = pip;
+  // 優先度は時間で入れ替わる (大きい方が古くなるなど) ので、表示中の地震が変わったら描き直す
+  const key = currentGroup()?.key;
+  if (key !== lastCurrentKey) {
+    lastCurrentKey = key;
+    renderList();
+    renderDetail();
+  }
   if (!waving) {
-    map.setWaves(null, null, null);
+    map.setWaves([]);
     $("#wave-info").textContent = "";
   }
   map.setTarget(box);
@@ -375,14 +439,20 @@ function onEvents(events: EqEvent[], live: boolean): void {
       if (lv && (!alert || rank[lv] > rank[alert])) alert = lv;
     }
     if (!live) continue;
-    const lv = alertLevel(e, g.events.length === 1, activeEew(conn.now()) !== null);
+    // その地震の EEW で既に鳴らしていれば、地震情報では鳴らさない
+    const eewActive =
+      e.kind === "quake" && activeEews(now()).some((x) => sameQuake(placeOf(x.origin_time_ms, x.hypocenter), placeOf(e.origin_time_ms, e.hypocenter)));
+    const lv = alertLevel(e, g.events.length === 1, eewActive);
     if (lv && (!alert || rank[lv] > rank[alert])) alert = lv;
   }
   renderList();
   renderDetail();
   map.setTsunami(activeAreas(tsunami));
   renderTsunamiBanner();
-  if (alert) play(alert);
+  if (alert && !(now() - lastAlert.at < ALERT_MERGE_MS && rank[alert] <= rank[lastAlert.level])) {
+    play(alert);
+    lastAlert = { level: alert, at: now() };
+  }
   tick();
 }
 
