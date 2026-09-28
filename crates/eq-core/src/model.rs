@@ -375,6 +375,6 @@ pub fn aggregate_pref_max<'a>(items: impl IntoIterator<Item = (&'a str, Scale)>)
             }),
         }
     }
-    out.sort_by(|a, b| b.scale.cmp(&a.scale));
+    out.sort_by_key(|p| std::cmp::Reverse(p.scale));
     out
 }

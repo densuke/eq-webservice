@@ -89,7 +89,7 @@ impl RssSink {
         if !changed {
             return Ok(());
         }
-        items.sort_by(|a, b| b.pub_date_ms.cmp(&a.pub_date_ms));
+        items.sort_by_key(|i| std::cmp::Reverse(i.pub_date_ms));
         items.truncate(self.cfg.max_items);
         let xml = render(&self.cfg, &items);
         if let Some(p) = &self.cfg.state_path {

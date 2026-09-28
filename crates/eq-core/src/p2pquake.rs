@@ -274,7 +274,7 @@ impl From<RawTsunami> for Tsunami {
                 max_height: a.max_height.and_then(|m| m.description),
             })
             .collect();
-        areas.sort_by(|a, b| b.grade.cmp(&a.grade));
+        areas.sort_by_key(|a| std::cmp::Reverse(a.grade));
         Tsunami {
             cancelled: r.cancelled,
             issued_at: r.issue.time,
