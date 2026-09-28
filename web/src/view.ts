@@ -91,13 +91,13 @@ export function renderList(): void {
 
 /** 今の表示モード (リアルタイム / リプレイ中 / デモモード中) と「リアルタイムに戻る」ボタン */
 export function renderMode(): void {
-  const mode = app.demo ? "demo" : app.selectedKey ? "replay" : "live";
+  const mode = app.demo ? "demo" : app.selectedKey ? "replay" : app.tourKey ? "tour" : "live";
   const el = $("#mode");
   if (el.dataset.mode !== mode) {
     el.dataset.mode = mode;
-    el.textContent = { live: "リアルタイム", replay: "リプレイ中", demo: "デモモード中" }[mode];
+    el.textContent = { live: "リアルタイム", replay: "リプレイ中", demo: "デモモード中", tour: "巡回中" }[mode];
   }
-  $("#back-live").hidden = mode === "live" && !map.userMoved;
+  $("#back-live").hidden = (mode === "live" || mode === "tour") && !map.userMoved;
   $("#demo-open").hidden = app.demo != null;
 }
 

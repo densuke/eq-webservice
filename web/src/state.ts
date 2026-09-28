@@ -49,6 +49,11 @@ export const app = {
   settings: loadSettings(),
   /** 利用者が観測点の一覧を自分で開閉した地震 (グループのキー → 開いているか) */
   listOpen: new Map<string, boolean>(),
+  /** 巡回を始めた時刻 (巡回していなければ null) と、今見せている地震 */
+  tourStart: null as number | null,
+  tourKey: null as string | null,
+  /** 新しく届いた地震をしばらく優先して見せる (巡回より先) */
+  tourHold: null as { key: string; until: number } | null,
 };
 
 /** main.ts にある処理。ほかのモジュールからはこれを通して呼ぶ (循環参照を避けるため) */
