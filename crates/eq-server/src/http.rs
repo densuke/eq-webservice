@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use axum::extract::ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
+use axum::http::{header, HeaderValue};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
@@ -18,6 +19,7 @@ use serde::Serialize;
 use tokio::sync::broadcast::error::RecvError;
 use tower_http::compression::CompressionLayer;
 use tower_http::services::ServeDir;
+use tower_http::set_header::SetResponseHeaderLayer;
 
 use crate::hub::{now_ms, Hub};
 
@@ -47,7 +49,12 @@ pub fn router(hub: Arc<Hub>, static_dir: &std::path::Path, extra: Vec<Router>) -
     if !static_dir.as_os_str().is_empty() {
         app = app.fallback_service(ServeDir::new(static_dir));
     }
-    app.layer(CompressionLayer::new())
+    // 更新後に古い app.js がブラウザに残らないよう、毎回更新を確認させる (変わっていなければ 304)
+    app.layer(SetResponseHeaderLayer::if_not_present(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("no-cache"),
+    ))
+    .layer(CompressionLayer::new())
 }
 
 async fn events_handler(State(hub): State<Arc<Hub>>) -> impl IntoResponse {
