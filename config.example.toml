@@ -1,0 +1,62 @@
+# eq-server 設定例。config.toml にコピーして使う。
+# 起動: eq-server --config config.toml
+
+[server]
+# Caddy などのリバースプロキシの裏に置く場合はループバックで待ち受ける
+listen = "127.0.0.1:8080"
+# フロントエンドのビルド成果物 (cd web && npm run build)
+static_dir = "web/dist"
+# ブラウザ接続時にまとめて送る直近イベント数
+recent_capacity = 200
+
+[source]
+type = "p2pquake"
+url = "wss://api.p2pquake.net/v2/ws"
+history_url = "https://api.p2pquake.net/v2/history"
+history_limit = 30
+
+# 地震が起きていないときの画面確認用: 記録データを「今」の時刻にずらして再生する
+# [source]
+# type = "replay"
+# path = "samples/demo.jsonl"
+# speed = 1.0
+# max_gap_ms = 10000
+# rebase_time = true
+# loop = true
+
+# ---- 配信先プラグイン ----
+# 共通キー: type (必須) / name / enabled / kinds / min_scale
+#   kinds     : "quake" (地震情報) / "eew" (緊急地震速報) / "eew_detection" / "tsunami"。省略ですべて
+#   min_scale : "1".."4", "5弱"(or "5-"), "5強", "6弱", "6強", "7"。地震情報・EEW にのみ効く
+
+# RSS: /feed.xml で配信し、再起動しても蓄積を引き継ぐ
+[[sinks]]
+type = "rss"
+kinds = ["quake", "tsunami"]
+route = "/feed.xml"
+state_path = "data/rss-state.json"
+# path = "data/feed.xml"   # ファイルにも書き出す場合
+title = "地震情報"
+link = "https://example.com/"
+max_items = 50
+
+# 受信した全イベントを JSON Lines で蓄積
+[[sinks]]
+type = "jsonl"
+path = "data/events.jsonl"
+
+# Discord Webhook (URL は環境変数から読む)
+[[sinks]]
+type = "discord"
+enabled = false
+kinds = ["quake", "eew", "tsunami"]
+min_scale = "3"
+webhook_url_env = "DISCORD_WEBHOOK_URL"
+username = "地震情報"
+
+# 任意の URL に正規化済み JSON を POST
+[[sinks]]
+type = "webhook"
+enabled = false
+url = "http://127.0.0.1:9000/hook"
+# headers = { Authorization = "Bearer xxx" }

@@ -1,0 +1,17 @@
+# デモ設定: 架空の地震 (samples/demo.jsonl) を「今」起きたものとして繰り返し再生する。
+#   cargo run -p eq-server -- --config samples/demo.toml
+[server]
+listen = "127.0.0.1:8080"
+static_dir = "web/dist"
+
+[source]
+type = "replay"
+path = "samples/demo.jsonl"
+speed = 1.0
+max_gap_ms = 8000
+rebase_time = true
+loop = true
+
+[[sinks]]
+type = "rss"
+kinds = ["quake", "tsunami"]
