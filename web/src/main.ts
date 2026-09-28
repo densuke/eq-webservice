@@ -191,7 +191,7 @@ $("#detail").addEventListener("click", (e) => {
   if (box?.dataset.key) app.listOpen.set(box.dataset.key, !box.open);
 });
 $("#back-live").addEventListener("click", () => {
-  if (app.demo) exitDemo();
+  if (app.demo && !app.selectedKey && !map.userMoved) exitDemo();
   else {
     app.selectedKey = null;
     map.release();

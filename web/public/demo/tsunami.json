@@ -169,6 +169,118 @@
           "max_height": "１ｍ"
         }
       ]
+    },
+    {
+      "id": "demo-ts-q1-d",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "quake",
+      "info_type": "detail_scale",
+      "origin_time": "2026/01/01 12:00:00",
+      "origin_time_ms": 1767236400000,
+      "issued_at": "2026/01/01 12:03:00",
+      "hypocenter": {
+        "name": "三陸沖",
+        "latitude": 39.0,
+        "longitude": 143.5,
+        "depth_km": 20,
+        "magnitude": 8.0
+      },
+      "max_scale": 60,
+      "domestic_tsunami": "Warning",
+      "points": [
+        {
+          "pref": "岩手県",
+          "addr": "大船渡市大船渡町",
+          "is_area": false,
+          "scale": 60
+        },
+        {
+          "pref": "岩手県",
+          "addr": "釜石市只越町",
+          "is_area": false,
+          "scale": 55
+        },
+        {
+          "pref": "岩手県",
+          "addr": "大槌町上町",
+          "is_area": false,
+          "scale": 50
+        },
+        {
+          "pref": "宮城県",
+          "addr": "気仙沼市赤岩",
+          "is_area": false,
+          "scale": 55
+        },
+        {
+          "pref": "宮城県",
+          "addr": "登米市東和町",
+          "is_area": false,
+          "scale": 50
+        },
+        {
+          "pref": "宮城県",
+          "addr": "大崎市田尻",
+          "is_area": false,
+          "scale": 45
+        },
+        {
+          "pref": "青森県",
+          "addr": "八戸市島守",
+          "is_area": false,
+          "scale": 50
+        },
+        {
+          "pref": "青森県",
+          "addr": "横浜町寺下",
+          "is_area": false,
+          "scale": 45
+        },
+        {
+          "pref": "青森県",
+          "addr": "おいらせ町上明堂",
+          "is_area": false,
+          "scale": 40
+        },
+        {
+          "pref": "福島県",
+          "addr": "いわき市小名浜",
+          "is_area": false,
+          "scale": 45
+        },
+        {
+          "pref": "福島県",
+          "addr": "大熊町野上",
+          "is_area": false,
+          "scale": 40
+        },
+        {
+          "pref": "福島県",
+          "addr": "南相馬市小高区",
+          "is_area": false,
+          "scale": 30
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "岩手県",
+          "scale": 60
+        },
+        {
+          "pref": "宮城県",
+          "scale": 55
+        },
+        {
+          "pref": "青森県",
+          "scale": 50
+        },
+        {
+          "pref": "福島県",
+          "scale": 45
+        }
+      ],
+      "comment": ""
     }
   ]
 }

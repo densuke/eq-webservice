@@ -200,6 +200,74 @@
       "comment": "負荷確認"
     },
     {
+      "id": "sw-q-0-d",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "quake",
+      "info_type": "detail_scale",
+      "origin_time": "2026/01/01 12:00:00",
+      "origin_time_ms": 1767236400000,
+      "issued_at": "2026/01/01 12:01:04",
+      "hypocenter": {
+        "name": "石川県能登地方",
+        "latitude": 37.3,
+        "longitude": 137.0,
+        "depth_km": 10,
+        "magnitude": 5.5
+      },
+      "max_scale": 55,
+      "domestic_tsunami": "None",
+      "points": [
+        {
+          "pref": "石川県",
+          "addr": "七尾市本府中町",
+          "is_area": false,
+          "scale": 55
+        },
+        {
+          "pref": "石川県",
+          "addr": "羽咋市旭町",
+          "is_area": false,
+          "scale": 50
+        },
+        {
+          "pref": "石川県",
+          "addr": "能登町松波",
+          "is_area": false,
+          "scale": 45
+        },
+        {
+          "pref": "富山県",
+          "addr": "富山市石坂",
+          "is_area": false,
+          "scale": 30
+        },
+        {
+          "pref": "富山県",
+          "addr": "滑川市寺家町",
+          "is_area": false,
+          "scale": 20
+        },
+        {
+          "pref": "富山県",
+          "addr": "富山朝日町境",
+          "is_area": false,
+          "scale": 10
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "石川県",
+          "scale": 55
+        },
+        {
+          "pref": "富山県",
+          "scale": 30
+        }
+      ],
+      "comment": ""
+    },
+    {
       "id": "sw-eew-4",
       "source": "p2pquake",
       "received_at_ms": 0,
@@ -280,6 +348,74 @@
         }
       ],
       "comment": "負荷確認"
+    },
+    {
+      "id": "sw-q-1-d",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "quake",
+      "info_type": "detail_scale",
+      "origin_time": "2026/01/01 12:00:00",
+      "origin_time_ms": 1767236400000,
+      "issued_at": "2026/01/01 12:01:19",
+      "hypocenter": {
+        "name": "石川県能登地方",
+        "latitude": 37.349999999999994,
+        "longitude": 137.05,
+        "depth_km": 10,
+        "magnitude": 5.5
+      },
+      "max_scale": 45,
+      "domestic_tsunami": "None",
+      "points": [
+        {
+          "pref": "石川県",
+          "addr": "七尾市本府中町",
+          "is_area": false,
+          "scale": 45
+        },
+        {
+          "pref": "石川県",
+          "addr": "羽咋市旭町",
+          "is_area": false,
+          "scale": 40
+        },
+        {
+          "pref": "石川県",
+          "addr": "能登町松波",
+          "is_area": false,
+          "scale": 30
+        },
+        {
+          "pref": "富山県",
+          "addr": "富山市石坂",
+          "is_area": false,
+          "scale": 30
+        },
+        {
+          "pref": "富山県",
+          "addr": "滑川市寺家町",
+          "is_area": false,
+          "scale": 20
+        },
+        {
+          "pref": "富山県",
+          "addr": "富山朝日町境",
+          "is_area": false,
+          "scale": 10
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "石川県",
+          "scale": 45
+        },
+        {
+          "pref": "富山県",
+          "scale": 30
+        }
+      ],
+      "comment": ""
     },
     {
       "id": "sw-eew-5",
@@ -364,6 +500,74 @@
       "comment": "負荷確認"
     },
     {
+      "id": "sw-q-2-d",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "quake",
+      "info_type": "detail_scale",
+      "origin_time": "2026/01/01 12:00:00",
+      "origin_time_ms": 1767236400000,
+      "issued_at": "2026/01/01 12:01:34",
+      "hypocenter": {
+        "name": "石川県能登地方",
+        "latitude": 37.4,
+        "longitude": 137.1,
+        "depth_km": 10,
+        "magnitude": 5.5
+      },
+      "max_scale": 50,
+      "domestic_tsunami": "None",
+      "points": [
+        {
+          "pref": "石川県",
+          "addr": "七尾市本府中町",
+          "is_area": false,
+          "scale": 50
+        },
+        {
+          "pref": "石川県",
+          "addr": "羽咋市旭町",
+          "is_area": false,
+          "scale": 45
+        },
+        {
+          "pref": "石川県",
+          "addr": "能登町松波",
+          "is_area": false,
+          "scale": 40
+        },
+        {
+          "pref": "富山県",
+          "addr": "富山市石坂",
+          "is_area": false,
+          "scale": 30
+        },
+        {
+          "pref": "富山県",
+          "addr": "滑川市寺家町",
+          "is_area": false,
+          "scale": 20
+        },
+        {
+          "pref": "富山県",
+          "addr": "富山朝日町境",
+          "is_area": false,
+          "scale": 10
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "石川県",
+          "scale": 50
+        },
+        {
+          "pref": "富山県",
+          "scale": 30
+        }
+      ],
+      "comment": ""
+    },
+    {
       "id": "sw-eew-6",
       "source": "p2pquake",
       "received_at_ms": 0,
@@ -444,6 +648,74 @@
         }
       ],
       "comment": "負荷確認"
+    },
+    {
+      "id": "sw-q-3-d",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "quake",
+      "info_type": "detail_scale",
+      "origin_time": "2026/01/01 12:00:00",
+      "origin_time_ms": 1767236400000,
+      "issued_at": "2026/01/01 12:01:49",
+      "hypocenter": {
+        "name": "石川県能登地方",
+        "latitude": 37.45,
+        "longitude": 137.15,
+        "depth_km": 10,
+        "magnitude": 5.5
+      },
+      "max_scale": 40,
+      "domestic_tsunami": "None",
+      "points": [
+        {
+          "pref": "石川県",
+          "addr": "七尾市本府中町",
+          "is_area": false,
+          "scale": 40
+        },
+        {
+          "pref": "石川県",
+          "addr": "羽咋市旭町",
+          "is_area": false,
+          "scale": 30
+        },
+        {
+          "pref": "石川県",
+          "addr": "能登町松波",
+          "is_area": false,
+          "scale": 20
+        },
+        {
+          "pref": "富山県",
+          "addr": "富山市石坂",
+          "is_area": false,
+          "scale": 30
+        },
+        {
+          "pref": "富山県",
+          "addr": "滑川市寺家町",
+          "is_area": false,
+          "scale": 20
+        },
+        {
+          "pref": "富山県",
+          "addr": "富山朝日町境",
+          "is_area": false,
+          "scale": 10
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "石川県",
+          "scale": 40
+        },
+        {
+          "pref": "富山県",
+          "scale": 30
+        }
+      ],
+      "comment": ""
     },
     {
       "id": "sw-eew-7",
@@ -528,6 +800,74 @@
       "comment": "負荷確認"
     },
     {
+      "id": "sw-q-4-d",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "quake",
+      "info_type": "detail_scale",
+      "origin_time": "2026/01/01 12:01:00",
+      "origin_time_ms": 1767236460000,
+      "issued_at": "2026/01/01 12:02:05",
+      "hypocenter": {
+        "name": "石川県能登地方",
+        "latitude": 37.5,
+        "longitude": 137.2,
+        "depth_km": 10,
+        "magnitude": 5.5
+      },
+      "max_scale": 60,
+      "domestic_tsunami": "None",
+      "points": [
+        {
+          "pref": "石川県",
+          "addr": "七尾市本府中町",
+          "is_area": false,
+          "scale": 60
+        },
+        {
+          "pref": "石川県",
+          "addr": "羽咋市旭町",
+          "is_area": false,
+          "scale": 55
+        },
+        {
+          "pref": "石川県",
+          "addr": "能登町松波",
+          "is_area": false,
+          "scale": 50
+        },
+        {
+          "pref": "富山県",
+          "addr": "富山市石坂",
+          "is_area": false,
+          "scale": 30
+        },
+        {
+          "pref": "富山県",
+          "addr": "滑川市寺家町",
+          "is_area": false,
+          "scale": 20
+        },
+        {
+          "pref": "富山県",
+          "addr": "富山朝日町境",
+          "is_area": false,
+          "scale": 10
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "石川県",
+          "scale": 60
+        },
+        {
+          "pref": "富山県",
+          "scale": 30
+        }
+      ],
+      "comment": ""
+    },
+    {
       "id": "sw-q-5",
       "source": "p2pquake",
       "received_at_ms": 0,
@@ -570,6 +910,74 @@
         }
       ],
       "comment": "負荷確認"
+    },
+    {
+      "id": "sw-q-5-d",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "quake",
+      "info_type": "detail_scale",
+      "origin_time": "2026/01/01 12:01:00",
+      "origin_time_ms": 1767236460000,
+      "issued_at": "2026/01/01 12:02:20",
+      "hypocenter": {
+        "name": "石川県能登地方",
+        "latitude": 37.55,
+        "longitude": 137.25,
+        "depth_km": 10,
+        "magnitude": 5.5
+      },
+      "max_scale": 45,
+      "domestic_tsunami": "None",
+      "points": [
+        {
+          "pref": "石川県",
+          "addr": "七尾市本府中町",
+          "is_area": false,
+          "scale": 45
+        },
+        {
+          "pref": "石川県",
+          "addr": "羽咋市旭町",
+          "is_area": false,
+          "scale": 40
+        },
+        {
+          "pref": "石川県",
+          "addr": "能登町松波",
+          "is_area": false,
+          "scale": 30
+        },
+        {
+          "pref": "富山県",
+          "addr": "富山市石坂",
+          "is_area": false,
+          "scale": 30
+        },
+        {
+          "pref": "富山県",
+          "addr": "滑川市寺家町",
+          "is_area": false,
+          "scale": 20
+        },
+        {
+          "pref": "富山県",
+          "addr": "富山朝日町境",
+          "is_area": false,
+          "scale": 10
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "石川県",
+          "scale": 45
+        },
+        {
+          "pref": "富山県",
+          "scale": 30
+        }
+      ],
+      "comment": ""
     },
     {
       "id": "sw-q-6",
@@ -616,6 +1024,74 @@
       "comment": "負荷確認"
     },
     {
+      "id": "sw-q-6-d",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "quake",
+      "info_type": "detail_scale",
+      "origin_time": "2026/01/01 12:01:00",
+      "origin_time_ms": 1767236460000,
+      "issued_at": "2026/01/01 12:02:35",
+      "hypocenter": {
+        "name": "石川県能登地方",
+        "latitude": 37.599999999999994,
+        "longitude": 137.3,
+        "depth_km": 10,
+        "magnitude": 5.5
+      },
+      "max_scale": 40,
+      "domestic_tsunami": "None",
+      "points": [
+        {
+          "pref": "石川県",
+          "addr": "七尾市本府中町",
+          "is_area": false,
+          "scale": 40
+        },
+        {
+          "pref": "石川県",
+          "addr": "羽咋市旭町",
+          "is_area": false,
+          "scale": 30
+        },
+        {
+          "pref": "石川県",
+          "addr": "能登町松波",
+          "is_area": false,
+          "scale": 20
+        },
+        {
+          "pref": "富山県",
+          "addr": "富山市石坂",
+          "is_area": false,
+          "scale": 30
+        },
+        {
+          "pref": "富山県",
+          "addr": "滑川市寺家町",
+          "is_area": false,
+          "scale": 20
+        },
+        {
+          "pref": "富山県",
+          "addr": "富山朝日町境",
+          "is_area": false,
+          "scale": 10
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "石川県",
+          "scale": 40
+        },
+        {
+          "pref": "富山県",
+          "scale": 30
+        }
+      ],
+      "comment": ""
+    },
+    {
       "id": "sw-q-7",
       "source": "p2pquake",
       "received_at_ms": 0,
@@ -658,6 +1134,74 @@
         }
       ],
       "comment": "負荷確認"
+    },
+    {
+      "id": "sw-q-7-d",
+      "source": "p2pquake",
+      "received_at_ms": 0,
+      "kind": "quake",
+      "info_type": "detail_scale",
+      "origin_time": "2026/01/01 12:01:00",
+      "origin_time_ms": 1767236460000,
+      "issued_at": "2026/01/01 12:02:50",
+      "hypocenter": {
+        "name": "石川県能登地方",
+        "latitude": 37.65,
+        "longitude": 137.35,
+        "depth_km": 10,
+        "magnitude": 5.5
+      },
+      "max_scale": 50,
+      "domestic_tsunami": "None",
+      "points": [
+        {
+          "pref": "石川県",
+          "addr": "七尾市本府中町",
+          "is_area": false,
+          "scale": 50
+        },
+        {
+          "pref": "石川県",
+          "addr": "羽咋市旭町",
+          "is_area": false,
+          "scale": 45
+        },
+        {
+          "pref": "石川県",
+          "addr": "能登町松波",
+          "is_area": false,
+          "scale": 40
+        },
+        {
+          "pref": "富山県",
+          "addr": "富山市石坂",
+          "is_area": false,
+          "scale": 30
+        },
+        {
+          "pref": "富山県",
+          "addr": "滑川市寺家町",
+          "is_area": false,
+          "scale": 20
+        },
+        {
+          "pref": "富山県",
+          "addr": "富山朝日町境",
+          "is_area": false,
+          "scale": 10
+        }
+      ],
+      "pref_max": [
+        {
+          "pref": "石川県",
+          "scale": 50
+        },
+        {
+          "pref": "富山県",
+          "scale": 30
+        }
+      ],
+      "comment": ""
     }
   ]
 }
