@@ -4,7 +4,7 @@ import { FULL_MS } from "./fade.ts";
 import { type Group, latestEew, summarizeQuake } from "./groups.ts";
 import { assignNumbers } from "./numbering.ts";
 import { type Place, byPriority, sameQuake } from "./priority.ts";
-import { EEW_BANNER_MS, WAVE_MAX_SEC, app, now } from "./state.ts";
+import { CAMERA_MS, EEW_BANNER_MS, WAVE_MAX_SEC, app, now } from "./state.ts";
 import { tourIndex, worthTouring } from "./tour.ts";
 import type { EewEvent, Hypocenter, Scale } from "./types.ts";
 
@@ -148,6 +148,7 @@ export function waveSources(now: number): WaveSource[] {
 export function updateTour(now: number, manual: boolean): void {
   const hold = app.tourHold && now < app.tourHold.until && app.world.store.get(app.tourHold.key) ? app.tourHold.key : null;
   const cands = priorityGroups(now)
+    .filter((g) => now - g.updatedAt <= CAMERA_MS)
     .map((g) => ({ g, c: geoOf(g)?.center }))
     .filter((x): x is { g: Group; c: NonNullable<typeof x.c> } => x.c != null)
     .sort((a, b) => (app.numbers.get(a.g.key) ?? 0) - (app.numbers.get(b.g.key) ?? 0));

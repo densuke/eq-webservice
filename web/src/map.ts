@@ -2,7 +2,7 @@
 
 import type { PrefScale, TsunamiArea } from "./types.ts";
 import { scaleColor, scaleLabel, scaleTextColor } from "./scale.ts";
-import { interiorPoint, labelPx, pickLabels } from "./labels.ts";
+import { interiorPoint, labelPx, mainRing, pickLabels } from "./labels.ts";
 import { geoCircle } from "./waves.ts";
 import { union, type Box } from "./camera.ts";
 import mapCss from "./map.css";
@@ -84,6 +84,8 @@ export class JapanMap {
   private labelLayer = el("g", { class: "labels" });
   /** 地域の内側に数字を置く点 (都道府県・細分区域) */
   private centers = new Map<string, [number, number]>();
+  /** 都道府県の本土の外接矩形 (カメラ用。東京都の伊豆・小笠原などの離島まで映さないように) */
+  private mainBoxes = new Map<string, Box>();
   private labelEls = new Map<string, SVGGElement>();
   private labelSig = "";
   private prefForecast = false;
@@ -194,6 +196,12 @@ export class JapanMap {
       if (cls !== "neighbor") {
         const rings = f.geometry.coordinates.flatMap((poly) => poly.map((ring) => ring.map(([lon, lat]) => project(lon, lat))));
         this.centers.set(f.properties.name, interiorPoint(rings));
+        if (cls === "pref") {
+          const r = mainRing(rings);
+          const xs = r.map((p) => p[0]);
+          const ys = r.map((p) => p[1]);
+          this.mainBoxes.set(f.properties.name, { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) });
+        }
       }
       const path = el("path", { d, class: cls, "data-name": f.properties.name });
       const title = el("title");
@@ -523,14 +531,9 @@ export class JapanMap {
     }
   }
 
-  /** 都道府県の外接矩形 (地図座標) */
+  /** 都道府県の本土の外接矩形 (地図座標)。離島の地震は震央の点と合わせて映す */
   prefBox(names: string[]): Box | null {
-    let box: Box | null = null;
-    for (const n of names) {
-      const b = this.prefs.get(n)?.getBBox();
-      if (b) box = union(box, { x0: b.x, y0: b.y, x1: b.x + b.width, y1: b.y + b.height });
-    }
-    return box;
+    return names.reduce<Box | null>((box, n) => union(box, this.mainBoxes.get(n) ?? null), null);
   }
 
   /** 目標へ指数的に近づける (目標が毎フレーム動いても滑らかに追う) */
