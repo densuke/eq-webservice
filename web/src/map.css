@@ -20,6 +20,14 @@
 .label rect { stroke: rgba(0, 0, 0, 0.7); stroke-width: 1.5; }
 .label.forecast rect { stroke: #fff; stroke-dasharray: 3 2; }
 .label text { font-weight: 800; }
+/* 予測 (緊急地震速報) の間だけ塗りと数字を点滅させ、観測の震度と見分ける */
+@keyframes forecast-pulse-pref { 50% { fill-opacity: 0.35; } }
+@keyframes forecast-pulse-area { 50% { fill-opacity: 0.2; } }
+@keyframes forecast-pulse-label { 50% { opacity: 0.45; } }
+.pref.hit.forecast { animation: forecast-pulse-pref 1.2s ease-in-out infinite; }
+.area.hit.forecast { animation: forecast-pulse-area 1.2s ease-in-out infinite; }
+.label.forecast { animation: forecast-pulse-label 1.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .pref.forecast, .area.forecast, .label.forecast { animation: none; } }
 .home-marker { pointer-events: none; }
 .home-ring { fill: none; stroke: #fff; stroke-width: 2.5; }
 .home-dot { fill: #58a6ff; stroke: #fff; stroke-width: 1.5; }
