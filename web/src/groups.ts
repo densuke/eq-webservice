@@ -36,16 +36,28 @@ export function groupKey(e: EqEvent): string {
 
 export class GroupStore {
   private groups = new Map<string, Group>();
+  /** 重複排除用に覚えておく ID (古いものから忘れる) */
   private ids = new Set<string>();
+  private idOrder: string[] = [];
+
+  private maxIds: number;
+
+  constructor(maxIds = 5000) {
+    this.maxIds = maxIds;
+  }
 
   /** 追加して所属グループを返す。既知の ID なら null */
   add(e: EqEvent): Group | null {
     if (this.ids.has(e.id)) return null;
     this.ids.add(e.id);
+    this.idOrder.push(e.id);
+    if (this.idOrder.length > this.maxIds) {
+      this.ids.delete(this.idOrder.shift()!);
+    }
     const key = groupKey(e);
     let g = this.groups.get(key);
     if (!g) {
-      g = { key, kind: e.kind === "quake" || e.kind === "eew" ? e.kind : e.kind, updatedAt: 0, events: [] } as Group;
+      g = { key, kind: e.kind, updatedAt: 0, events: [] } as Group;
       this.groups.set(key, g);
     }
     (g.events as EqEvent[]).push(e);

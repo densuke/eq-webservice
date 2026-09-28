@@ -152,7 +152,9 @@ fn render(cfg: &RssConfig, items: &[Item]) -> String {
         s += &format!("  <title>{}</title>\n", esc(&i.title));
         s += &format!(
             "  <description>{}</description>\n",
-            esc(&i.description.replace('\n', "<br>"))
+            // description は「HTML をエスケープして入れる」決まりなので、本文を HTML として
+            // エスケープし、改行だけを <br> にしたものを、さらに XML としてエスケープする
+            esc(&esc(&i.description).replace('\n', "<br>"))
         );
         if !cfg.link.is_empty() {
             s += &format!("  <link>{}</link>\n", esc(&cfg.link));
@@ -212,6 +214,23 @@ async fn write_atomic(path: &std::path::Path, data: &[u8]) -> anyhow::Result<()>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn description_is_html_inside_xml() {
+        let cfg: RssConfig = toml::from_str("").unwrap();
+        let item = Item {
+            guid: "g".into(),
+            title: "t".into(),
+            description: "a<b\nc".into(),
+            pub_date_ms: 0,
+        };
+        let xml = render(&cfg, &[item]);
+        // XML として読むと "a&lt;b<br>c" (HTML として a<b 改行 c) になる
+        assert!(
+            xml.contains("<description>a&amp;lt;b&lt;br&gt;c</description>"),
+            "{xml}"
+        );
+    }
 
     #[test]
     fn rfc822_date() {
