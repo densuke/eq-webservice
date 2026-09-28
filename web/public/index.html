@@ -14,6 +14,7 @@
     <h1>地震情報マップ</h1>
     <span id="wave-info" class="wave-info"></span>
     <span class="clock"><span id="clock-date" class="clock-date"></span> <span id="clock-time"></span></span>
+    <button id="sound" class="follow" type="button" title="新しい地震情報で警戒音を鳴らします">音 OFF</button>
   </header>
   <div id="eew-banner" class="eew-banner" role="alert" hidden></div>
   <main class="layout">
@@ -27,7 +28,7 @@
       <section id="detail" class="detail" aria-live="polite"><p class="muted">接続しています…</p></section>
       <div class="list-head">
         <h2>履歴</h2>
-        <button id="follow" class="follow active" type="button" title="最新の情報を自動で表示します">最新に追従</button>
+        <button id="follow" class="follow active" type="button" title="最新の情報を自動で表示します">リアルタイム表示中</button>
       </div>
       <ul id="list" class="list"></ul>
       <footer class="credit">
