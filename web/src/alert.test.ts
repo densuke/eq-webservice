@@ -24,6 +24,7 @@ test("eew is strong unless cancelled or a drill; it silences the following quake
   assert.equal(alertLevel(eew({ cancelled: true }), true, false), null);
   assert.equal(alertLevel(eew({ test: true }), true, false), null);
   assert.equal(alertLevel(eew({ test: true, source: "replay" }), true, false), "strong");
+  assert.equal(alertLevel(eew({ test: true, source: "demo" }), true, false), "strong");
   assert.equal(alertLevel(quake(50), true, true), null);
 });
 

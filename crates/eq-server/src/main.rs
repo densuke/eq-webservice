@@ -1,5 +1,6 @@
 mod cli;
 mod config;
+mod demo;
 mod http;
 mod hub;
 mod plugins;
@@ -22,7 +23,15 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
         .init();
 
-    let cli = Cli::parse(std::env::args().skip(1))?.with_env(|k| std::env::var(k).ok())?;
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    // eq-server convert <場面のディレクトリ> <出力先>: デモモード用の JSON を作る
+    if args.first().map(String::as_str) == Some("convert") {
+        let [_, src, out] = args.as_slice() else {
+            anyhow::bail!("usage: eq-server convert <samples/scenarios> <web/public/demo>");
+        };
+        return demo::convert_dir(src.as_ref(), out.as_ref());
+    }
+    let cli = Cli::parse(args)?.with_env(|k| std::env::var(k).ok())?;
     if cli.help {
         println!("{USAGE}");
         return Ok(());

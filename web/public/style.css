@@ -164,7 +164,20 @@ body {
 .list-head h2 { font-size: 13px; margin: 0; color: var(--muted); font-weight: 600; }
 .follow { background: none; border: 1px solid var(--line); color: var(--muted); border-radius: 999px; padding: 2px 10px; font: inherit; font-size: 12px; cursor: pointer; }
 .follow.active { border-color: #3fb950; color: #3fb950; }
-#follow:not(.active) { border-color: #58a6ff; color: #fff; background: #1f6feb; }
+/* 表示モード: リアルタイム=緑 / リプレイ中=青 / デモモード中=橙 */
+.mode { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; color: #fff; background: #238636; white-space: nowrap; }
+.mode[data-mode="replay"] { background: #1f6feb; }
+.mode[data-mode="demo"] { background: #b35900; }
+.back-live { background: #1f6feb; border: 1px solid #58a6ff; color: #fff; border-radius: 999px; padding: 2px 10px; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+/* デモモードの場面一覧 */
+.demo-panel { padding: 10px 16px; border-bottom: 1px solid var(--line); background: #2a1d0e; }
+.demo-head { font-size: 12px; color: #f0b36e; margin-bottom: 6px; }
+.demo-head b { color: #fff; margin-right: 6px; }
+.demo-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 40vh; overflow: auto; }
+.demo-list li { display: flex; gap: 10px; align-items: center; }
+.demo-text { flex: 1; min-width: 0; font-size: 13px; }
+.demo-text .muted { font-size: 11px; }
+.demo-list li.running .follow { border-color: #d29922; color: #d29922; }
 .list { list-style: none; margin: 0; padding: 0 8px; overflow: auto; flex: 1; }
 .list li { display: flex; gap: 10px; align-items: center; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
 .list li:hover { background: #1c2430; }
@@ -181,6 +194,7 @@ body {
   .topbar { position: sticky; top: 0; z-index: 2; gap: 8px; }
   .topbar h1 { font-size: 14px; }
   .version { display: none; }
+  .mode { font-size: 11px; padding: 2px 6px; }
   .clock-panel { top: 6px; right: 6px; padding: 3px 8px 4px; }
   .inset-okinawa, .inset-ogasawara { height: 100px; }
   .c-hm { font-size: 26px; }

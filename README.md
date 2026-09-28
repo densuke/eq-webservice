@@ -19,7 +19,7 @@ Wolfx EEW (wss, 任意)─┘
 | `crates/eq-core` | データモデルと P2P地震情報 JSON の変換（tokio 非依存。将来 WASM 化できるようにしてある） |
 | `crates/eq-server` | 上流への接続（再接続付き）、重複排除、ブラウザ向け WebSocket、静的ファイル配信、プラグイン |
 | `web/` | フロントエンド（TypeScript + esbuild、地図は SVG で自前描画。外部タイル不要） |
-| `samples/` | 地震が起きていないときの確認用デモデータと設定 |
+| `samples/` | 地震が起きていないときの確認用デモデータ (`scenarios/`) と設定 |
 | `tools/simplify_geojson.py` | 都道府県境界データを軽量化するスクリプト |
 | `tools/tsunami_areas.py` | 津波予報区の沿岸線データを軽量化するスクリプト |
 | `tools/neighbors.py` | 周辺国の陸地 (背景) を切り出して軽量化するスクリプト |
@@ -98,6 +98,22 @@ HTTP の口:
 - `/api/events` … 直近の情報（JSON）
 - `/feed.xml` … RSS（rss プラグインを有効にした場合）
 - `/healthz` … 死活監視
+
+### デモモード
+
+画面右上の「デモ」から、いくつかの場面 (緊急地震速報の警報・予報、群発、全国同時、離島、津波警報) を
+再生して表示や音を確かめられます。再生はブラウザの中だけで行うので、サーバやほかの閲覧者には影響しません。
+デモ中も実際の情報は受け続け、緊急地震速報などが届くとデモを終えて実際の表示に戻ります。
+`https://<サーバ>/?demo=standard` のように URL で場面を指定して開くこともできます (見守りモニタの動作確認用)。
+
+画面左上には今の表示モード (リアルタイム / リプレイ中 / デモモード中) が出ます。
+
+場面のデータは `samples/scenarios/*.jsonl` (P2P地震情報 / Wolfx 形式、先頭の `# name:` `# description:` で名前と説明) で、
+画面用の JSON は次のコマンドで作ります (サーバと同じ変換処理を使います。食い違いはテストで検出します)。
+
+```sh
+cargo run -p eq-server -- convert samples/scenarios web/public/demo
+```
 
 ### 警戒音
 

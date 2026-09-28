@@ -11,8 +11,11 @@
 <body>
   <header class="topbar">
     <h1>地震情報マップ <span class="version">v%VERSION%</span></h1>
+    <span id="mode" class="mode" data-mode="live">リアルタイム</span>
+    <button id="back-live" class="back-live" type="button" hidden>リアルタイムに戻る</button>
     <span id="wave-info" class="wave-info"></span>
     <span id="telop" class="telop" aria-live="off"></span>
+    <button id="demo-open" class="follow" type="button" title="いくつかの場面を再生して表示を確かめます">デモ</button>
     <button id="sound" class="follow" type="button" title="新しい地震情報で警戒音を鳴らします">音 OFF</button>
   </header>
   <div id="eew-banner" class="eew-banner" role="alert" hidden></div>
@@ -33,10 +36,13 @@
       </div>
     </section>
     <aside class="side">
+      <section id="demo-panel" class="demo-panel" hidden>
+        <div class="demo-head"><b>デモモード</b> 実際の地震ではありません。場面を選んで実行してください</div>
+        <ul id="demo-list" class="demo-list"></ul>
+      </section>
       <section id="detail" class="detail" aria-live="polite"><p class="muted">接続しています…</p></section>
       <div class="list-head">
         <h2>履歴</h2>
-        <button id="follow" class="follow active" type="button" title="最新の情報を自動で表示します">リアルタイム表示中</button>
       </div>
       <ul id="list" class="list"></ul>
       <footer class="credit">
