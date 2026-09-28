@@ -51,6 +51,10 @@ pub enum SourceConfig {
         /// 起動時と再接続時に読む。空文字で無効。
         #[serde(default = "default_p2pquake_tsunami")]
         tsunami_url: String,
+        /// 緊急地震速報 (予報を含む) の WebSocket。P2P地震情報は警報しか配信しないため別に受ける。
+        /// 例: "wss://ws-api.wolfx.jp/jma_eew" (Wolfx Open API)。空文字で無効 (既定)
+        #[serde(default)]
+        eew_url: String,
     },
     /// 記録済みの JSON Lines を再生する (開発・デモ用)
     Replay {
@@ -76,6 +80,7 @@ impl Default for SourceConfig {
             history_url: default_p2pquake_history(),
             history_limit: default_history_limit(),
             tsunami_url: default_p2pquake_tsunami(),
+            eew_url: String::new(),
         }
     }
 }

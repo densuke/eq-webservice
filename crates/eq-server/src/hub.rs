@@ -92,12 +92,28 @@ impl Hub {
         {
             st.tsunami = Some(ev.clone());
         }
+        // 同じ地震の EEW は最新の報だけを直近履歴に残す (予報は 1 地震で何報も出るため)。
+        // 遅れて届いた古い報は配信はするが、直近履歴には入れない
+        if let EventBody::Eew(e) = &ev.body {
+            let same = |r: &Arc<Event>| match &r.body {
+                EventBody::Eew(x) if x.event_id == e.event_id => Some(serial(x)),
+                _ => None,
+            };
+            if st.recent.iter().filter_map(same).any(|s| s > serial(e)) {
+                return Some(ev);
+            }
+            st.recent.retain(|r| same(r).is_none());
+        }
         st.recent.push_back(ev.clone());
         while st.recent.len() > self.recent_capacity {
             st.recent.pop_front();
         }
         Some(ev)
     }
+}
+
+fn serial(e: &eq_core::Eew) -> u32 {
+    e.serial.parse().unwrap_or(0)
 }
 
 pub fn now_ms() -> u64 {
@@ -110,7 +126,7 @@ pub fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use eq_core::{EewDetection, Tsunami};
+    use eq_core::{Eew, EewDetection, Scale, Tsunami};
 
     fn ev(id: &str) -> Event {
         Event {
@@ -148,6 +164,47 @@ mod tests {
                 areas: vec![],
             }),
         }
+    }
+
+    fn eew(id: &str, event_id: &str, serial: &str) -> Event {
+        Event {
+            id: id.into(),
+            source: "test".into(),
+            received_at_ms: 0,
+            body: EventBody::Eew(Eew {
+                event_id: event_id.into(),
+                serial: serial.into(),
+                cancelled: false,
+                test: false,
+                warning: false,
+                issued_at: "2026/09/29 04:45:10".into(),
+                origin_time: None,
+                origin_time_ms: None,
+                hypocenter: None,
+                areas: vec![],
+                pref_max: vec![],
+                max_scale: Scale::S4,
+            }),
+        }
+    }
+
+    #[tokio::test]
+    async fn keeps_only_the_latest_eew_report_per_earthquake() {
+        let hub = Hub::new(10);
+        let mut rx = hub.subscribe();
+        hub.publish(eew("a1", "A", "1"));
+        hub.publish(ev("x"));
+        hub.publish(eew("a3", "A", "3"));
+        // 遅れて届いた古い報は配信するが直近履歴には入れない
+        assert!(hub.publish(eew("a2", "A", "2")));
+        hub.publish(eew("b1", "B", "1"));
+        let recent: Vec<_> = hub.recent().iter().map(|e| e.id.clone()).collect();
+        assert_eq!(recent, ["x", "a3", "b1"]);
+        let mut sent = vec![];
+        while let Ok(e) = rx.try_recv() {
+            sent.push(e.id.clone());
+        }
+        assert_eq!(sent, ["a1", "x", "a3", "a2", "b1"]);
     }
 
     #[test]

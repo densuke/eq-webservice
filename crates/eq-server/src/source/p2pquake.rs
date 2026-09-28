@@ -7,28 +7,13 @@ use tokio_tungstenite::tungstenite::Message;
 
 use crate::hub::Hub;
 
-const MIN_BACKOFF: Duration = Duration::from_secs(1);
-const MAX_BACKOFF: Duration = Duration::from_secs(60);
 /// これだけ無通信なら接続が死んでいるとみなす (上流はピア情報を頻繁に流すので十分長い)
 const IDLE_TIMEOUT: Duration = Duration::from_secs(180);
 
-/// WebSocket に接続し続ける。切断時は指数バックオフで再接続する。
+/// WebSocket に接続し続ける。
 /// 接続のたびに現在の津波予報を読み直す (切断中に出た予報・解除を取りこぼさないため)。
 pub async fn run(url: &str, tsunami_url: &str, hub: &Hub) {
-    let mut backoff = MIN_BACKOFF;
-    loop {
-        tracing::info!(url, "connecting to P2P地震情報");
-        match session(url, tsunami_url, hub).await {
-            Ok(()) => {
-                tracing::warn!("upstream closed the connection");
-                backoff = MIN_BACKOFF;
-            }
-            Err(e) => tracing::warn!("upstream error: {e:#}"),
-        }
-        tracing::info!(secs = backoff.as_secs(), "reconnecting later");
-        tokio::time::sleep(backoff).await;
-        backoff = (backoff * 2).min(MAX_BACKOFF);
-    }
+    super::reconnecting("P2P地震情報", || session(url, tsunami_url, hub)).await
 }
 
 async fn session(url: &str, tsunami_url: &str, hub: &Hub) -> anyhow::Result<()> {

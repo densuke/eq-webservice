@@ -348,7 +348,10 @@ impl From<RawEew> for Eew {
             .areas
             .into_iter()
             .map(|a| EewArea {
-                pref: a.pref,
+                // pref は「北海道道北」のような地方名のことがあるので、区域名から都道府県を求める
+                pref: Some(crate::area::area_pref(&a.name))
+                    .filter(|p| !p.is_empty())
+                    .map_or(a.pref, str::to_string),
                 name: a.name,
                 scale_from: Scale(a.scale_from),
                 // 99 は「〜程度以上」
@@ -372,6 +375,7 @@ impl From<RawEew> for Eew {
             serial: r.issue.serial,
             cancelled: r.cancelled,
             test: r.test,
+            warning: true,
             issued_at: r.issue.time,
             origin_time_ms: origin_time.as_deref().and_then(jst::parse_ms),
             origin_time,
@@ -457,6 +461,17 @@ mod tests {
         assert_eq!(e.areas[1].scale_to, None);
         assert_eq!(e.pref_max[0].pref, "宮城県");
         assert_eq!(ev.title(), "【緊急地震速報(警報)】宮城県沖 第3報");
+    }
+
+    #[test]
+    fn eew_area_prefecture_comes_from_the_area_name() {
+        let json = r#"{"code": 556, "_id": "h", "issue": {"time": "2022/08/11 00:53:24", "eventId": "20220811005302", "serial": "1"},
+          "areas": [{"pref": "北海道道北", "name": "上川地方北部", "scaleFrom": 45, "scaleTo": 45, "kindCode": "10"}]}"#;
+        let EventBody::Eew(e) = parse(json).unwrap().unwrap().body else {
+            panic!()
+        };
+        assert_eq!(e.areas[0].pref, "北海道");
+        assert_eq!(e.pref_max[0].pref, "北海道");
     }
 
     #[test]

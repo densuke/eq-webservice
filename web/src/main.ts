@@ -88,7 +88,7 @@ function groupRow(g: Group): string {
     }
     case "eew": {
       const e = latestEew(g);
-      return `${badge(e.max_scale)}<div class="row-main"><div class="row-title eew-title">${numTag(g.key)}${e.test ? "[テスト] " : ""}緊急地震速報 ${
+      return `${badge(e.max_scale)}<div class="row-main"><div class="row-title eew-title">${numTag(g.key)}${e.test ? "[テスト] " : ""}緊急地震速報${e.warning ? "" : " (予報)"} ${
         e.cancelled ? "(取消)" : esc(e.hypocenter?.name ?? "")
       }</div><div class="row-sub">${esc((e.origin_time ?? e.issued_at).slice(5, 16))} ・第${esc(e.serial)}報</div></div>`;
     }
@@ -252,7 +252,7 @@ function renderDetail(): void {
     const e = latestEew(g);
     box.innerHTML = `
       <div class="detail-head">${badge(e.max_scale, true)}
-        <div><div class="detail-kind eew-title">緊急地震速報 (警報)${e.test ? " [テスト]" : ""} 第${esc(e.serial)}報</div>
+        <div><div class="detail-kind eew-title">緊急地震速報 (${e.warning ? "警報" : "予報"})${e.test ? " [テスト]" : ""} 第${esc(e.serial)}報</div>
         <div class="detail-title">${numTag(g.key)}${e.cancelled ? "取り消されました" : esc(e.hypocenter?.name ?? "震源不明")}</div>
         <div class="detail-sub">${esc(e.origin_time ?? e.issued_at)} 発生</div></div></div>
       <dl class="facts"><dt>震源</dt><dd>${hypoText(e.hypocenter)}</dd><dt>予測最大</dt><dd>震度${scaleLabel(e.max_scale)}</dd></dl>
@@ -440,13 +440,17 @@ function renderBanner(now: number): void {
     .map((c) => c.e);
   const banner = $("#eew-banner");
   banner.hidden = eews.length === 0;
+  // 予報だけなら警報と色を分ける
+  banner.classList.toggle("forecast", eews.length > 0 && eews.every((e) => !e.warning));
   const rest = eews.length - EEW_BANNER_MAX;
   banner.innerHTML =
     eews
       .slice(0, EEW_BANNER_MAX)
       .map((e) => {
         const prefs = e.pref_max.map((p) => p.pref).join("・");
-        return `<div>${numTag(`e:${e.event_id}`)}<b>${e.test ? "【テスト】" : ""}緊急地震速報 (警報)</b> ${esc(e.hypocenter?.name ?? "")} で地震 ・ 強い揺れに警戒: ${esc(prefs || "—")}</div>`;
+        return `<div>${numTag(`e:${e.event_id}`)}<b>${e.test ? "【テスト】" : ""}緊急地震速報 (${e.warning ? "警報" : "予報"})</b> ${esc(e.hypocenter?.name ?? "")} で地震 ・ ${
+          e.warning ? "強い揺れに警戒" : `予測最大震度${scaleLabel(e.max_scale)}`
+        }: ${esc(prefs || "—")}</div>`;
       })
       .join("") + (rest > 0 ? `<div>ほか ${rest} 件の緊急地震速報</div>` : "");
 }
@@ -514,11 +518,16 @@ function onEvents(events: EqEvent[], live: boolean): void {
     // その地震の EEW で既に鳴らしていれば、地震情報では鳴らさない
     const eewActive =
       e.kind === "quake" && activeEews(now()).some((x) => sameQuake(placeOf(x.origin_time_ms, x.hypocenter), placeOf(e.origin_time_ms, e.hypocenter)));
-    const lv = alertLevel(e, g.events.length === 1, eewActive);
+    // EEW は予報から警報に上がったときも鳴らす
+    const isNew =
+      g.events.length === 1 || (e.kind === "eew" && e.warning && !g.events.slice(0, -1).some((x) => (x as EewEvent).warning));
+    const lv = alertLevel(e, isNew, eewActive);
     if (lv && (!alert || rank[lv] > rank[alert])) alert = lv;
   }
   renderList();
   renderDetail();
+  // Wolfx 経由の情報を受けたら出典を出す
+  if (events.some((e) => e.source === "wolfx")) $("#credit-wolfx").hidden = false;
   map.setTsunami(activeAreas(tsunami));
   renderTsunamiBanner();
   if (alert && !(now() - lastAlert.at < ALERT_MERGE_MS && rank[alert] <= rank[lastAlert.level])) {

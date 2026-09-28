@@ -16,6 +16,9 @@ history_url = "https://api.p2pquake.net/v2/history"
 history_limit = 30
 # 現在の津波予報 (履歴 API には含まれないため別に取得する)
 tsunami_url = "https://api.p2pquake.net/v2/jma/tsunami"
+# 緊急地震速報の予報も受け取る (P2P地震情報は警報のみ)。Wolfx Open API (非公式の中継)。
+# 利用規約 https://wolfx.jp/legal/terms を確認のうえ有効にする。空文字で無効
+eew_url = ""
 
 # 地震が起きていないときの画面確認用: 記録データを「今」の時刻にずらして再生する
 # [source]

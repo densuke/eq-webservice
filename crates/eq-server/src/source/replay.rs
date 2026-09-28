@@ -5,7 +5,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use anyhow::Context;
-use eq_core::{p2pquake, Event};
+use eq_core::{p2pquake, wolfx, Event};
 
 use crate::hub::{now_ms, Hub};
 
@@ -41,7 +41,13 @@ fn load(text: &str) -> anyhow::Result<Vec<Event>> {
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        if let Some(ev) = p2pquake::parse(line).with_context(|| format!("line {}", i + 1))? {
+        // Wolfx 形式 (緊急地震速報の予報など) も混ぜられる
+        let parsed = if line.contains("\"EventID\"") {
+            wolfx::parse(line).map_err(anyhow::Error::from)
+        } else {
+            p2pquake::parse(line).map_err(anyhow::Error::from)
+        };
+        if let Some(ev) = parsed.with_context(|| format!("line {}", i + 1))? {
             out.push(ev);
         }
     }

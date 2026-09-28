@@ -3,10 +3,12 @@
 //! このクレートは tokio などの実行環境に依存しない。将来フロントエンド側で
 //! WASM として同じモデル/変換ロジックを使えるようにするため。
 
+pub mod area;
 pub mod jst;
 pub mod model;
 pub mod p2pquake;
 pub mod scale;
+pub mod wolfx;
 
 pub use model::*;
 pub use scale::Scale;

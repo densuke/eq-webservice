@@ -5,7 +5,9 @@
 受け取った情報は、RSS・Discord などの配信先（プラグイン）にも流せます。
 
 ```
-P2P地震情報 (wss) ──▶ eq-server (Rust) ──▶ ブラウザ (静的ページ + TypeScript, WebSocket)
+P2P地震情報 (wss) ──┐
+                     ├─▶ eq-server (Rust) ──▶ ブラウザ (静的ページ + TypeScript, WebSocket)
+Wolfx EEW (wss, 任意)─┘
                            │
                            └─▶ プラグイン: RSS / Discord / JSON Lines 蓄積 / 汎用 Webhook
 ```
@@ -26,9 +28,16 @@ P2P地震情報 (wss) ──▶ eq-server (Rust) ──▶ ブラウザ (静的�
 | code | 内容 | 画面での表示 |
 | --- | --- | --- |
 | 556 | 緊急地震速報（警報） | 警報バナー、震央、P波・S波の円、予測震度で都道府県を塗る（白の破線） |
+| — | 緊急地震速報（予報）※ | 予報バナー（橙）。そのほかは警報と同じ |
 | 551 | 地震情報（震度速報・震源・各地の震度） | 震央、観測震度で都道府県を塗る、観測点の一覧 |
 | 552 | 津波予報 | 対象の沿岸を等級の色（大津波警報=紫、津波警報=赤、津波注意報=黄）で描き、解除まで表示。バナー、一覧・詳細 |
 | 554 | 緊急地震速報の発表検出 | 受信のみ |
+
+※ P2P地震情報は緊急地震速報の警報（予測震度5弱以上）しか配信しないため、予報は
+[Wolfx Open API](https://wolfx.jp/docs/open-api) の JMA 緊急地震速報から受け取ります。
+`config.toml` の `[source] eew_url = "wss://ws-api.wolfx.jp/jma_eew"` で有効になります（既定は無効）。
+Wolfx は非公式の中継サービスです。公開サイトで使う場合は [Wolfx の利用規約](https://wolfx.jp/legal/terms)
+（再提供や、公式の警報として表示することの禁止など）を確認してください。
 
 同じ地震についての複数の情報（震度速報 → 震源 → 各地の震度、EEW の続報）は 1 行にまとめて表示します。
 複数の地震がほぼ同時に起きたときは、P波・S波の円はすべて描き、地図のカメラと詳細パネルは
@@ -153,6 +162,7 @@ GitHub Actions（`.github/workflows/ci.yml`）で次をビルド・テストし�
 ## 出典・ライセンス
 
 - 地震情報: [P2P地震情報](https://www.p2pquake.net/)（気象庁発表の情報）
+- 緊急地震速報（予報、有効にした場合）: [Wolfx Project](https://wolfx.jp/) の Open API 経由（気象庁発表の情報。非公式の中継）
 - 地図: 地球地図日本（国土地理院）を [dataofjapan/land](https://github.com/dataofjapan/land) 経由で加工。
   営利目的で使う場合は、国土地理院の利用規約に従って利用報告が必要です。
 - 津波予報区: [気象庁「予報区等GISデータ」](https://www.data.jma.go.jp/developer/gis.html)を加工して作成
