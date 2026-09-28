@@ -22,16 +22,13 @@ export interface SingleGroup {
 }
 export type Group = QuakeGroup | EewGroup | SingleGroup;
 
-export function groupKey(e: EqEvent): string {
-  switch (e.kind) {
-    case "quake":
-      // 発生時刻 (分単位) が同じものは同じ地震とみなす
-      return `q:${e.origin_time.slice(0, 16)}`;
-    case "eew":
-      return `e:${e.event_id}`;
-    default:
-      return `${e.kind}:${e.id}`;
-  }
+function groupKey(e: EqEvent): string {
+  return e.kind === "eew" ? `e:${e.event_id}` : `${e.kind}:${e.id}`;
+}
+
+/** グループ内で分かっている震源名 (最初の震度速報には無い) */
+function quakeName(g: QuakeGroup): string {
+  return g.events.find((e) => e.hypocenter?.name)?.hypocenter?.name ?? "";
 }
 
 export class GroupStore {
@@ -54,7 +51,7 @@ export class GroupStore {
     if (this.idOrder.length > this.maxIds) {
       this.ids.delete(this.idOrder.shift()!);
     }
-    const key = groupKey(e);
+    const key = e.kind === "quake" ? this.quakeKey(e) : groupKey(e);
     let g = this.groups.get(key);
     if (!g) {
       g = { key, kind: e.kind, updatedAt: 0, events: [] } as Group;
@@ -64,6 +61,24 @@ export class GroupStore {
     g.updatedAt = Math.max(g.updatedAt, e.received_at_ms);
     this.prune();
     return g;
+  }
+
+  /**
+   * 地震情報には地震ごとの ID が無いので、発生時刻 (分) と震源名でまとめる。
+   * 最初の震度速報には震源が無いため、後から来た震源付きの情報は、同じ分の震源の無いグループに
+   * 揺れた都道府県が重なれば合流させる (重ならなければ同じ分に起きた別の地震とみなす)。
+   */
+  private quakeKey(e: QuakeEvent): string {
+    const minute = `q:${e.origin_time.slice(0, 16)}`;
+    const inMinute = [...this.groups.values()].filter((g): g is QuakeGroup => g.kind === "quake" && g.key.startsWith(minute));
+    const orphans = inMinute.filter((g) => !quakeName(g));
+    const name = e.hypocenter?.name ?? "";
+    if (!name) return orphans[0]?.key ?? (inMinute.length ? `${minute}:${inMinute.length}` : minute);
+    const same = inMinute.find((g) => quakeName(g) === name);
+    if (same) return same.key;
+    const prefs = new Set(e.pref_max.map((p) => p.pref));
+    const orphan = orphans.find((g) => prefs.size === 0 || g.events.some((x) => x.pref_max.some((p) => prefs.has(p.pref))));
+    return orphan?.key ?? `${minute}:${name}`;
   }
 
   get(key: string): Group | undefined {

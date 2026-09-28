@@ -46,7 +46,7 @@ function tone(c: AudioContext, freq: number, at: number, dur: number, type: Osci
   osc.stop(t + dur + 0.05);
 }
 
-export function play(level: AlertLevel): void {
+export function play(level: AlertLevel | "pip"): void {
   if (!soundEnabled() || !ctx || ctx.state !== "running") return;
   const c = ctx;
   switch (level) {
@@ -59,6 +59,12 @@ export function play(level: AlertLevel): void {
         tone(c, 988, at, 0.5, "sine", 0.3);
         tone(c, 784, at + 0.3, 0.8, "sine", 0.3);
       }
+      break;
+    case "info": // 上がる 3 音 (確定情報の案内)
+      [660, 880, 1100].forEach((f, i) => tone(c, f, i * 0.18, 0.6, "sine", 0.22));
+      break;
+    case "pip": // 波の広がり中の刻み
+      tone(c, 1200, 0, 0.12, "sine", 0.15);
       break;
     case "strong": // 2 音を交互に繰り返す
       for (let i = 0; i < 12; i++) tone(c, i % 2 ? 770 : 960, i * 0.2, 0.18, "square", 0.12);

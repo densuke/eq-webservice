@@ -1,6 +1,6 @@
 // SVG による日本地図。外部タイルに依存せず、都道府県の塗り分け・震央・P波/S波を描く。
 
-import type { PrefScale } from "./types.ts";
+import type { PrefScale, TsunamiArea } from "./types.ts";
 import { scaleColor } from "./scale.ts";
 import { geoCircle } from "./waves.ts";
 import { union, type Box } from "./camera.ts";
@@ -26,6 +26,11 @@ interface GeoFeature {
   geometry: { type: "MultiPolygon"; coordinates: number[][][][] };
 }
 
+interface LineFeature {
+  properties: { name: string };
+  geometry: { type: "MultiLineString"; coordinates: number[][][] };
+}
+
 export function project(lon: number, lat: number): [number, number] {
   return [(lon - LON0) * KX, -(lat - LAT0) * KY];
 }
@@ -48,11 +53,17 @@ function ringPath(coords: [number, number][]): string {
 export class JapanMap {
   readonly svg: SVGSVGElement;
   private prefLayer = el("g", { class: "prefs" });
+  private tsunamiLayer = el("g", { class: "tsunami" });
   private waveLayer = el("g", { class: "waves" });
   private markerLayer = el("g", { class: "markers" });
   private prefs = new Map<string, SVGPathElement>();
+  private tsunamiAreas = new Map<string, { path: SVGPathElement; box: Box }>();
+  /** 塗り分け中の都道府県と色 (薄くするときに使う) */
+  private hitColors = new Map<string, string>();
+  private fade = 1;
   private view: View;
-  private epicenter: SVGGElement | null = null;
+  private epicenters: SVGGElement[] = [];
+  private epicenterSig = "";
   private pWave = el("path", { class: "wave wave-p" });
   private sWave = el("path", { class: "wave wave-s" });
   private target: View | null = null;
@@ -63,7 +74,7 @@ export class JapanMap {
 
   constructor(container: HTMLElement) {
     this.svg = el("svg", { class: "map", preserveAspectRatio: "xMidYMid meet" });
-    this.svg.append(this.prefLayer, this.waveLayer, this.markerLayer);
+    this.svg.append(this.prefLayer, this.tsunamiLayer, this.waveLayer, this.markerLayer);
     this.waveLayer.append(this.sWave, this.pWave);
     container.append(this.svg);
     this.view = this.homeView();
@@ -87,48 +98,113 @@ export class JapanMap {
     }
   }
 
+  /** 津波予報区の沿岸線 */
+  async loadTsunami(url: string): Promise<void> {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`津波予報区のデータを取得できません (${res.status})`);
+    const data: { features: LineFeature[] } = await res.json();
+    for (const f of data.features) {
+      let d = "";
+      let box: Box | null = null;
+      for (const line of f.geometry.coordinates) {
+        line.forEach(([lon, lat], i) => {
+          const [x, y] = project(lon, lat);
+          d += `${i === 0 ? "M" : "L"}${x.toFixed(1)} ${y.toFixed(1)}`;
+          box = union(box, { x0: x, y0: y, x1: x, y1: y });
+        });
+      }
+      const path = el("path", { d, class: "tsunami-line" });
+      const title = el("title");
+      title.textContent = f.properties.name;
+      path.append(title);
+      this.tsunamiLayer.append(path);
+      this.tsunamiAreas.set(f.properties.name, { path, box: box! });
+    }
+  }
+
+  /** 発表中の津波予報区を等級の色で描く */
+  setTsunami(areas: TsunamiArea[]): void {
+    for (const { path } of this.tsunamiAreas.values()) delete path.dataset.grade;
+    for (const a of areas) {
+      const t = this.tsunamiAreas.get(a.name);
+      if (t) t.path.dataset.grade = a.grade;
+    }
+  }
+
+  /** 津波予報区の外接矩形 (地図座標) */
+  tsunamiBox(names: string[]): Box | null {
+    return names.reduce<Box | null>((b, n) => union(b, this.tsunamiAreas.get(n)?.box ?? null), null);
+  }
+
   /** 都道府県の塗り分け。forecast は緊急地震速報の予測 (破線で区別) */
   setPrefScales(items: PrefScale[], forecast = false): void {
     for (const p of this.prefs.values()) {
       p.style.fill = "";
       p.classList.remove("forecast", "hit");
     }
-    for (const { pref, scale } of items) {
-      const p = this.prefs.get(pref);
-      if (!p) continue;
-      p.style.fill = scaleColor(scale);
-      p.classList.add("hit");
-      if (forecast) p.classList.add("forecast");
-    }
+    this.hitColors = new Map(items.filter(({ pref }) => this.prefs.has(pref)).map(({ pref, scale }) => [pref, scaleColor(scale)]));
+    for (const pref of this.hitColors.keys()) this.prefs.get(pref)!.classList.toggle("forecast", forecast);
+    this.paintFade();
   }
 
-  setEpicenter(lat: number | null, lon: number | null): void {
-    this.epicenter?.remove();
-    this.epicenter = null;
-    if (lat == null || lon == null) return;
-    const [x, y] = project(lon, lat);
-    const g = el("g", { class: "epicenter" });
-    g.dataset.x = String(x);
-    g.dataset.y = String(y);
-    const r = 9;
-    g.append(
-      el("circle", { r: 16, class: "epicenter-pulse" }),
-      el("path", { d: `M${-r} ${-r}L${r} ${r}M${r} ${-r}L${-r} ${r}`, class: "epicenter-x-bg" }),
-      el("path", { d: `M${-r} ${-r}L${r} ${r}M${r} ${-r}L${-r} ${r}`, class: "epicenter-x" }),
-    );
-    this.markerLayer.append(g);
-    this.epicenter = g;
+  /** 塗り分けと震央の濃さ (1 = はっきり, 0 = 消える) */
+  setFade(alpha: number): void {
+    if (Math.abs(alpha - this.fade) < 0.005) return;
+    this.fade = alpha;
+    this.paintFade();
+  }
+
+  private paintFade(): void {
+    const a = this.fade;
+    for (const [pref, color] of this.hitColors) {
+      const p = this.prefs.get(pref)!;
+      p.style.fill = a >= 1 ? color : `color-mix(in srgb, ${color} ${(a * 100).toFixed(1)}%, var(--land))`;
+      p.classList.toggle("hit", a > 0);
+    }
+    this.markerLayer.style.opacity = String(a);
+  }
+
+  /** 震央の印。primary (表示中の地震) は大きく、ほかは小さく。label は一時的な番号 */
+  setEpicenters(items: { lat: number; lon: number; label: number | null; primary: boolean }[]): void {
+    const sig = JSON.stringify(items);
+    if (sig === this.epicenterSig) return;
+    this.epicenterSig = sig;
+    this.epicenters.forEach((g) => g.remove());
+    // 表示中の地震を最前面に
+    this.epicenters = [...items]
+      .sort((a, b) => Number(a.primary) - Number(b.primary))
+      .map(({ lat, lon, label, primary }) => {
+        const [x, y] = project(lon, lat);
+        const g = el("g", { class: primary ? "epicenter" : "epicenter sub" });
+        g.dataset.x = String(x);
+        g.dataset.y = String(y);
+        g.dataset.k = primary ? "1" : "0.65";
+        const r = 9;
+        const x9 = `M${-r} ${-r}L${r} ${r}M${r} ${-r}L${-r} ${r}`;
+        if (primary) g.append(el("circle", { r: 16, class: "epicenter-pulse" }));
+        g.append(el("path", { d: x9, class: "epicenter-x-bg" }), el("path", { d: x9, class: "epicenter-x" }));
+        if (label != null) {
+          const t = el("text", { x: 11, y: -9, class: "epicenter-label" });
+          t.textContent = String(label);
+          g.append(t);
+        }
+        this.markerLayer.append(g);
+        return g;
+      });
     this.updateMarkerScale();
   }
 
-  /** P波・S波の到達範囲 (km)。null は非表示 */
-  setWaves(center: { lat: number; lon: number } | null, pKm: number | null, sKm: number | null): void {
-    const circle = (km: number | null) => {
-      if (!center || km == null || km <= 0) return "";
-      return ringPath(geoCircle(center.lat, center.lon, km));
-    };
-    this.pWave.setAttribute("d", circle(pKm));
-    this.sWave.setAttribute("d", circle(sKm));
+  /** P波・S波の到達範囲 (km)。複数の地震の円をまとめて描く。空配列で非表示 */
+  setWaves(waves: { lat: number; lon: number; pKm: number | null; sKm: number | null }[]): void {
+    const circles = (km: (w: (typeof waves)[number]) => number | null) =>
+      waves
+        .map((w) => {
+          const r = km(w);
+          return r != null && r > 0 ? ringPath(geoCircle(w.lat, w.lon, r)) : "";
+        })
+        .join("");
+    this.pWave.setAttribute("d", circles((w) => w.pKm));
+    this.sWave.setAttribute("d", circles((w) => w.sKm));
   }
 
   /** 自動カメラの目標。null は日本全体。利用者が手で動かしている間は何もしない */
@@ -212,10 +288,11 @@ export class JapanMap {
   }
 
   private updateMarkerScale(): void {
-    if (!this.epicenter) return;
     const k = this.unitsPerPixel();
-    const { x, y } = this.epicenter.dataset;
-    this.epicenter.setAttribute("transform", `translate(${x} ${y}) scale(${k})`);
+    for (const g of this.epicenters) {
+      const { x, y, k: size } = g.dataset;
+      g.setAttribute("transform", `translate(${x} ${y}) scale(${k * Number(size)})`);
+    }
   }
 
   private clientToMap(cx: number, cy: number): [number, number] {

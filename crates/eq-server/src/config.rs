@@ -47,6 +47,10 @@ pub enum SourceConfig {
         history_url: String,
         #[serde(default = "default_history_limit")]
         history_limit: u32,
+        /// 現在の津波予報を取得する API (履歴 API には津波予報が含まれないため別に取る)。
+        /// 起動時と再接続時に読む。空文字で無効。
+        #[serde(default = "default_p2pquake_tsunami")]
+        tsunami_url: String,
     },
     /// 記録済みの JSON Lines を再生する (開発・デモ用)
     Replay {
@@ -71,6 +75,7 @@ impl Default for SourceConfig {
             url: default_p2pquake_ws(),
             history_url: default_p2pquake_history(),
             history_limit: default_history_limit(),
+            tsunami_url: default_p2pquake_tsunami(),
         }
     }
 }
@@ -80,6 +85,9 @@ fn default_p2pquake_ws() -> String {
 }
 fn default_p2pquake_history() -> String {
     "https://api.p2pquake.net/v2/history".into()
+}
+fn default_p2pquake_tsunami() -> String {
+    "https://api.p2pquake.net/v2/jma/tsunami".into()
 }
 fn default_history_limit() -> u32 {
     30

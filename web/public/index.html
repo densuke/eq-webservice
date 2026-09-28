@@ -17,10 +17,12 @@
     <button id="sound" class="follow" type="button" title="新しい地震情報で警戒音を鳴らします">音 OFF</button>
   </header>
   <div id="eew-banner" class="eew-banner" role="alert" hidden></div>
+  <div id="tsunami-banner" class="tsunami-banner" role="status" hidden></div>
   <main class="layout">
     <section id="map" class="map-wrap" aria-label="日本地図">
       <div class="legend" aria-hidden="true">
         <span style="background:#f2f2ff;color:#111">1</span><span style="background:#00aaff">2</span><span style="background:#0041ff">3</span><span style="background:#faf500;color:#111">4</span><span style="background:#ffe600;color:#111">5-</span><span style="background:#ff9900">5+</span><span style="background:#ff2800">6-</span><span style="background:#a50021">6+</span><span style="background:#b40068">7</span>
+        <span class="legend-tsunami major_warning">大津波警報</span><span class="legend-tsunami warning">津波警報</span><span class="legend-tsunami watch">津波注意報</span>
         <span class="legend-wave p">P波</span><span class="legend-wave s">S波</span>
       </div>
     </section>
@@ -34,6 +36,7 @@
       <footer class="credit">
         情報: <a href="https://www.p2pquake.net/" target="_blank" rel="noopener">P2P地震情報</a> (気象庁発表)<br>
         地図: 地球地図日本 (国土地理院) を加工<br>
+        津波予報区: 気象庁のデータを加工<br>
         P波・S波の円は一様速度による概算です。
       </footer>
     </aside>

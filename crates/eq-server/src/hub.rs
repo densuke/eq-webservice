@@ -4,7 +4,7 @@ use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use eq_core::Event;
+use eq_core::{Event, EventBody};
 use tokio::sync::broadcast;
 
 /// 購読者が処理しきれない場合に溜めておける件数
@@ -20,6 +20,8 @@ pub struct Hub {
 
 struct State {
     recent: VecDeque<Arc<Event>>,
+    /// 最新の津波予報。直近履歴から押し出されても、解除されるまでブラウザに渡し続ける
+    tsunami: Option<Arc<Event>>,
     seen: HashSet<String>,
     seen_order: VecDeque<String>,
 }
@@ -31,6 +33,7 @@ impl Hub {
             tx,
             state: Mutex::new(State {
                 recent: VecDeque::new(),
+                tsunami: None,
                 seen: HashSet::new(),
                 seen_order: VecDeque::new(),
             }),
@@ -59,9 +62,11 @@ impl Hub {
         events.into_iter().filter_map(|ev| self.remember(ev)).collect()
     }
 
-    /// 直近のイベント (古い順)
+    /// 直近のイベント (古い順)。最新の津波予報が押し出されていれば先頭に足す
     pub fn recent(&self) -> Vec<Arc<Event>> {
-        self.state.lock().unwrap().recent.iter().cloned().collect()
+        let st = self.state.lock().unwrap();
+        let pinned = st.tsunami.as_ref().filter(|t| !st.recent.iter().any(|e| e.id == t.id));
+        pinned.into_iter().chain(st.recent.iter()).cloned().collect()
     }
 
     fn remember(&self, mut ev: Event) -> Option<Arc<Event>> {
@@ -79,6 +84,14 @@ impl Hub {
             ev.received_at_ms = now_ms();
         }
         let ev = Arc::new(ev);
+        if matches!(ev.body, EventBody::Tsunami(_))
+            && st
+                .tsunami
+                .as_ref()
+                .is_none_or(|t| t.issued_at_ms() <= ev.issued_at_ms())
+        {
+            st.tsunami = Some(ev.clone());
+        }
         st.recent.push_back(ev.clone());
         while st.recent.len() > self.recent_capacity {
             st.recent.pop_front();
@@ -97,7 +110,7 @@ pub fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use eq_core::{EewDetection, EventBody};
+    use eq_core::{EewDetection, Tsunami};
 
     fn ev(id: &str) -> Event {
         Event {
@@ -122,6 +135,31 @@ mod tests {
         assert_eq!(rx.recv().await.unwrap().id, "b");
         let recent: Vec<_> = hub.recent().iter().map(|e| e.id.clone()).collect();
         assert_eq!(recent, ["b", "c"]);
+    }
+
+    fn tsunami(id: &str, issued_at: &str) -> Event {
+        Event {
+            id: id.into(),
+            source: "test".into(),
+            received_at_ms: 0,
+            body: EventBody::Tsunami(Tsunami {
+                cancelled: false,
+                issued_at: issued_at.into(),
+                areas: vec![],
+            }),
+        }
+    }
+
+    #[test]
+    fn keeps_latest_tsunami_after_it_is_pushed_out() {
+        let hub = Hub::new(2);
+        hub.publish(tsunami("t2", "2026/09/28 12:10:00"));
+        // 遅れて届いた古い予報では置き換えない
+        hub.publish(tsunami("t1", "2026/09/28 12:00:00"));
+        hub.publish(ev("a"));
+        hub.publish(ev("b"));
+        let recent: Vec<_> = hub.recent().iter().map(|e| e.id.clone()).collect();
+        assert_eq!(recent, ["t2", "a", "b"]);
     }
 
     #[tokio::test]

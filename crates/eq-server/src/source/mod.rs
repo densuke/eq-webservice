@@ -16,18 +16,25 @@ pub async fn run(cfg: SourceConfig, hub: Arc<Hub>, on_seed: impl FnOnce(&[Arc<eq
             url,
             history_url,
             history_limit,
+            tsunami_url,
         } => {
+            let mut events = Vec::new();
             if !history_url.is_empty() && history_limit > 0 {
                 match p2pquake::fetch_history(&history_url, history_limit).await {
-                    Ok(events) => {
-                        let seeded = hub.seed(events);
-                        tracing::info!(count = seeded.len(), "loaded history");
-                        on_seed(&seeded);
-                    }
+                    Ok(evs) => events = evs,
                     Err(e) => tracing::warn!("failed to load history: {e:#}"),
                 }
             }
-            p2pquake::run(&url, &hub).await
+            if !tsunami_url.is_empty() {
+                match p2pquake::fetch_latest_tsunami(&tsunami_url).await {
+                    Ok(ev) => events.extend(ev),
+                    Err(e) => tracing::warn!("failed to load tsunami: {e:#}"),
+                }
+            }
+            let seeded = hub.seed(events);
+            tracing::info!(count = seeded.len(), "loaded history");
+            on_seed(&seeded);
+            p2pquake::run(&url, &tsunami_url, &hub).await
         }
         SourceConfig::Replay {
             path,

@@ -10,6 +10,10 @@
   --p-wave: #4fc3f7;
   --s-wave: #ff5252;
   --alert: #d7263d;
+  /* 津波予報の配色 (気象庁に準拠) */
+  --t-watch: #faf500;
+  --t-warning: #ff2800;
+  --t-major: #c800ff;
   color-scheme: dark;
 }
 
@@ -49,11 +53,25 @@ body {
 .pref { fill: var(--land); stroke: var(--land-edge); stroke-width: 0.8; vector-effect: non-scaling-stroke; fill-rule: evenodd; }
 .pref.hit { stroke: #000; }
 .pref.forecast { stroke: #fff; stroke-dasharray: 4 3; stroke-width: 1.2; }
+.tsunami-line { fill: none; stroke: none; vector-effect: non-scaling-stroke; stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 0 1.5px #000) drop-shadow(0 0 1px #000); }
+.tsunami-line[data-grade="watch"] { stroke: var(--t-watch); }
+.tsunami-line[data-grade="warning"] { stroke: var(--t-warning); }
+.tsunami-line[data-grade="major_warning"] { stroke: var(--t-major); stroke-width: 7; }
+.tsunami-banner { color: #111; background: var(--t-watch); padding: 6px 16px; font-size: 14px; }
+.tsunami-banner[data-grade="warning"] { color: #fff; background: var(--t-warning); }
+.tsunami-banner[data-grade="major_warning"] { color: #fff; background: var(--t-major); }
+.legend-tsunami { background: none !important; margin-left: 6px; }
+.legend-tsunami.watch { border-bottom: 3px solid var(--t-watch); }
+.legend-tsunami.warning { border-bottom: 3px solid var(--t-warning); }
+.legend-tsunami.major_warning { border-bottom: 3px solid var(--t-major); }
 .wave { fill: none; vector-effect: non-scaling-stroke; stroke-width: 2.5; }
 .wave-p { stroke: var(--p-wave); }
 .wave-s { stroke: var(--s-wave); fill: rgba(255, 82, 82, 0.05); }
 .epicenter-x { stroke: #ff1744; stroke-width: 4; stroke-linecap: round; fill: none; }
 .epicenter-x-bg { stroke: #fff; stroke-width: 8; stroke-linecap: round; fill: none; }
+.epicenter.sub { opacity: 0.8; }
+.epicenter-label { font-size: 15px; font-weight: 700; fill: #fff; stroke: #000; stroke-width: 4px; paint-order: stroke; }
+.num { display: inline-block; min-width: 1.4em; padding: 0 3px; margin-right: 4px; border-radius: 4px; background: #fff; color: #111; font-size: 0.85em; font-weight: 700; text-align: center; }
 .epicenter-pulse { fill: none; stroke: #ff1744; stroke-width: 2; animation: pulse 1.6s ease-out infinite; transform-box: fill-box; transform-origin: center; }
 @keyframes pulse { from { transform: scale(0.4); opacity: 1; } to { transform: scale(2.2); opacity: 0; } }
 

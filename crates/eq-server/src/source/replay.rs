@@ -53,6 +53,9 @@ async fn play(events: &[Event], opts: &Options, round: u32, hub: &Hub) {
     let mut prev: Option<i64> = None;
     // 記録上の時刻 → 再生時の時刻 へのずれ
     let mut delta = 0i64;
+    // 発生時刻のずれは周回の最初の情報で決めて固定する。情報ごとに変えると、
+    // 同じ地震の震度速報と各地の震度で発生時刻が変わり、別の地震に見えてしまう
+    let mut origin_delta: Option<i64> = None;
     for ev in events {
         let recorded = ev.issued_at_ms();
         let wait_ms = match (prev, recorded) {
@@ -65,16 +68,19 @@ async fn play(events: &[Event], opts: &Options, round: u32, hub: &Hub) {
             prev = Some(r);
             // 待ち時間を詰めた・倍速にした分だけずれを補正し、発表時刻がいつも「今」になるようにする
             delta = now_ms() as i64 - r;
+            origin_delta.get_or_insert(delta);
         }
         let mut ev = ev.clone();
         // 同じ ID は重複として捨てられるので、周回ごとに変える
         ev.id = format!("{}#replay{round}", ev.id);
+        // 画面側で「再生データ」と分かるように (訓練報でも警戒音を鳴らす)
+        ev.source = "replay".into();
         if let eq_core::EventBody::Eew(e) = &mut ev.body {
             // EEW の続報は event_id でまとめられるので、これも周回ごとに変える
             e.event_id = format!("{}#replay{round}", e.event_id);
         }
         if opts.rebase_time {
-            ev.shift_times(delta);
+            ev.shift_times(delta, origin_delta.unwrap_or(delta));
         }
         let title = ev.title();
         if hub.publish(ev) {

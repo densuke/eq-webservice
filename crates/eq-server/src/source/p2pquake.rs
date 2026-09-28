@@ -13,11 +13,12 @@ const MAX_BACKOFF: Duration = Duration::from_secs(60);
 const IDLE_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// WebSocket に接続し続ける。切断時は指数バックオフで再接続する。
-pub async fn run(url: &str, hub: &Hub) {
+/// 接続のたびに現在の津波予報を読み直す (切断中に出た予報・解除を取りこぼさないため)。
+pub async fn run(url: &str, tsunami_url: &str, hub: &Hub) {
     let mut backoff = MIN_BACKOFF;
     loop {
         tracing::info!(url, "connecting to P2P地震情報");
-        match session(url, hub).await {
+        match session(url, tsunami_url, hub).await {
             Ok(()) => {
                 tracing::warn!("upstream closed the connection");
                 backoff = MIN_BACKOFF;
@@ -30,9 +31,21 @@ pub async fn run(url: &str, hub: &Hub) {
     }
 }
 
-async fn session(url: &str, hub: &Hub) -> anyhow::Result<()> {
+async fn session(url: &str, tsunami_url: &str, hub: &Hub) -> anyhow::Result<()> {
     let (mut ws, _) = tokio_tungstenite::connect_async(url).await.context("connect")?;
     tracing::info!("connected to upstream");
+    if !tsunami_url.is_empty() {
+        // 既に受け取っている予報なら重複として捨てられる
+        match fetch_latest_tsunami(tsunami_url).await {
+            Ok(Some(ev)) => {
+                if hub.publish(ev) {
+                    tracing::info!("caught up tsunami forecast");
+                }
+            }
+            Ok(None) => {}
+            Err(e) => tracing::warn!("failed to load tsunami: {e:#}"),
+        }
+    }
     loop {
         let msg = match tokio::time::timeout(IDLE_TIMEOUT, ws.next()).await {
             Err(_) => anyhow::bail!("no data for {}s", IDLE_TIMEOUT.as_secs()),
@@ -89,12 +102,33 @@ pub async fn fetch_history(base: &str, limit: u32) -> anyhow::Result<Vec<Event>>
         .collect();
     // 履歴 API は新しい順
     events.reverse();
-    // 受信時刻を発表時刻にしておく。起動時にまとめて配信すると全件がほぼ同じ時刻になり、
-    // ブラウザ側で新旧の順が崩れるため
-    for ev in &mut events {
-        if let Some(t) = ev.issued_at_ms() {
-            ev.received_at_ms = t.max(0) as u64;
-        }
-    }
+    events.iter_mut().for_each(stamp_issued);
     Ok(events)
+}
+
+/// 現在の津波予報 (最新の 1 件。解除済みならその解除の情報)。
+pub async fn fetch_latest_tsunami(url: &str) -> anyhow::Result<Option<Event>> {
+    let items: Vec<serde_json::Value> = reqwest::Client::new()
+        .get(url)
+        .query(&[("limit", "1")])
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let Some(item) = items.into_iter().next() else {
+        return Ok(None);
+    };
+    let mut ev = p2pquake::parse_value(item)?;
+    ev.iter_mut().for_each(stamp_issued);
+    Ok(ev)
+}
+
+/// 受信時刻を発表時刻にしておく。起動時にまとめて配信すると全件がほぼ同じ時刻になり、
+/// ブラウザ側で新旧の順が崩れるため
+fn stamp_issued(ev: &mut Event) {
+    if let Some(t) = ev.issued_at_ms() {
+        ev.received_at_ms = t.max(0) as u64;
+    }
 }
