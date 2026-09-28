@@ -4,6 +4,7 @@ import type { PrefScale, TsunamiArea } from "./types.ts";
 import { scaleColor } from "./scale.ts";
 import { geoCircle } from "./waves.ts";
 import { union, type Box } from "./camera.ts";
+import mapCss from "./map.css";
 import { clusterMarkers, edgePoint, labelSize, type Cluster, type Marker } from "./cluster.ts";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -19,7 +20,16 @@ const MARKER_MERGE_PX = 18;
 const DETAIL_MAX_H = 1300;
 
 /** 日本全体が収まる表示範囲 (lon/lat) */
-const HOME = { lonMin: 122.5, lonMax: 149, latMin: 24, latMax: 46 };
+const HOME = { lonMin: 128, lonMax: 146.2, latMin: 30, latMax: 45.8 };
+
+/**
+ * 日本全体の表示で本図に入らない離島の別枠。本図の層をそのまま縮小して映す。
+ * 地震に寄っているときは本図だけで描けるので隠す。always でないものは、その範囲に何かあるときだけ出す
+ */
+const INSETS = [
+  { id: "okinawa", title: "南西諸島", lonMin: 122.9, lonMax: 131.4, latMin: 24.0, latMax: 30.0, always: true },
+  { id: "ogasawara", title: "小笠原", lonMin: 140.8, lonMax: 142.5, latMin: 24.0, latMax: 27.9, always: false },
+];
 
 interface View {
   x: number;
@@ -77,6 +87,7 @@ export class JapanMap {
   private view: View;
   private epicenters: SVGGElement[] = [];
   private epicenterSig = "";
+  private insets: ((typeof INSETS)[number] & { box: HTMLDivElement; svg: SVGSVGElement; markers: SVGGElement; bounds: Box })[] = [];
   private markerItems: { key: string; x: number; y: number; label: number | null; primary: boolean; scale: number }[] = [];
   /** 画面外の地震の方向を示す矢印 (地図の上に重ねる HTML) */
   private offscreen = document.createElement("div");
@@ -92,7 +103,30 @@ export class JapanMap {
 
   constructor(container: HTMLElement) {
     this.svg = el("svg", { class: "map", preserveAspectRatio: "xMidYMid meet" });
-    this.svg.append(this.neighborLayer, this.prefLayer, this.areaLayer, this.tsunamiLayer, this.waveLayer, this.dotLayer, this.markerLayer);
+    // 別枠には塗り分け・津波予報・観測点の点だけを映す (震央の印は縮尺に合わせて別に描く)
+    const base = el("g", { id: "map-base" });
+    // 外部の CSS は <use> の複製に効かないので、図形のスタイルは SVG の中に置く
+    const style = el("style");
+    style.textContent = mapCss;
+    base.append(style, this.neighborLayer, this.prefLayer, this.areaLayer, this.tsunamiLayer, this.dotLayer);
+    this.svg.append(base, this.waveLayer, this.markerLayer);
+    for (const ins of INSETS) {
+      const [x0, y0] = project(ins.lonMin, ins.latMax);
+      const [x1, y1] = project(ins.lonMax, ins.latMin);
+      const box = document.createElement("div");
+      box.className = `inset inset-${ins.id}`;
+      box.hidden = true;
+      box.dataset.title = ins.title;
+      const svg = el("svg", { viewBox: `${x0} ${y0} ${x1 - x0} ${y1 - y0}`, preserveAspectRatio: "xMidYMid meet" });
+      svg.style.aspectRatio = String((x1 - x0) / (y1 - y0));
+      const use = el("use");
+      use.setAttribute("href", "#map-base");
+      const markers = el("g");
+      svg.append(use, markers);
+      box.append(svg);
+      container.append(box);
+      this.insets.push({ ...ins, box, svg, markers, bounds: { x0, y0, x1, y1 } });
+    }
     this.waveLayer.append(this.sWave, this.pWave);
     this.offscreen.className = "offscreen-layer";
     this.offscreen.addEventListener("click", (e) => {
@@ -161,6 +195,7 @@ export class JapanMap {
       }),
     );
     this.paintFade();
+    this.updateInsets();
   }
 
   /** 津波予報区の沿岸線 */
@@ -194,6 +229,53 @@ export class JapanMap {
       const t = this.tsunamiAreas.get(a.name);
       if (t) t.path.dataset.grade = a.grade;
     }
+    this.updateInsets();
+  }
+
+  /** 別枠の表示。日本全体を見ているときだけ出し、always でないものはその範囲に何かあるときだけ */
+  private updateInsets(): void {
+    const overview = this.view.h >= this.homeView().h * 0.8;
+    for (const ins of this.insets) {
+      ins.box.hidden = !overview || !(ins.always || this.hasContentIn(ins.bounds));
+      if (!ins.box.hidden) this.renderInsetMarkers(ins);
+    }
+  }
+
+  /** 別枠の中の震央の印 (別枠の縮尺で、本図と同じ画面上の大きさに) */
+  private renderInsetMarkers(ins: (typeof this.insets)[number]): void {
+    const w = ins.svg.getBoundingClientRect().width;
+    const k = w > 0 ? (ins.bounds.x1 - ins.bounds.x0) / w : 1;
+    const b = ins.bounds;
+    const r = 6;
+    const x9 = `M${-r} ${-r}L${r} ${r}M${r} ${-r}L${-r} ${r}`;
+    ins.markers.replaceChildren(
+      ...this.markerItems
+        .filter((m) => m.x >= b.x0 && m.x <= b.x1 && m.y >= b.y0 && m.y <= b.y1)
+        .map((m) => {
+          const g = el("g", { class: "epicenter sub", transform: `translate(${m.x} ${m.y}) scale(${k})` });
+          g.append(el("path", { d: x9, class: "epicenter-x-bg" }), el("path", { d: x9, class: "epicenter-x" }));
+          if (m.label != null) {
+            const t = el("text", { x: 8, y: -6, class: "epicenter-label", style: "font-size: 11px" });
+            t.textContent = String(m.label);
+            g.append(t);
+          }
+          return g;
+        }),
+    );
+  }
+
+  /** 範囲内に塗り分け・津波予報・震央があるか */
+  private hasContentIn(b: Box): boolean {
+    const inBox = (x: number, y: number) => x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1;
+    const boxHits = (p: SVGGraphicsElement) => {
+      const r = p.getBBox();
+      return r.x <= b.x1 && r.x + r.width >= b.x0 && r.y <= b.y1 && r.y + r.height >= b.y0;
+    };
+    return (
+      this.markerItems.some((m) => inBox(m.x, m.y)) ||
+      [...this.areaColors.keys()].some((n) => boxHits(this.areas.get(n)!)) ||
+      [...this.tsunamiAreas.values()].some((t) => t.path.dataset.grade && inBox((t.box.x0 + t.box.x1) / 2, (t.box.y0 + t.box.y1) / 2))
+    );
   }
 
   /** 津波予報区の外接矩形 (地図座標) */
@@ -243,6 +325,7 @@ export class JapanMap {
       return { x, y, ...rest };
     });
     this.renderMarkers();
+    this.updateInsets();
   }
 
   /** 画面上で重なる印をまとめて描く。まとまり方はズームで変わるので、表示範囲が変わるたびに呼ぶ */
@@ -385,9 +468,18 @@ export class JapanMap {
   }
 
   private applyView(): void {
+    // 画面の大きさが変わったときなどに、表示範囲の縦横比を画面に合わせる (足りない方向に広げる)
+    const aspect = this.aspect();
+    const cur = this.view;
+    if (Math.abs(cur.w / cur.h - aspect) > 1e-3) {
+      const w = Math.max(cur.w, cur.h * aspect);
+      const h = w / aspect;
+      this.view = { x: cur.x + (cur.w - w) / 2, y: cur.y + (cur.h - h) / 2, w, h };
+    }
     const v = this.view;
     this.svg.setAttribute("viewBox", `${v.x} ${v.y} ${v.w} ${v.h}`);
-    this.svg.classList.toggle("detail", this.areas.size > 0 && v.h < DETAIL_MAX_H);
+    this.svg.classList.toggle("zoomed", this.areas.size > 0 && v.h < DETAIL_MAX_H);
+    this.updateInsets();
     this.renderMarkers();
     this.updateMarkerScale();
   }

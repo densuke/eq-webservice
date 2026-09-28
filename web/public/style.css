@@ -70,39 +70,26 @@ body {
 
 .layout { flex: 1; display: grid; grid-template-columns: 1fr 380px; min-height: 0; }
 .map-wrap { position: relative; background: var(--sea); min-height: 0; overflow: hidden; }
-.map { width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+.map { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
 .map:active { cursor: grabbing; }
 
-.neighbor { fill: #20262f; stroke: #2b323d; stroke-width: 0.6; vector-effect: non-scaling-stroke; fill-rule: evenodd; }
-.pref { fill: var(--land); stroke: var(--land-edge); stroke-width: 0.8; vector-effect: non-scaling-stroke; fill-rule: evenodd; }
-.pref.hit { stroke: #000; }
-.pref.forecast { stroke: #fff; stroke-dasharray: 4 3; stroke-width: 1.2; }
-/* 寄ったとき (.detail) は都道府県の塗りをやめ、細分区域と観測点で描く */
-.map:not(.detail) .areas, .map:not(.detail) .dots { display: none; }
-.map.detail .pref { fill: var(--land) !important; stroke: #5a6474; }
-.area { fill: none; stroke: rgba(255, 255, 255, 0.1); stroke-width: 0.5; vector-effect: non-scaling-stroke; fill-rule: evenodd; }
-.area.hit { stroke: rgba(0, 0, 0, 0.6); fill-opacity: 0.55; }
-.area.forecast { stroke: #fff; stroke-dasharray: 4 3; stroke-width: 1; }
-.dot, .dot-bg { fill: none; stroke-linecap: round; vector-effect: non-scaling-stroke; }
-.dot { stroke-width: 7px; }
-.dot-bg { stroke: #000; stroke-width: 9.5px; }
-.tsunami-line { fill: none; stroke: none; vector-effect: non-scaling-stroke; stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 0 1.5px #000) drop-shadow(0 0 1px #000); }
-.tsunami-line[data-grade="watch"] { stroke: var(--t-watch); }
-.tsunami-line[data-grade="warning"] { stroke: var(--t-warning); }
-.tsunami-line[data-grade="major_warning"] { stroke: var(--t-major); stroke-width: 7; }
+/* 寄ったとき (.zoomed) は都道府県の塗りをやめ、細分区域と観測点で描く */
+.map:not(.zoomed) .areas, .map:not(.zoomed) .dots { display: none; }
+.map.zoomed .pref { fill: var(--land) !important; stroke: #5a6474; }
 .tsunami-banner { color: #111; background: var(--t-watch); padding: 6px 16px; font-size: 14px; }
 .tsunami-banner[data-grade="warning"] { color: #fff; background: var(--t-warning); }
 .tsunami-banner[data-grade="major_warning"] { color: #fff; background: var(--t-major); }
-.wave { fill: none; vector-effect: non-scaling-stroke; stroke-width: 2.5; }
-.wave-p { stroke: var(--p-wave); }
-.wave-s { stroke: var(--s-wave); fill: rgba(255, 82, 82, 0.05); }
-.epicenter-x { stroke: #ff1744; stroke-width: 4; stroke-linecap: round; fill: none; }
-.epicenter-x-bg { stroke: #fff; stroke-width: 8; stroke-linecap: round; fill: none; }
-.epicenter.sub { opacity: 0.8; }
-.epicenter-label { font-size: 15px; font-weight: 700; fill: #fff; stroke: #000; stroke-width: 4px; paint-order: stroke; }
 .num { display: inline-block; min-width: 1.4em; padding: 0 3px; margin-right: 4px; border-radius: 4px; background: #fff; color: #111; font-size: 0.85em; font-weight: 700; text-align: center; }
-.epicenter-pulse { fill: none; stroke: #ff1744; stroke-width: 2; animation: pulse 1.6s ease-out infinite; transform-box: fill-box; transform-origin: center; }
-@keyframes pulse { from { transform: scale(0.4); opacity: 1; } to { transform: scale(2.2); opacity: 0; } }
+
+/* 離島の別枠 (日本全体を表示しているときだけ) */
+.inset {
+  position: absolute; z-index: 1; pointer-events: none; background: var(--sea);
+  border: 1px solid #3a4452; border-radius: 4px; overflow: hidden;
+}
+.inset::before { content: attr(data-title); position: absolute; left: 4px; top: 2px; font-size: 10px; color: var(--muted); }
+.inset svg { display: block; height: 100%; width: auto; }
+.inset-okinawa { left: 10px; top: 10px; height: 150px; }
+.inset-ogasawara { right: 10px; bottom: 10px; height: 150px; }
 
 /* 画面外の地震の方向 (地図の端)。色は最大震度 */
 .offscreen-layer { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
@@ -181,6 +168,7 @@ body {
   .topbar h1 { font-size: 14px; }
   .version { display: none; }
   .clock-panel { top: 6px; right: 6px; padding: 3px 8px 4px; }
+  .inset-okinawa, .inset-ogasawara { height: 100px; }
   .c-hm { font-size: 26px; }
   .c-day { font-size: 20px; }
   .eew-banner { position: sticky; top: 37px; z-index: 2; font-size: 14px; }
