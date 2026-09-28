@@ -5,6 +5,7 @@ import { scaleColor, scaleLabel } from "./scale.ts";
 import { geoCircle } from "./waves.ts";
 import { union, type Box } from "./camera.ts";
 import mapCss from "./map.css";
+import { esc } from "./html.ts";
 import { clusterMarkers, edgePoint, labelSize, type Cluster, type Marker } from "./cluster.ts";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -407,7 +408,7 @@ export class JapanMap {
       .filter(({ p }) => p)
       .map(({ m, p }) => {
         const c = scaleColor(m.scale);
-        return `<button type="button" class="offscreen" data-key="${m.key.replace(/"/g, "&quot;")}" style="left:${p!.x.toFixed(0)}px;top:${p!.y.toFixed(0)}px;--c:${c}" title="${m.label}番の地震へ"><i style="transform:rotate(${p!.angle.toFixed(0)}deg) translateX(17px)"></i>${m.label}</button>`;
+        return `<button type="button" class="offscreen" data-key="${esc(m.key)}" style="left:${p!.x.toFixed(0)}px;top:${p!.y.toFixed(0)}px;--c:${c}" title="${m.label}番の地震へ"><i style="transform:rotate(${p!.angle.toFixed(0)}deg) translateX(17px)"></i>${m.label}</button>`;
       })
       .join("");
     if (this.offscreen.innerHTML !== html) this.offscreen.innerHTML = html;

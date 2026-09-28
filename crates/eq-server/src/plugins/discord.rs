@@ -83,7 +83,14 @@ impl Sink for DiscordSink {
             body["username"] = json!(u);
         }
         for _ in 0..2 {
-            let res = self.client.post(&self.url).json(&body).send().await?;
+            // Webhook の URL は秘密情報なので、エラー (ログに出る) には含めない
+            let res = self
+                .client
+                .post(&self.url)
+                .json(&body)
+                .send()
+                .await
+                .map_err(reqwest::Error::without_url)?;
             if res.status().as_u16() == 429 {
                 // レート制限: 指定秒数待って 1 回だけ再送
                 let wait: f64 = res
@@ -95,7 +102,7 @@ impl Sink for DiscordSink {
                 tokio::time::sleep(Duration::from_secs_f64(wait.min(10.0))).await;
                 continue;
             }
-            res.error_for_status()?;
+            res.error_for_status().map_err(reqwest::Error::without_url)?;
             return Ok(());
         }
         anyhow::bail!("rate limited")

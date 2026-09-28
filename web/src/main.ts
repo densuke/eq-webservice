@@ -1,4 +1,5 @@
 import { Connection, type Status } from "./connection.ts";
+import { esc } from "./html.ts";
 import { GroupStore, latestEew, summarizeQuake, type Group } from "./groups.ts";
 import { alertLevel, type AlertLevel } from "./alert.ts";
 import { followRadiusKm, pad, pointBox, stopRadiusKm, union, type Box } from "./camera.ts";
@@ -47,10 +48,6 @@ let numbers = new Map<string, number>();
 let conn: Connection;
 
 // ---------- 描画ヘルパ ----------
-
-function esc(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-}
 
 function numTag(key: string): string {
   const n = numbers.get(key);

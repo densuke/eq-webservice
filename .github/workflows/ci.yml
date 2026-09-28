@@ -158,3 +158,47 @@ jobs:
               --title "$GITHUB_REF_NAME" \
               --generate-notes $prerelease
           fi
+
+  # 依存関係の既知の脆弱性 (見つかったら失敗にする)
+  audit:
+    name: audit (cargo / npm)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - run: cargo audit
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm audit --omit=dev
+        working-directory: web
+
+  # カバレッジは計器として表示するだけ (合否には使わない)
+  coverage:
+    name: coverage (表示のみ)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: coverage
+      - name: rust
+        run: cargo llvm-cov --summary-only | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: web
+        working-directory: web
+        run: |
+          npm ci
+          node --test --experimental-strip-types --experimental-test-coverage src/*.test.ts 2>&1 \
+            | sed -n '/start of coverage report/,/end of coverage report/p' | tee -a "$GITHUB_STEP_SUMMARY"
