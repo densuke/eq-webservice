@@ -57,6 +57,8 @@ export interface EewEvent extends EventBase {
   serial: string;
   cancelled: boolean;
   test: boolean;
+  /** 警報 (予測震度5弱以上)。false は予報 */
+  warning: boolean;
   issued_at: string;
   origin_time: string | null;
   origin_time_ms: number | null;

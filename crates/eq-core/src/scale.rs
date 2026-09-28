@@ -20,6 +20,22 @@ impl Scale {
     pub const S6_UPPER: Scale = Scale(60);
     pub const S7: Scale = Scale(70);
 
+    /// "3", "5弱", "5-", "6強", "6+" などを読む。
+    pub fn parse(s: &str) -> Option<Scale> {
+        Some(match s.trim() {
+            "1" => Scale::S1,
+            "2" => Scale::S2,
+            "3" => Scale::S3,
+            "4" => Scale::S4,
+            "5-" | "5弱" => Scale::S5_LOWER,
+            "5+" | "5強" => Scale::S5_UPPER,
+            "6-" | "6弱" => Scale::S6_LOWER,
+            "6+" | "6強" => Scale::S6_UPPER,
+            "7" => Scale::S7,
+            _ => return None,
+        })
+    }
+
     pub fn is_known(self) -> bool {
         self.0 > 0
     }

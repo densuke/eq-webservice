@@ -99,6 +99,7 @@ body {
 .point-row { display: flex; gap: 8px; align-items: flex-start; }
 .arrived { color: #ff7b72; font-size: 12px; }
 .eew-title { color: #ff7b72; }
+.eew-banner.forecast { background: #b35900; animation: none; }
 .muted { color: var(--muted); }
 .error { color: #f85149; }
 

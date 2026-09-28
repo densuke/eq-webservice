@@ -3,8 +3,11 @@
 
 pub mod p2pquake;
 pub mod replay;
+pub mod wolfx;
 
+use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::config::SourceConfig;
 use crate::hub::Hub;
@@ -17,6 +20,7 @@ pub async fn run(cfg: SourceConfig, hub: Arc<Hub>, on_seed: impl FnOnce(&[Arc<eq
             history_url,
             history_limit,
             tsunami_url,
+            eew_url,
         } => {
             let mut events = Vec::new();
             if !history_url.is_empty() && history_limit > 0 {
@@ -34,7 +38,7 @@ pub async fn run(cfg: SourceConfig, hub: Arc<Hub>, on_seed: impl FnOnce(&[Arc<eq
             let seeded = hub.seed(events);
             tracing::info!(count = seeded.len(), "loaded history");
             on_seed(&seeded);
-            p2pquake::run(&url, &tsunami_url, &hub).await
+            tokio::join!(p2pquake::run(&url, &tsunami_url, &hub), wolfx::run(&eew_url, &hub));
         }
         SourceConfig::Replay {
             path,
@@ -53,5 +57,30 @@ pub async fn run(cfg: SourceConfig, hub: Arc<Hub>, on_seed: impl FnOnce(&[Arc<eq
                 tracing::error!("replay failed: {e:#}");
             }
         }
+    }
+}
+
+const MIN_BACKOFF: Duration = Duration::from_secs(1);
+const MAX_BACKOFF: Duration = Duration::from_secs(60);
+
+/// session を繰り返す (戻らない)。切断・エラーのたびに指数バックオフで再接続する。
+async fn reconnecting<F, Fut>(name: &str, mut session: F)
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = anyhow::Result<()>>,
+{
+    let mut backoff = MIN_BACKOFF;
+    loop {
+        tracing::info!(name, "connecting");
+        match session().await {
+            Ok(()) => {
+                tracing::warn!(name, "upstream closed the connection");
+                backoff = MIN_BACKOFF;
+            }
+            Err(e) => tracing::warn!(name, "upstream error: {e:#}"),
+        }
+        tracing::info!(name, secs = backoff.as_secs(), "reconnecting later");
+        tokio::time::sleep(backoff).await;
+        backoff = (backoff * 2).min(MAX_BACKOFF);
     }
 }

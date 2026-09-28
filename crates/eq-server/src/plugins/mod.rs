@@ -90,24 +90,11 @@ fn de_scale<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Scale>, D::
         None => return Ok(None),
         Some(Raw::Num(n)) if n < 10 => Scale(n as i32 * 10),
         Some(Raw::Num(n)) => Scale(n as i32),
-        Some(Raw::Str(s)) => parse_scale(&s).ok_or_else(|| serde::de::Error::custom(format!("unknown scale {s:?}")))?,
+        Some(Raw::Str(s)) => {
+            Scale::parse(&s).ok_or_else(|| serde::de::Error::custom(format!("unknown scale {s:?}")))?
+        }
     };
     Ok(Some(v))
-}
-
-pub fn parse_scale(s: &str) -> Option<Scale> {
-    Some(match s.trim() {
-        "1" => Scale::S1,
-        "2" => Scale::S2,
-        "3" => Scale::S3,
-        "4" => Scale::S4,
-        "5-" | "5弱" => Scale::S5_LOWER,
-        "5+" | "5強" => Scale::S5_UPPER,
-        "6-" | "6弱" => Scale::S6_LOWER,
-        "6+" | "6強" => Scale::S6_UPPER,
-        "7" => Scale::S7,
-        _ => return None,
-    })
 }
 
 pub struct Loaded {

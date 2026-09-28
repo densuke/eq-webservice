@@ -26,7 +26,7 @@ pub struct Event {
 pub enum EventBody {
     /// 地震情報 (震度速報・震源情報・各地の震度など)
     Quake(Quake),
-    /// 緊急地震速報 (警報)
+    /// 緊急地震速報 (警報・予報)
     Eew(Eew),
     /// 緊急地震速報の発表検出 (内容なしの「鳴った」通知)
     EewDetection(EewDetection),
@@ -128,6 +128,9 @@ pub struct Eew {
     pub cancelled: bool,
     /// テスト配信
     pub test: bool,
+    /// 警報 (予測震度5弱以上)。false は予報。P2P地震情報は警報だけを配信する
+    #[serde(default = "yes")]
+    pub warning: bool,
     pub issued_at: String,
     pub origin_time: Option<String>,
     /// 発生時刻 (epoch ミリ秒)。P波・S波の描画に使う。
@@ -202,10 +205,10 @@ impl Event {
                 }
             }
             EventBody::Eew(e) => {
-                let prefix = if e.test {
-                    "【緊急地震速報(テスト)】"
-                } else {
-                    "【緊急地震速報(警報)】"
+                let prefix = match (e.test, e.warning) {
+                    (true, _) => "【緊急地震速報(テスト)】",
+                    (false, true) => "【緊急地震速報(警報)】",
+                    (false, false) => "【緊急地震速報(予報)】",
                 };
                 if e.cancelled {
                     format!("{prefix}取消")
@@ -360,6 +363,10 @@ pub fn domestic_tsunami_label(v: &str) -> Option<&'static str> {
         "Warning" => Some("津波予報(警報等)を発表中です。"),
         _ => None,
     }
+}
+
+fn yes() -> bool {
+    true
 }
 
 /// 都道府県ごとの最大震度を、震度の大きい順 (同震度は出現順) で返す。
