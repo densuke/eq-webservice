@@ -593,7 +593,14 @@ function renderClock(now: number): void {
   set("#c-day", `${c.day}日`);
   set("#c-wd", `(${c.weekday})`);
   set("#c-hm", c.hm);
-  set("#c-sec", c.sec);
+  if ($("#c-sec").textContent !== c.sec) {
+    set("#c-sec", c.sec);
+    // 秒が変わるたびに拍動させる (アニメーションを最初からやり直す)
+    const beat = $("#c-beat");
+    beat.classList.remove("beat");
+    void beat.offsetWidth;
+    beat.classList.add("beat");
+  }
 }
 
 function setStatus(s: Status): void {

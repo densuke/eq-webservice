@@ -61,6 +61,12 @@ body {
 .c-time { font-weight: 700; }
 .c-hm { font-size: 34px; letter-spacing: 0.02em; }
 .c-sec { font-size: 18px; margin-left: 4px; color: var(--muted); }
+/* 秒ごとに拍動する印。緑=オンライン / 赤=切断中 / 黄=接続中 (切断中・接続中は拍動しない) */
+.c-beat { display: inline-block; width: 10px; height: 10px; margin-left: 6px; border-radius: 50%; background: #d29922; vertical-align: 0.15em; }
+.clock-panel[data-status="open"] .c-beat { background: #3fb950; }
+.clock-panel[data-status="closed"] .c-beat { background: #f85149; }
+.clock-panel[data-status="open"] .c-beat.beat { animation: beat 0.9s ease-out; }
+@keyframes beat { from { box-shadow: 0 0 0 0 rgba(63, 185, 80, 0.8); transform: scale(1.35); } to { box-shadow: 0 0 0 8px rgba(63, 185, 80, 0); transform: scale(1); } }
 
 .eew-banner {
   background: var(--alert); color: #fff; padding: 8px 16px; font-size: 15px;
