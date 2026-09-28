@@ -76,6 +76,15 @@ body {
 .pref { fill: var(--land); stroke: var(--land-edge); stroke-width: 0.8; vector-effect: non-scaling-stroke; fill-rule: evenodd; }
 .pref.hit { stroke: #000; }
 .pref.forecast { stroke: #fff; stroke-dasharray: 4 3; stroke-width: 1.2; }
+/* 寄ったとき (.detail) は都道府県の塗りをやめ、細分区域と観測点で描く */
+.map:not(.detail) .areas, .map:not(.detail) .dots { display: none; }
+.map.detail .pref { fill: var(--land) !important; stroke: #5a6474; }
+.area { fill: none; stroke: rgba(255, 255, 255, 0.1); stroke-width: 0.5; vector-effect: non-scaling-stroke; fill-rule: evenodd; }
+.area.hit { stroke: rgba(0, 0, 0, 0.6); fill-opacity: 0.55; }
+.area.forecast { stroke: #fff; stroke-dasharray: 4 3; stroke-width: 1; }
+.dot, .dot-bg { fill: none; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.dot { stroke-width: 7px; }
+.dot-bg { stroke: #000; stroke-width: 9.5px; }
 .tsunami-line { fill: none; stroke: none; vector-effect: non-scaling-stroke; stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 0 1.5px #000) drop-shadow(0 0 1px #000); }
 .tsunami-line[data-grade="watch"] { stroke: var(--t-watch); }
 .tsunami-line[data-grade="warning"] { stroke: var(--t-warning); }

@@ -11,6 +11,9 @@ const LAT0 = 37;
 const KX = Math.cos((LAT0 * Math.PI) / 180) * 100;
 const KY = 100;
 
+/** 表示範囲の高さがこれより小さい (寄っている) ときは、細分区域と観測点で描く (1 度 ≒ 100) */
+const DETAIL_MAX_H = 1300;
+
 /** 日本全体が収まる表示範囲 (lon/lat) */
 const HOME = { lonMin: 122.5, lonMax: 149, latMin: 24, latMax: 46 };
 
@@ -53,10 +56,15 @@ function ringPath(coords: [number, number][]): string {
 export class JapanMap {
   readonly svg: SVGSVGElement;
   private prefLayer = el("g", { class: "prefs" });
+  private areaLayer = el("g", { class: "areas" });
+  private dotLayer = el("g", { class: "dots" });
   private tsunamiLayer = el("g", { class: "tsunami" });
   private waveLayer = el("g", { class: "waves" });
   private markerLayer = el("g", { class: "markers" });
   private prefs = new Map<string, SVGPathElement>();
+  private areas = new Map<string, SVGPathElement>();
+  /** 塗り分け中の細分区域と色 */
+  private areaColors = new Map<string, string>();
   private tsunamiAreas = new Map<string, { path: SVGPathElement; box: Box }>();
   /** 塗り分け中の都道府県と色 (薄くするときに使う) */
   private hitColors = new Map<string, string>();
@@ -74,7 +82,7 @@ export class JapanMap {
 
   constructor(container: HTMLElement) {
     this.svg = el("svg", { class: "map", preserveAspectRatio: "xMidYMid meet" });
-    this.svg.append(this.prefLayer, this.tsunamiLayer, this.waveLayer, this.markerLayer);
+    this.svg.append(this.prefLayer, this.areaLayer, this.tsunamiLayer, this.waveLayer, this.dotLayer, this.markerLayer);
     this.waveLayer.append(this.sWave, this.pWave);
     container.append(this.svg);
     this.view = this.homeView();
@@ -84,18 +92,55 @@ export class JapanMap {
   }
 
   async load(url: string): Promise<void> {
+    await this.loadPolygons(url, "pref", this.prefLayer, this.prefs);
+  }
+
+  /** 地震情報細分区域 (寄ったときに使う) */
+  async loadAreas(url: string): Promise<void> {
+    await this.loadPolygons(url, "area", this.areaLayer, this.areas);
+    this.applyView();
+  }
+
+  private async loadPolygons(url: string, cls: string, layer: SVGGElement, into: Map<string, SVGPathElement>): Promise<void> {
     const res = await fetch(url);
-    if (!res.ok) throw new Error(`地図データを取得できません (${res.status})`);
+    if (!res.ok) throw new Error(`地図データを取得できません (${url}: ${res.status})`);
     const data: { features: GeoFeature[] } = await res.json();
     for (const f of data.features) {
       const d = f.geometry.coordinates.flatMap((poly) => poly.map((ring) => ringPath(ring as [number, number][]))).join("");
-      const path = el("path", { d, class: "pref", "data-name": f.properties.name });
+      const path = el("path", { d, class: cls, "data-name": f.properties.name });
       const title = el("title");
       title.textContent = f.properties.name;
       path.append(title);
-      this.prefLayer.append(path);
-      this.prefs.set(f.properties.name, path);
+      layer.append(path);
+      into.set(f.properties.name, path);
     }
+  }
+
+  /** 寄ったときの細かい表示: 細分区域の塗り分けと、震度観測点の点。forecast は緊急地震速報の予測 */
+  setDetail(areas: { name: string; scale: number }[], forecast: boolean, dots: { lat: number; lon: number; scale: number }[]): void {
+    for (const name of this.areaColors.keys()) {
+      const p = this.areas.get(name)!;
+      p.style.fill = "";
+      p.classList.remove("forecast", "hit");
+    }
+    this.areaColors = new Map(areas.filter(({ name }) => this.areas.has(name)).map(({ name, scale }) => [name, scaleColor(scale)]));
+    for (const name of this.areaColors.keys()) this.areas.get(name)!.classList.toggle("forecast", forecast);
+    // 点は震度ごとに 1 本の path にまとめる (長さ 0 の線を丸い線端で描くと、ズームしても同じ大きさの点になる)
+    const byScale = new Map<number, string>();
+    for (const { lat, lon, scale } of [...dots].sort((a, b) => a.scale - b.scale)) {
+      const [x, y] = project(lon, lat);
+      byScale.set(scale, (byScale.get(scale) ?? "") + `M${x.toFixed(1)} ${y.toFixed(1)}h0`);
+    }
+    const all = [...byScale.values()].join("");
+    this.dotLayer.replaceChildren(
+      el("path", { d: all, class: "dot-bg" }),
+      ...[...byScale].map(([scale, d]) => {
+        const p = el("path", { d, class: "dot" });
+        p.style.stroke = scaleColor(scale);
+        return p;
+      }),
+    );
+    this.paintFade();
   }
 
   /** 津波予報区の沿岸線 */
@@ -156,12 +201,19 @@ export class JapanMap {
 
   private paintFade(): void {
     const a = this.fade;
+    const mix = (color: string) => (a >= 1 ? color : `color-mix(in srgb, ${color} ${(a * 100).toFixed(1)}%, var(--land))`);
     for (const [pref, color] of this.hitColors) {
       const p = this.prefs.get(pref)!;
-      p.style.fill = a >= 1 ? color : `color-mix(in srgb, ${color} ${(a * 100).toFixed(1)}%, var(--land))`;
+      p.style.fill = mix(color);
+      p.classList.toggle("hit", a > 0);
+    }
+    for (const [name, color] of this.areaColors) {
+      const p = this.areas.get(name)!;
+      p.style.fill = mix(color);
       p.classList.toggle("hit", a > 0);
     }
     this.markerLayer.style.opacity = String(a);
+    this.dotLayer.style.opacity = String(a);
   }
 
   /** 震央の印。primary (表示中の地震) は大きく、ほかは小さく。label は一時的な番号 */
@@ -277,6 +329,7 @@ export class JapanMap {
   private applyView(): void {
     const v = this.view;
     this.svg.setAttribute("viewBox", `${v.x} ${v.y} ${v.w} ${v.h}`);
+    this.svg.classList.toggle("detail", this.areas.size > 0 && v.h < DETAIL_MAX_H);
     this.updateMarkerScale();
   }
 

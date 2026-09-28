@@ -12,6 +12,7 @@ import { surfaceRadiusKm, VP_KM_S, VS_KM_S } from "./waves.ts";
 import { byPriority, sameQuake, type Place } from "./priority.ts";
 import { assignNumbers } from "./numbering.ts";
 import { clockParts } from "./clock.ts";
+import { eewAreaScales, quakeDetail, type Station } from "./detail.ts";
 
 /** 発生からこの秒数を過ぎたら P波・S波の表示を止める */
 const WAVE_MAX_SEC = 180;
@@ -142,11 +143,15 @@ function paintMap(g: Group | undefined): void {
   if (g?.kind === "quake") {
     const q = summarizeQuake(g);
     map.setPrefScales(q.prefMax);
+    const d = quakeDetail(q.points, stations);
+    map.setDetail(d.areas, false, d.dots);
   } else if (g?.kind === "eew") {
     const e = latestEew(g);
     map.setPrefScales(e.cancelled ? [] : e.pref_max, true);
+    map.setDetail(e.cancelled ? [] : eewAreaScales(e.areas), true, []);
   } else {
     map.setPrefScales([]);
+    map.setDetail([], false, []);
   }
 }
 
@@ -542,6 +547,15 @@ function onEvents(events: EqEvent[], live: boolean): void {
 }
 
 let telopMessages: string[] = [];
+/** 震度観測点の位置と属する細分区域 (観測点名 → 位置) */
+let stations = new Map<string, Station>();
+
+async function loadStations(): Promise<void> {
+  const res = await fetch("stations.json");
+  if (!res.ok) return;
+  const rows: [string, number, number, string][] = await res.json();
+  stations = new Map(rows.map(([name, lat, lon, area]) => [name, { lat, lon, area }]));
+}
 
 /** テロップ。地震の情報を出している間は邪魔をしないよう消す */
 function renderTelop(now: number, busy: boolean): void {
@@ -629,6 +643,9 @@ Promise.all([
   map.load("japan.geojson"),
   // 無くても地震の表示はできる
   map.loadTsunami("tsunami.geojson").catch(() => {}),
+  // 無ければ寄っても都道府県で塗る
+  map.loadAreas("areas.geojson").catch(() => {}),
+  loadStations().catch(() => {}),
 ])
   .catch((err) => {
     $("#detail").innerHTML = `<p class="error">${esc(String(err))}</p>`;
