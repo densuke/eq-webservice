@@ -1,5 +1,6 @@
 mod banner;
 mod bgm;
+mod bgm_send;
 mod cli;
 mod config;
 mod demo;
@@ -34,6 +35,10 @@ async fn main() -> anyhow::Result<()> {
             anyhow::bail!("usage: eq-server convert <samples/scenarios> <web/public/demo>");
         };
         return demo::convert_dir(src.as_ref(), out.as_ref());
+    }
+    // eq-server bgm-send <MP3 のディレクトリ> <Icecast の URL>: 平時の BGM を Icecast へ送り続ける
+    if args.first().map(String::as_str) == Some("bgm-send") {
+        return bgm_send::run(&args[1..]);
     }
     let cli = Cli::parse(args)?.with_env(|k| std::env::var(k).ok())?;
     if cli.help {
