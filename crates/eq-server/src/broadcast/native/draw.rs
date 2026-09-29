@@ -11,7 +11,7 @@ use super::frame::{Frame, OKINAWA};
 use super::geo::{Shape, View};
 use super::icon::Icons;
 use super::model::{scale_color, scale_text_color, QuakeSummary};
-use super::paint::{epicenter, rect, rrect, LAND, LAND_EDGE, MUTED, SEA};
+use super::paint::{epicenter, rect, rrect, LAND, LAND_EDGE, MUTED, NEIGHBOR, NEIGHBOR_EDGE, SEA};
 use super::panel;
 use super::text::Text;
 use crate::quake::Scale;
@@ -45,6 +45,8 @@ pub struct Renderer {
     main: Frame,
     /// 離島の別枠
     insets: Vec<Frame>,
+    /// 周辺国の陸地 (都道府県より下に描く。無ければ空)
+    neighbors: Vec<Shape>,
     prefs: Vec<Shape>,
     areas: HashMap<String, Shape>,
     base: Pixmap,
@@ -54,11 +56,12 @@ pub struct Renderer {
 const INSET_LINE: [u8; 3] = [0x3a, 0x44, 0x52];
 
 impl Renderer {
-    pub fn new(view: View, prefs: Vec<Shape>, areas: Vec<Shape>, text: Text) -> Renderer {
+    pub fn new(view: View, neighbors: Vec<Shape>, prefs: Vec<Shape>, areas: Vec<Shape>, text: Text) -> Renderer {
         let mut r = Renderer {
             text,
             insets: Frame::inset(&view, &OKINAWA).into_iter().collect(),
             main: Frame::main(view),
+            neighbors,
             prefs,
             areas: areas.into_iter().map(|s| (s.key.clone(), s)).collect(),
             base: Pixmap::new(W, H).expect("size"),
@@ -75,6 +78,10 @@ impl Renderer {
             if let Some(((x, y, w, h), _)) = f.inset_box() {
                 rrect(&mut pm, x - 1.0, y - 1.0, w + 2.0, h + 2.0, 4.0, INSET_LINE, 1.0);
                 rect(&mut pm, x, y, w, h, SEA, 1.0);
+            }
+            for s in &self.neighbors {
+                f.fill(&mut pm, &s.path, NEIGHBOR, 1.0);
+                f.stroke(&mut pm, &s.path, NEIGHBOR_EDGE, 1.0, 0.6);
             }
             for s in &self.prefs {
                 f.fill(&mut pm, &s.path, LAND, 1.0);

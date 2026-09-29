@@ -84,4 +84,11 @@ mod tests {
         assert!(pm.pixels().iter().any(|p| p.alpha() > 0));
         assert!(rasterize(b"not svg").is_none());
     }
+
+    #[test]
+    fn icons_that_embed_a_png_are_drawn() {
+        // 一部の気象庁のアイコン (201 など) は PNG を埋め込んでいる
+        let pm = rasterize(include_bytes!("testdata/png.svg")).unwrap();
+        assert!(pm.pixels().iter().any(|p| p.alpha() > 0));
+    }
 }

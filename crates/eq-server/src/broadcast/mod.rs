@@ -394,7 +394,10 @@ mod tests {
         assert_eq!(cfg.source, Source::Native);
         let native = ffmpeg_args(&cfg, &[], &out);
         assert!(native.windows(2).any(|w| w == ["-f", "rawvideo"]));
-        assert!(native.windows(2).any(|w| w == ["-pix_fmt", "yuv420p"]));
+        assert!(native
+            .windows(4)
+            .any(|w| w == ["-f", "rawvideo", "-pix_fmt", "yuv420p"]));
+        assert!(!native.contains(&"rgba".to_string()));
         assert!(native.windows(2).any(|w| w == ["-s", "1280x720"]));
         assert!(!native.contains(&"mjpeg".to_string()));
         assert_eq!(BroadcastConfig::default().source, Source::Chrome);

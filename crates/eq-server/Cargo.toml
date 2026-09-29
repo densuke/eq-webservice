@@ -21,8 +21,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 roxmltree = "0.21.1"
 symphonia = { version = "0.6.1", default-features = false, features = ["mp3"] }
 tiny-skia = "0.12"
-# 天気アイコンの SVG を描くだけ (文字・画像の埋め込みは使わない)
-resvg = { version = "0.48", default-features = false }
+# 天気アイコンの SVG を描くだけ (文字は使わない。一部のアイコンは PNG を埋め込むので画像は要る)
+resvg = { version = "0.48", default-features = false, features = ["raster-images"] }
 fontdue = "0.9"
 
 [dev-dependencies]

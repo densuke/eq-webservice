@@ -20,7 +20,8 @@ fn renderer(text: Text) -> Renderer {
     let view = View::fit_home(MAP_RECT);
     let prefs = geo::load(&dir.join("japan.geojson"), "name", &view).unwrap();
     let areas = geo::load(&dir.join("warning-areas.geojson"), "code", &view).unwrap();
-    Renderer::new(view, prefs, areas, text)
+    let neighbors = geo::load(&dir.join("neighbors.geojson"), "name", &view).unwrap();
+    Renderer::new(view, neighbors, prefs, areas, text)
 }
 
 fn center_of(pref: &str) -> (u32, u32) {
@@ -29,6 +30,12 @@ fn center_of(pref: &str) -> (u32, u32) {
     let shapes = geo::load(&dir.join("japan.geojson"), "name", &view).unwrap();
     let c = shapes.iter().find(|s| s.key == pref).unwrap().center;
     (c.0 as u32, c.1 as u32)
+}
+
+/// 日本海の画素 (陸から離れた海)
+fn sea_px() -> (u32, u32) {
+    let (x, y) = View::fit_home(MAP_RECT).px(134.0, 40.5);
+    (x as u32, y as u32)
 }
 
 fn rgb(pm: &Pixmap, (x, y): (u32, u32)) -> [u8; 3] {
@@ -85,9 +92,9 @@ fn calm_frame_shows_the_sea_and_a_warned_prefecture() {
     };
     let pm = r.render(&scene(None, &[], Some(&warnings), None));
     assert_eq!((pm.width(), pm.height()), (1280, 720));
-    assert_eq!(rgb(&pm, (100, 100)), SEA); // 日本海
-                                           // 警報の赤 (陸に半透明で重なる) が地図に出る。県の全体を塗るのではなく、市町村等の区域だけを塗る
-                                           // (左下の凡例にも赤があるので、数えるのは凡例より右)
+    assert_eq!(rgb(&pm, sea_px()), SEA); // 日本海
+                                         // 警報の赤 (陸に半透明で重なる) が地図に出る。県の全体を塗るのではなく、市町村等の区域だけを塗る
+                                         // (左下の凡例にも赤があるので、数えるのは凡例より右)
     let red = |pm: &Pixmap| {
         let w = pm.width() as usize;
         let hit = |(i, p): (usize, &tiny_skia::PremultipliedColorU8)| {
@@ -127,7 +134,30 @@ fn quake_frame_paints_the_prefecture_with_its_scale_color() {
     assert_eq!(rgb(&pm, center_of("東京都")), [0xfa, 0xf5, 0x00]); // 震度 4
     assert_eq!(rgb(&pm, center_of("長野県")), [0x00, 0xaa, 0xff]); // 震度 2
     assert_eq!(rgb(&pm, center_of("愛知県")), [0x3a, 0x42, 0x50]); // 揺れていない県
-    assert_eq!(rgb(&pm, (100, 100)), SEA);
+    assert_eq!(rgb(&pm, sea_px()), SEA);
+}
+
+#[test]
+fn neighbor_countries_are_drawn_under_japan_and_a_missing_file_is_fine() {
+    let mut r = renderer(Text::none());
+    let pm = r.render(&scene(None, &[], None, None));
+    let (x, y) = View::fit_home(MAP_RECT).px(126.98, 37.57); // ソウル
+    assert_eq!(rgb(&pm, (x as u32, y as u32)), paint::NEIGHBOR);
+    assert_eq!(rgb(&pm, center_of("長野県")), [0x3a, 0x42, 0x50]); // 日本の県はその上
+                                                                   // load_renderer は neighbors.geojson が無くても動く
+    let dir = tempfile::tempdir().unwrap();
+    let web = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/public");
+    for f in ["japan.geojson", "warning-areas.geojson"] {
+        std::fs::copy(web.join(f), dir.path().join(f)).unwrap();
+    }
+    let cfg = BroadcastConfig {
+        map_dir: dir.path().display().to_string(),
+        font: "/nonexistent".into(),
+        ..BroadcastConfig::default()
+    };
+    let mut bare = load_renderer(&cfg).unwrap();
+    let pm = bare.render(&scene(None, &[], None, None));
+    assert_eq!(rgb(&pm, (x as u32, y as u32)), SEA);
 }
 
 /// 中心から 3 画素以内に、その色 (各成分の差が 3 以内) の画素があるか

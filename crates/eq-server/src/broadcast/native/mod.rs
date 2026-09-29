@@ -112,13 +112,18 @@ pub fn start(cfg: &BroadcastConfig, notices: Option<UnboundedSender<String>>) ->
 fn load_renderer(cfg: &BroadcastConfig) -> anyhow::Result<Renderer> {
     let view = geo::View::fit_home(draw::MAP_RECT);
     let dir = std::path::Path::new(&cfg.map_dir);
+    // 周辺国の陸地は背景なので、無くても続ける
+    let neighbors = geo::load(&dir.join("neighbors.geojson"), "name", &view).unwrap_or_else(|e| {
+        tracing::warn!("broadcast: 周辺国の陸地を読めないので、描きません: {e:#}");
+        Vec::new()
+    });
     let prefs = geo::load(&dir.join("japan.geojson"), "name", &view)?;
     let areas = geo::load(&dir.join("warning-areas.geojson"), "code", &view)?;
     let text = text::Text::load(&cfg.font, cfg.font_index).unwrap_or_else(|e| {
         tracing::warn!("broadcast: font {} を読めないので、文字は描きません: {e:#}", cfg.font);
         text::Text::none()
     });
-    Ok(Renderer::new(view, prefs, areas, text))
+    Ok(Renderer::new(view, neighbors, prefs, areas, text))
 }
 
 /// https://host → wss://host/ws

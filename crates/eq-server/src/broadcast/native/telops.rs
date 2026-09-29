@@ -1,5 +1,6 @@
 //! 天気コード -> (昼のアイコン, 夜のアイコン)。tools/jma_telops.py が気象庁の天気予報のページの TELOPS から作る。
-//! 手で直さない。出典: 気象庁ホームページ https://www.jma.go.jp/bosai/forecast/ を加工
+//! 作り直す: リポジトリの直下で python3 tools/jma_telops.py (手で直さない)
+//! 出典: 気象庁ホームページ https://www.jma.go.jp/bosai/forecast/ を加工
 
 /// コードの昇順 (二分探索で引く)
 pub const TELOPS: &[(u16, &str, &str)] = &[
