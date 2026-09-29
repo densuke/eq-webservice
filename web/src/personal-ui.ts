@@ -5,7 +5,7 @@ import { esc } from "./html.ts";
 import { type NotifyLevel, TOUR_CHOICES, countdown, countdownWorthShowing, estimateIntensity, intensityToScale, nearestArea, notifyScale, saveSettings, shouldNotify } from "./personal.ts";
 import { activeEews } from "./quakes.ts";
 import { scaleLabel } from "./scale.ts";
-import { $, map } from "./dom.ts";
+import { $, map, tapWord } from "./dom.ts";
 import { app } from "./state.ts";
 import type { EqEvent } from "./types.ts";
 import { GRADE_LABEL } from "./view.ts";
@@ -114,7 +114,7 @@ $("#settings-open").addEventListener("click", () => {
 });
 
 $("#home-pick").addEventListener("click", () => {
-  $("#settings-note").textContent = "地図をタップ (クリック) して、自分の地点を選んでください。";
+  $("#settings-note").textContent = `地図を${tapWord}して、自分の地点を選んでください。`;
   map.pickPoint((p) => {
     $("#settings-note").textContent = "地点と設定はこの端末の中だけに保存されます。通知はこの画面が裏にあるときに出ます。";
     setSettings({ ...app.settings, home: p });
