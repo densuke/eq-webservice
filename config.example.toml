@@ -76,3 +76,8 @@ url = "http://127.0.0.1:9000/hook"
 enabled = true
 # feed_url = "https://www.data.jma.go.jp/developer/xml/feed/regular.xml"
 # interval_sec = 300
+
+# 平時の BGM。ディレクトリの音声ファイルをファイル名順に流す (いつでも差し替え可)。空なら使わない
+[bgm]
+dir = ""
+# dir = "/home/eq/bgm"

@@ -18,6 +18,9 @@ pub struct Config {
     /// 気象警報・注意報 (平時の地図に出す)
     #[serde(default)]
     pub weather: crate::weather::WeatherConfig,
+    /// 平時の BGM
+    #[serde(default)]
+    pub bgm: crate::bgm::BgmConfig,
 }
 
 /// 平常時に画面上部で切り替えて表示する文

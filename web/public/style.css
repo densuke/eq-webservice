@@ -93,7 +93,7 @@ body {
   background: #b35900; color: #fff; border: 0; border-radius: 999px; padding: 8px 16px;
   font: 600 14px/1.2 system-ui, sans-serif; cursor: pointer; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
 }
-#sound.waiting { border-color: #d29922; color: #d29922; }
+#sound.waiting, #bgm.waiting { border-color: #d29922; color: #d29922; }
 
 /* 地図のツールチップ (名前と震度) */
 .map-tip {
@@ -138,6 +138,7 @@ body {
 .lt.watch { border-bottom: 3px solid var(--t-watch); }
 .lt.warning { border-bottom: 3px solid var(--t-warning); }
 .lt.major_warning { border-bottom: 3px solid var(--t-major); }
+.bgm-now { font-size: 11px; max-width: 16em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lwn { padding-bottom: 1px; border-bottom: 3px solid; }
 .lwn.advisory { border-color: #f2e700; }
 .lwn.warning { border-color: #ff2800; }

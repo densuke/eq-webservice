@@ -21,6 +21,7 @@ tower-http = { version = "0.6", features = ["fs", "compression-gzip", "trace", "
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 roxmltree = "0.21.1"
+lofty = "0.25.4"
 
 [dev-dependencies]
 tempfile = "3"

@@ -1,3 +1,4 @@
+mod bgm;
 mod cli;
 mod config;
 mod demo;
@@ -65,6 +66,7 @@ async fn main() -> anyhow::Result<()> {
         weather::spawn(cfg.weather.clone(), warnings.clone());
     }
     routes.push(weather::router(warnings));
+    routes.push(bgm::router(&cfg.bgm));
 
     let listener = tokio::net::TcpListener::bind(&cfg.server.listen)
         .await

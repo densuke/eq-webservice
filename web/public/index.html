@@ -20,6 +20,8 @@
     <button id="settings-open" class="follow" type="button" title="自分の地点と通知の設定">設定</button>
     <button id="demo-open" class="follow" type="button" title="いくつかの場面を再生して表示を確かめます">デモ</button>
     <button id="sound" class="follow" type="button" title="新しい地震情報で警戒音を鳴らします">音 OFF</button>
+    <button id="bgm" class="follow" type="button" hidden>BGM OFF</button>
+    <span id="bgm-now" class="bgm-now muted" hidden></span>
   </header>
   <div id="eew-banner" class="eew-banner" role="alert" hidden></div>
   <div id="tsunami-banner" class="tsunami-banner" role="status" hidden></div>
@@ -69,6 +71,9 @@
         </div>
         <div class="settings-row"><b>離れた地震の巡回</b>
           <select id="tour-sec"></select>
+        </div>
+        <div class="settings-row"><b>BGM の音量</b>
+          <input type="range" id="bgm-volume" min="0" max="100" step="10" aria-label="BGM の音量">
         </div>
         <p id="settings-note" class="muted">地点と設定はこの端末の中だけに保存されます。通知はこの画面が裏にあるときに出ます。</p>
       </section>
