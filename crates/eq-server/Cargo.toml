@@ -20,6 +20,7 @@ toml = "0.9"
 tower-http = { version = "0.6", features = ["fs", "compression-gzip", "trace", "set-header"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+roxmltree = "0.21.1"
 
 [dev-dependencies]
 tempfile = "3"

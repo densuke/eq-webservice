@@ -36,7 +36,7 @@ messages = []
 
 # ---- 配信先プラグイン ----
 # 共通キー: type (必須) / name / enabled / kinds / min_scale
-#   kinds     : "quake" (地震情報) / "eew" (緊急地震速報) / "eew_detection" / "tsunami"。省略ですべて
+#   kinds     : "quake" (地震情報) / "eew" (緊急地震速報) / "eew_detection" / "tsunami" / "userquake" (地震感知情報)。省略で userquake 以外すべて
 #   min_scale : "1".."4", "5弱"(or "5-"), "5強", "6弱", "6強", "7"。地震情報・EEW にのみ効く
 
 # RSS: /feed.xml で配信し、再起動しても蓄積を引き継ぐ
@@ -70,3 +70,9 @@ type = "webhook"
 enabled = false
 url = "http://127.0.0.1:9000/hook"
 # headers = { Authorization = "Bearer xxx" }
+
+# 気象警報・注意報 (平時の地図に出す)。気象庁防災情報XML の集約通報を定期的に取得する
+[weather]
+enabled = true
+# feed_url = "https://www.data.jma.go.jp/developer/xml/feed/regular.xml"
+# interval_sec = 300

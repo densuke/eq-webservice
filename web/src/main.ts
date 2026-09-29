@@ -16,6 +16,7 @@ import { type World, app, hooks, liveWorld, now, now as serverNow } from "./stat
 import { activeAreas, latestTsunami, tsunamiAlert } from "./tsunami.ts";
 import type { EewEvent, EqEvent, UserquakeEvent } from "./types.ts";
 import { confidenceGrade, latestUserquake, userquakeShown } from "./userquake.ts";
+import { topLevel } from "./warnings.ts";
 import { numTag, renderBanner, renderDetail, renderList, renderMode, renderTsunamiBanner, updatePointsOpen } from "./view.ts";
 import { latestEew, summarizeQuake } from "./groups.ts";
 
@@ -74,7 +75,7 @@ export function tick(): void {
   renderCountdown(now);
   updatePointsOpen();
   renderDemoControls();
-  renderUserquake(now);
+  renderWarnings(now, renderUserquake(now));
   // 波の表示中は滑らかに、そうでなければ時計の更新だけ
   if (waving) raf = requestAnimationFrame(tick);
   // デモの再生中は倍速でも情報が遅れないよう細かく
@@ -154,20 +155,50 @@ function receiveUserquake(e: UserquakeEvent, live: boolean, target: World): void
   showToast(`揺れの報告: ${esc(names.slice(0, 3).join("、") || "地域不明")}${names.length > 3 ? " ほか" : ""}`);
 }
 
-/** 地震感知情報の印を地図に出す (出す間だけ) */
-function renderUserquake(now: number): void {
+/** 地震感知情報の印を地図に出す (出す間だけ)。出したかを返す */
+function renderUserquake(now: number): boolean {
   const u = app.world.userquake;
   const official = app.world.store
     .list()
     .filter((g) => g.kind === "eew" || g.kind === "quake")
     .map((g) => g.updatedAt);
-  if (!u || !userquakeShown(u, now, official)) return map.setUserquake([]);
+  if (!u || !userquakeShown(u, now, official)) {
+    map.setUserquake([]);
+    return false;
+  }
   map.setUserquake(
     u.areas.flatMap((a) => {
       const p = app.userquakeAreas.get(a.code);
       return p ? [{ name: p[0], lat: p[1], lon: p[2], count: a.count, grade: confidenceGrade(a.confidence) }] : [];
     }),
   );
+  return true;
+}
+
+/**
+ * 平時 (地震・津波・揺れの報告の表示が無く、実際の情報を見ているとき) だけ気象警報・注意報を塗る。
+ * 地震の情報が届けば地震の表示に切り替わり、落ち着けば平時に戻る
+ */
+function renderWarnings(now: number, feeling: boolean): void {
+  const calm =
+    !app.demo && !app.selectedKey && !feeling && priorityGroups(now).length === 0 && activeEews(now).length === 0 && activeAreas(app.world.tsunami).length === 0;
+  const w = calm ? app.warnings : null;
+  const items = w
+    ? Object.entries(w.areas).map(([code, kinds]) => ({ code, level: topLevel(kinds), text: kinds.map((k) => k.name).join("、") }))
+    : [];
+  if (items.length && !map.warningAreasLoaded && !warningAreasLoading) {
+    warningAreasLoading = true;
+    map.loadWarningAreas("warning-areas.geojson").catch(() => (warningAreasLoading = false));
+  }
+  map.setWarnings(items);
+  $("#legend-warn").hidden = items.length === 0;
+}
+let warningAreasLoading = false;
+
+/** 発表中の気象警報・注意報を取り直す (サーバは 5 分ごとに気象庁から取得している) */
+async function loadWarnings(): Promise<void> {
+  const res = await fetch("api/warnings");
+  if (res.ok) app.warnings = await res.json();
 }
 
 export async function loadUserquakeAreas(): Promise<void> {
@@ -254,6 +285,8 @@ hooks.renderAll = renderAll;
 hooks.onEvents = onEvents;
 
 loadTelop();
+// 気象警報・注意報は 5 分ごとに取り直す
+window.setInterval(() => void loadWarnings().catch(() => {}), 5 * 60_000);
 
 Promise.all([
   map.load("japan.geojson"),
@@ -264,6 +297,7 @@ Promise.all([
   map.loadNeighbors("neighbors.geojson").catch(() => {}),
   loadStations().catch(() => {}),
   loadUserquakeAreas().catch(() => {}),
+  loadWarnings().catch(() => {}),
 ])
   .catch((err) => {
     $("#detail").innerHTML = `<p class="error">${esc(String(err))}</p>`;

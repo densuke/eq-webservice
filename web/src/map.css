@@ -2,6 +2,13 @@
 .neighbor { fill: #20262f; stroke: #2b323d; stroke-width: 0.6; vector-effect: non-scaling-stroke; fill-rule: evenodd; }
 .pref { fill: var(--land); stroke: var(--land-edge); stroke-width: 0.8; vector-effect: non-scaling-stroke; fill-rule: evenodd; }
 .pref.hit { stroke: #000; }
+/* 気象警報・注意報 (平時)。レベル2 注意報 = 黄、レベル3 警報 = 赤、レベル4 危険警報 = 紫、レベル5 特別警報 = 黒 */
+.warn { fill: none; stroke: none; }
+.warn[data-level] { stroke: rgba(0, 0, 0, 0.35); stroke-width: 0.4; vector-effect: non-scaling-stroke; fill-rule: evenodd; }
+.warn[data-level="advisory"] { fill: #f2e700; fill-opacity: 0.5; }
+.warn[data-level="warning"] { fill: #ff2800; fill-opacity: 0.65; }
+.warn[data-level="danger"] { fill: #aa00ff; fill-opacity: 0.7; }
+.warn[data-level="emergency"] { fill: #0c000c; fill-opacity: 0.85; stroke: #fff; }
 .pref.forecast { stroke: #fff; stroke-dasharray: 4 3; stroke-width: 1.2; }
 .area { fill: none; stroke: rgba(255, 255, 255, 0.1); stroke-width: 0.5; vector-effect: non-scaling-stroke; fill-rule: evenodd; }
 .area.hit { stroke: rgba(0, 0, 0, 0.6); fill-opacity: 0.55; }

@@ -137,6 +137,11 @@ body {
 .lt.watch { border-bottom: 3px solid var(--t-watch); }
 .lt.warning { border-bottom: 3px solid var(--t-warning); }
 .lt.major_warning { border-bottom: 3px solid var(--t-major); }
+.lwn { padding-bottom: 1px; border-bottom: 3px solid; }
+.lwn.advisory { border-color: #f2e700; }
+.lwn.warning { border-color: #ff2800; }
+.lwn.danger { border-color: #aa00ff; }
+.lwn.emergency { border-color: #fff; }
 .lw.p { border-bottom: 2px solid var(--p-wave); }
 .lw.s { border-bottom: 2px solid var(--s-wave); }
 

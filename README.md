@@ -34,7 +34,11 @@ Wolfx EEW (wss, 任意)─┘
 | 551 | 地震情報（震度速報・震源・各地の震度） | 震央、観測震度で都道府県を塗る、観測点の一覧 |
 | 552 | 津波予報 | 対象の沿岸を等級の色（大津波警報=紫、津波警報=赤、津波注意報=黄）で描き、解除まで表示。バナー、一覧・詳細 |
 | 554 | 緊急地震速報の発表検出 | 受信のみ |
+| — | 気象警報・注意報（気象庁防災情報XML の集約通報）※2 | 平時（地震・津波・揺れの報告の表示が無いとき）だけ、市町村等ごとに段階の色（注意報=黄、警報=赤、危険警報=紫、特別警報=黒）で塗る。ツールチップに発表中の種類。地震の情報が届けば地震の表示に切り替わる |
 | 9611 | 地震感知情報（P2P地震情報の利用者による「揺れた」報告の集計。気象庁の発表ではない） | 報告のあった地域に広がる輪（信頼度が低いほど薄く）、控えめな音と「揺れの報告」の知らせ。最後の更新から 2 分、またはその揺れの緊急地震速報・地震情報が届くまで。一覧には入れない |
+
+※2 気象庁防災情報XML (PULL 型) の「気象警報・注意報（Ｒ０６）（集約通報）」（全国分を 10 分ごとに発表）をサーバが 5 分ごとに取得して
+`GET /api/warnings` で返します。`config.toml` の `[weather] enabled = false` で止められます。
 
 ※ P2P地震情報は緊急地震速報の警報（予測震度5弱以上）しか配信しないため、予報は
 [Wolfx Open API](https://wolfx.jp/docs/open-api) の JMA 緊急地震速報から受け取ります。
@@ -252,6 +256,7 @@ cargo llvm-cov --summary-only  # カバレッジ (計器として見るだけ。
 - 津波予報区・地震情報細分区域: [気象庁「予報区等GISデータ」](https://www.data.jma.go.jp/developer/gis.html)を加工して作成
 - 周辺国の陸地: [Natural Earth](https://www.naturalearthdata.com/)（パブリックドメイン）を加工
 - 震度観測点の位置: [気象庁の震度観測点の一覧](https://www.data.jma.go.jp/eqev/data/intens-st/)を加工して作成
+- 気象警報・注意報: [気象庁防災情報XML](https://xml.kishou.go.jp/)。区域 (市町村等) の境界は[気象庁「予報区等GISデータ」](https://www.data.jma.go.jp/developer/gis.html)を加工して作成 (`tools/jma_warning_areas.py`)
 - 地震感知情報の地域の位置 (`web/public/userquake-areas.json`): [p2pquake/epsp-specifications](https://github.com/p2pquake/epsp-specifications) の `epsp-area.csv` を加工
   （MIT License, Copyright (c) 2018 takuya (P2PQuake)）
 - ソースコード: GPL-3.0-or-later（[LICENSE](LICENSE)）
