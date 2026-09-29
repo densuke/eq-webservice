@@ -7,9 +7,11 @@
 mod audio;
 mod chrome;
 mod mixer;
+mod native;
 
 use std::collections::BTreeMap;
 use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
@@ -17,9 +19,28 @@ use serde::Deserialize;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
+/// 画面の作り方
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Source {
+    /// 画面の無い Chrome でページを開き、JPEG で受け取る (今までの動き)
+    Chrome,
+    /// Rust で描く (native/。Chrome は起動しない)
+    Native,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct BroadcastConfig {
+    /// 画面の作り方 (既定は chrome)
+    pub source: Source,
+    /// native: データの取得先 (地震情報・警報・天気・BGM の曲名)
+    pub server: String,
+    /// native: 文字のフォント (.ttc は font_index 番目)。読めなければ文字を描かない
+    pub font: String,
+    pub font_index: u32,
+    /// native: 地図のデータ (japan.geojson・warning-areas.geojson) の場所
+    pub map_dir: String,
     /// 開くページ (配信用の表示は ?broadcast=1)
     pub url: String,
     pub width: u32,
@@ -51,6 +72,15 @@ impl Default for BroadcastConfig {
     fn default() -> Self {
         let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect();
         BroadcastConfig {
+            source: Source::Chrome,
+            server: "https://eq.fuga.jp".into(),
+            font: if cfg!(target_os = "macos") {
+                "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc".into()
+            } else {
+                "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc".into()
+            },
+            font_index: 0,
+            map_dir: "web/public".into(),
             url: "https://eq.fuga.jp/?broadcast=1".into(),
             width: 1280,
             height: 720,
@@ -113,12 +143,20 @@ pub async fn run(args: &[String]) -> anyhow::Result<()> {
 /// Chrome と ffmpeg を 1 組起動し、どちらかが止まるまで画面を送り続ける
 async fn session(cfg: &BroadcastConfig, output: &[String], secrets: &[String]) -> anyhow::Result<()> {
     let (notice_tx, notice_rx) = tokio::sync::mpsc::unbounded_channel();
-    let page = if cfg.mixer {
-        with_query(&cfg.url, "audio=mixer")
-    } else {
-        cfg.url.clone()
+    let notices = cfg.mixer.then_some(notice_tx);
+    // 画面: chrome (JPEG を受け取る) か native (Rust で描いた RGBA を watch で受け取る) のどちらか
+    let (mut screen, mut chrome, mut native) = match cfg.source {
+        Source::Chrome => {
+            let page = if cfg.mixer {
+                with_query(&cfg.url, "audio=mixer")
+            } else {
+                cfg.url.clone()
+            };
+            let (s, c) = chrome::launch(cfg, &page, notices).await?;
+            (Some(s), Some(c), None)
+        }
+        Source::Native => (None, None, Some(native::start(cfg, notices)?)),
     };
-    let (mut screen, mut chrome) = chrome::launch(cfg, &page, cfg.mixer.then_some(notice_tx)).await?;
     // mixer の音 (fifo は mixer より後に捨てる。宣言の順を変えないこと)
     let mixer_fifo = if cfg.mixer { Some(audio::Fifo::create()?) } else { None };
     let _mixer = mixer_fifo
@@ -143,16 +181,25 @@ async fn session(cfg: &BroadcastConfig, output: &[String], secrets: &[String]) -
         .with_context(|| format!("starting {}", cfg.ffmpeg))?;
     let mut stdin = ffmpeg.stdin.take().context("ffmpeg stdin")?;
     let mut log = BufReader::new(ffmpeg.stderr.take().context("ffmpeg stderr")?).lines();
-    tracing::info!(url = %cfg.url, width = cfg.width, height = cfg.height, fps = cfg.fps, "broadcast started");
-    let mut frame: Vec<u8> = Vec::new();
+    tracing::info!(source = ?cfg.source, url = %cfg.url, width = cfg.width, height = cfg.height, fps = cfg.fps, "broadcast started");
+    let mut frame: Arc<Vec<u8>> = Arc::default();
     let mut tick = tokio::time::interval(Duration::from_secs_f64(1.0 / cfg.fps.max(1) as f64));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         tokio::select! {
-            f = screen.next_frame() => {
+            f = async { match screen.as_mut() { Some(s) => s.next_frame().await, None => std::future::pending().await } } => {
                 let (data, session) = f?;
-                screen.ack(session).await?;
-                frame = chrome::decode_base64(&data)?;
+                if let Some(s) = screen.as_mut() {
+                    s.ack(session).await?;
+                }
+                frame = Arc::new(chrome::decode_base64(&data)?);
+            }
+            // native: 描き直された画面
+            r = async { match native.as_mut() { Some(n) => n.frames.changed().await, None => std::future::pending().await } } => {
+                r.context("native renderer stopped")?;
+                if let Some(n) = native.as_mut() {
+                    frame = n.frames.borrow_and_update().clone();
+                }
             }
             // 変化が無くても同じ画面を送り続け、fps を一定にする (ffmpeg は枚数から時刻を決める)
             _ = tick.tick(), if !frame.is_empty() => {
@@ -168,7 +215,9 @@ async fn session(cfg: &BroadcastConfig, output: &[String], secrets: &[String]) -
                 Some(l) => tracing::warn!("ffmpeg: {}", redact(&l, secrets)),
                 None => anyhow::bail!("ffmpeg exited: {}", ffmpeg.wait().await?),
             },
-            status = chrome.wait() => anyhow::bail!("chrome exited: {}", status?),
+            status = async { match chrome.as_mut() { Some(c) => c.wait().await, None => std::future::pending().await } } => {
+                anyhow::bail!("chrome exited: {}", status?)
+            }
             status = async {
                 match audio_cmd.as_mut() {
                     Some(a) => a.child.wait().await,
@@ -194,15 +243,14 @@ fn with_query(url: &str, item: &str) -> String {
 fn ffmpeg_args(cfg: &BroadcastConfig, audio: &[String], output: &[String]) -> Vec<String> {
     let fps = cfg.fps.max(1).to_string();
     let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
-    let mut a = s(&[
-        "-hide_banner",
-        "-loglevel",
-        "warning",
-        "-f",
-        "image2pipe",
-        "-c:v",
-        "mjpeg",
-    ]);
+    let mut a = s(&["-hide_banner", "-loglevel", "warning"]);
+    match cfg.source {
+        Source::Chrome => a.extend(s(&["-f", "image2pipe", "-c:v", "mjpeg"])),
+        Source::Native => {
+            let size = format!("{}x{}", cfg.width, cfg.height);
+            a.extend(s(&["-f", "rawvideo", "-pix_fmt", "rgba", "-s", &size]));
+        }
+    }
     a.extend(s(&["-framerate", &fps, "-i", "-"]));
     if audio.is_empty() {
         // 無音も実時間の速さで作る (そうしないと音だけ先に進み、映像とずれる)
@@ -214,7 +262,10 @@ fn ffmpeg_args(cfg: &BroadcastConfig, audio: &[String], output: &[String]) -> Ve
     // 画面の大きさをそろえる (Chrome の最初の画面は表示の大きさを決める前のもので、縦が足りないことがある)
     let (w, h) = (cfg.width, cfg.height);
     let fit = format!("scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1");
-    a.extend(["-vf".to_string(), fit]);
+    // (native は 1280x720 で描くので、そろえる必要が無い)
+    if cfg.source == Source::Chrome {
+        a.extend(["-vf".to_string(), fit]);
+    }
     a.extend(cfg.encode.iter().cloned());
     // YouTube などはキーフレームの間隔を 4 秒以下に求める (2 秒ごとにする)
     let gop = (cfg.fps.max(1) * 2).to_string();
@@ -329,6 +380,24 @@ mod tests {
         assert_eq!(a[6], "-i");
         assert!(toml::from_str::<BroadcastConfig>("mixer = true").unwrap().mixer);
         assert!(!BroadcastConfig::default().mixer);
+    }
+
+    #[test]
+    fn native_video_is_raw_rgba_and_chrome_stays_mjpeg() {
+        let out = ["out.flv".to_string()];
+        let chrome = ffmpeg_args(&BroadcastConfig::default(), &[], &out);
+        assert!(chrome.windows(2).any(|w| w == ["-f", "image2pipe"]));
+        assert!(chrome.windows(2).any(|w| w == ["-c:v", "mjpeg"]));
+        assert!(chrome.contains(&"-vf".to_string()));
+        assert!(!chrome.contains(&"rawvideo".to_string()));
+        let cfg = toml::from_str::<BroadcastConfig>("source = \"native\"").unwrap();
+        assert_eq!(cfg.source, Source::Native);
+        let native = ffmpeg_args(&cfg, &[], &out);
+        assert!(native.windows(2).any(|w| w == ["-f", "rawvideo"]));
+        assert!(native.windows(2).any(|w| w == ["-pix_fmt", "rgba"]));
+        assert!(native.windows(2).any(|w| w == ["-s", "1280x720"]));
+        assert!(!native.contains(&"mjpeg".to_string()));
+        assert_eq!(BroadcastConfig::default().source, Source::Chrome);
     }
 
     #[test]
