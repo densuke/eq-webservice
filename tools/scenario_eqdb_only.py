@@ -52,7 +52,8 @@ def p2p_quake(qid: str, issued: datetime, kind: str, hyp: dict, pts: list[dict])
         "id": qid,
         "issue": {"source": "気象庁", "time": issued.strftime(FMT), "type": kind, "correct": "None"},
         "earthquake": {
-            "time": hyp["ot"][:16] + ":00",
+            # 発生時刻は秒まで (P2P地震情報は分までだが、波の描画を発生に合わせるため)
+            "time": hyp["ot"][:19],
             "maxScale": max((p["scale"] for p in pts), default=-1),
             "domesticTsunami": "Unknown",
             "foreignTsunami": "Unknown",

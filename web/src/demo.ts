@@ -1,6 +1,6 @@
-// デモモード: 場面の情報を、発生時刻を「今」にずらしてブラウザの中だけで再生する。
-// 報の間隔は、波を描いている間は実時間のまま、それ以外は詰める (最大 MAX_GAP_MS)。発表時刻はそれぞれ「受け取った時刻」に、
-// 発生時刻は同じ詰め方で写す (同じ地震の続報は同じ発生時刻のまま、後から起きた地震も自分の報より前になる)。
+// デモモード: 場面の情報を、デモ専用の時計に合わせてブラウザの中だけで再生する。
+// 再生位置 (ミリ秒) と当時の時刻の対応表を作る。波を描いている間は実時間のまま、それ以外の長い間は詰める (最大 MAX_GAP_MS。
+// その間は時計が早く進む)。記録の場面は時刻をずらさず (時計は当時の日時)、架空の場面は再生の始まりが「今」になるようにずらす。
 
 import { WAVE_MAX_SEC } from "./waves.ts";
 import type { EqEvent } from "./types.ts";
@@ -43,86 +43,95 @@ function issuedMs(e: EqEvent): number | null {
   return "issued_at" in e ? parseJst(e.issued_at) : null;
 }
 
-/** 1 件をずらす。issuedDelta は発表時刻、originDelta は発生時刻・到達予想時刻に足す */
-function shift(e: EqEvent, issuedDelta: number, originDelta: number, run: number): EqEvent {
+/** 1 件をずらす (ID には再生ごとの番号を付ける) */
+function shift(e: EqEvent, delta: number, run: number): EqEvent {
   const id = `${e.id}#demo${run}`;
-  const ms = (v: number | null) => (v == null ? null : v + originDelta);
+  const ms = (v: number | null) => (v == null ? null : v + delta);
+  const t = (v: string) => shiftJst(v, delta);
   switch (e.kind) {
     case "quake":
-      return { ...e, id, source: "demo", issued_at: shiftJst(e.issued_at, issuedDelta), origin_time: shiftJst(e.origin_time, originDelta), origin_time_ms: ms(e.origin_time_ms) };
+      return { ...e, id, source: "demo", issued_at: t(e.issued_at), origin_time: t(e.origin_time), origin_time_ms: ms(e.origin_time_ms) };
     case "eew":
       return {
         ...e,
         id,
         source: "demo",
         event_id: `${e.event_id}#demo${run}`,
-        issued_at: shiftJst(e.issued_at, issuedDelta),
-        origin_time: e.origin_time && shiftJst(e.origin_time, originDelta),
+        issued_at: t(e.issued_at),
+        origin_time: e.origin_time && t(e.origin_time),
         origin_time_ms: ms(e.origin_time_ms),
-        areas: e.areas.map((a) => ({ ...a, arrival_time: a.arrival_time && shiftJst(a.arrival_time, originDelta) })),
+        areas: e.areas.map((a) => ({ ...a, arrival_time: a.arrival_time && t(a.arrival_time) })),
       };
     case "tsunami":
-      return { ...e, id, source: "demo", issued_at: shiftJst(e.issued_at, issuedDelta) };
+      return { ...e, id, source: "demo", issued_at: t(e.issued_at) };
     default:
       return { ...e, id, source: "demo" };
   }
 }
 
-/**
- * 実時刻 t を再生の時刻に写す。timeline は各報の [実時刻, 再生時刻] (時刻順)。
- * 詰めた間に入る時刻は、次の報までの間隔を保つ側に寄せる (後から起きた地震の発生時刻が、自分の最初の報より後にならない)
- */
-function playAt(t: number, timeline: [number, number][]): number {
-  const i = timeline.findIndex(([rec]) => rec > t);
-  if (i === 0) return timeline[0][1] - (timeline[0][0] - t);
-  const [prevRec, prevAt] = timeline[(i === -1 ? timeline.length : i) - 1];
-  if (i === -1) return prevAt + (t - prevRec);
-  const [nextRec, nextAt] = timeline[i];
-  return Math.max(prevAt, Math.min(prevAt + (t - prevRec), nextAt - (nextRec - t)));
+/** 再生を始める位置: 最初の地震 (無ければ最初の報) のこの時間前から */
+export const LEAD_MS = 5000;
+
+export interface Plan {
+  /** at は再生位置 (ミリ秒)。時刻順 */
+  events: { at: number; event: EqEvent }[];
+  /** 最後の報の再生位置 */
+  end: number;
+  /** 再生位置 -> そのときの時刻 (epoch ミリ秒) */
+  toReal(pos: number): number;
 }
 
-/** 区間 [a, b] のうち、どれかの地震の波を描いている間 (発生から WAVE_MAX_SEC) に重なる長さ */
-function waveOverlap(a: number, b: number, origins: number[]): number {
-  let covered = 0;
-  let end = a;
-  for (const o of origins) {
-    const from = Math.max(o, end);
-    const to = Math.min(o + WAVE_MAX_SEC * 1000, b);
-    if (to > from) {
-      covered += to - from;
-      end = to;
-    }
-  }
-  return covered;
+/** [実時刻, 再生位置] の点を結んだ折れ線で写す (範囲の外は 1:1) */
+function interpolate(points: [number, number][], x: number, from: 0 | 1): number {
+  const to = from === 0 ? 1 : 0;
+  const i = points.findIndex((p) => p[from] > x);
+  const [a, b] = i === -1 ? [points[points.length - 1], null] : i === 0 ? [points[0], null] : [points[i - 1], points[i]];
+  if (!b || b[from] === a[from]) return a[to] + (x - a[from]);
+  return a[to] + ((x - a[from]) * (b[to] - a[to])) / (b[from] - a[from]);
 }
 
 /**
- * 再生の予定: at (再生開始からのミリ秒) と、その時刻に届いたことにする情報。run は再生ごとの番号 (ID の重複を避ける)。
- * 報の間は、波を描いている間は実時間のまま、それ以外は MAX_GAP_MS までに詰める (観測の震度が波より先に出ないように)
+ * 再生の計画を作る。run は再生ごとの番号 (ID の重複を避ける)。
+ * startAt を渡すと再生の始まりがその時刻になるようにずらす (架空の場面)。渡さなければ当時の時刻のまま (記録の場面)
  */
-export function schedule(events: EqEvent[], now: number, run: number): { at: number; event: EqEvent }[] {
-  const origins = [...new Set(events.map((e) => ("origin_time_ms" in e ? e.origin_time_ms : null)).filter((o): o is number => o != null))].sort((x, y) => x - y);
-  const ats: number[] = [];
-  const timeline: [number, number][] = [];
-  let at = 0;
-  let prev: number | null = null;
-  for (const e of events) {
-    const rec = issuedMs(e);
-    if (prev != null && rec != null && rec > prev) {
-      const real = waveOverlap(prev, rec, origins);
-      at += real + Math.min(rec - prev - real, MAX_GAP_MS);
+export function makePlan(events: EqEvent[], run: number, startAt?: number): Plan {
+  const recs = events.map(issuedMs);
+  const origins = events.map((e) => ("origin_time_ms" in e ? e.origin_time_ms : null)).filter((o): o is number => o != null);
+  const known = recs.filter((r): r is number => r != null);
+  const first = Math.min(...origins, ...known);
+  const start = (Number.isFinite(first) ? first : 0) - LEAD_MS;
+  const delta = startAt == null ? 0 : startAt - start;
+  // 波を描いている間 (発生から WAVE_MAX_SEC)。重なりはまとめる
+  const windows = [...origins]
+    .sort((x, y) => x - y)
+    .map((o): [number, number] => [o, o + WAVE_MAX_SEC * 1000])
+    .reduce<[number, number][]>((acc, w) => {
+      const last = acc[acc.length - 1];
+      if (last && w[0] <= last[1]) last[1] = Math.max(last[1], w[1]);
+      else acc.push([...w]);
+      return acc;
+    }, []);
+  const points: [number, number][] = [[start, 0]];
+  let prev = start;
+  for (const rec of known) {
+    if (rec <= prev) continue;
+    // 間を、波を描いている部分 (実時間) と何も無い部分 (まとめて MAX_GAP_MS までに詰める) に分ける
+    const cuts = [prev, ...windows.flat().filter((c) => c > prev && c < rec), rec];
+    const pieces = cuts.slice(1).map((b, i) => ({ a: cuts[i], b, wave: windows.some(([w0, w1]) => w0 <= cuts[i] && b <= w1) }));
+    const quiet = pieces.filter((x) => !x.wave).reduce((sum, x) => sum + (x.b - x.a), 0);
+    const k = quiet > 0 ? Math.min(quiet, MAX_GAP_MS) / quiet : 1;
+    for (const x of pieces) {
+      const pos = points[points.length - 1][1] + (x.b - x.a) * (x.wave ? 1 : k);
+      points.push([x.b, pos]);
     }
-    if (rec != null) {
-      prev = rec;
-      timeline.push([rec, at]);
-    }
-    ats.push(at);
+    prev = rec;
   }
-  return events.map((e, i) => {
-    const rec = issuedMs(e);
-    const issuedDelta = rec == null ? 0 : now + ats[i] - rec;
-    const origin = "origin_time_ms" in e ? e.origin_time_ms : null;
-    const originDelta = origin != null && timeline.length ? now + playAt(origin, timeline) - origin : issuedDelta;
-    return { at: ats[i], event: { ...shift(e, issuedDelta, originDelta, run), received_at_ms: now + ats[i] } };
-  });
+  const toPos = (real: number) => interpolate(points, real, 0);
+  // 受け取った時刻は発表時刻 (デモの時計で届く時刻) にする
+  const planned = events.map((e, i) => ({ at: Math.round(toPos(recs[i] ?? start)), event: { ...shift(e, delta, run), received_at_ms: (recs[i] ?? start) + delta } }));
+  return {
+    events: planned,
+    end: planned.reduce((m, x) => Math.max(m, x.at), 0),
+    toReal: (pos) => interpolate(points, pos, 1) + delta,
+  };
 }
