@@ -17,6 +17,7 @@ use axum::{Json, Router};
 use eq_core::Event;
 use serde::Serialize;
 use tokio::sync::broadcast::error::RecvError;
+use tower_http::compression::predicate::{DefaultPredicate, NotForContentType, Predicate};
 use tower_http::compression::CompressionLayer;
 use tower_http::services::ServeDir;
 use tower_http::set_header::SetResponseHeaderLayer;
@@ -65,7 +66,10 @@ pub fn router(hub: Arc<Hub>, static_dir: &std::path::Path, extra: Vec<Router>) -
         .layer(header(header::X_CONTENT_TYPE_OPTIONS, "nosniff"))
         .layer(header(header::X_FRAME_OPTIONS, "SAMEORIGIN"))
         .layer(header(header::REFERRER_POLICY, "same-origin"))
-        .layer(CompressionLayer::new())
+        // 音声 (BGM) は既に圧縮されているので圧縮しない
+        .layer(
+            CompressionLayer::new().compress_when(DefaultPredicate::new().and(NotForContentType::const_new("audio/"))),
+        )
 }
 
 async fn events_handler(State(hub): State<Arc<Hub>>) -> impl IntoResponse {

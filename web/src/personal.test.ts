@@ -79,6 +79,8 @@ test("saved settings are validated; broken or old values fall back to the defaul
   assert.deepEqual(normalizeSettings({ home: { lat: 35, lon: 139 }, notify: "3" }), { ...DEFAULTS, home: { lat: 35, lon: 139 }, notify: "3" });
   assert.deepEqual(normalizeSettings({ home: { lat: "x", lon: 1 }, notify: "9", tourSec: 7, collapseMin: 3 }), DEFAULTS);
   assert.equal(normalizeSettings({ tourSec: 0 }).tourSec, 0);
+  assert.deepEqual(normalizeSettings({ bgm: true, bgmVolume: 70 }), { ...DEFAULTS, bgm: true, bgmVolume: 70 });
+  assert.deepEqual(normalizeSettings({ bgm: "yes", bgmVolume: 55 }), DEFAULTS);
   assert.equal(normalizeSettings({ collapseMin: -1 }).collapseMin, -1);
 });
 

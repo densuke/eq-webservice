@@ -13,10 +13,15 @@ export interface Settings {
   tourSec: number;
   /** 観測点の一覧を最後の発表から何分で畳むか。0 は最初から畳む、-1 は自動で畳まない */
   collapseMin: number;
+  /** 平時の BGM を流すか */
+  bgm: boolean;
+  /** BGM の音量 (0〜100) */
+  bgmVolume: number;
 }
 
 const KEY = "eq-settings";
-export const DEFAULTS: Settings = { home: null, notify: "4", tourSec: 10, collapseMin: 10 };
+export const DEFAULTS: Settings = { home: null, notify: "4", tourSec: 10, collapseMin: 10, bgm: false, bgmVolume: 40 };
+export const BGM_VOLUMES = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
 export const TOUR_CHOICES = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60];
 export const COLLAPSE_CHOICES = [0, 5, 10, 30, 60, -1];
 
@@ -32,6 +37,8 @@ export function normalizeSettings(v: unknown): Settings {
     notify: pick(o.notify, ["off", "warning", "4", "3"] as const, DEFAULTS.notify),
     tourSec: pick(o.tourSec, TOUR_CHOICES, DEFAULTS.tourSec),
     collapseMin: pick(o.collapseMin, COLLAPSE_CHOICES, DEFAULTS.collapseMin),
+    bgm: o.bgm === true,
+    bgmVolume: pick(o.bgmVolume, BGM_VOLUMES, DEFAULTS.bgmVolume),
   };
 }
 

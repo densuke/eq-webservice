@@ -17,6 +17,7 @@ import { activeAreas, latestTsunami, tsunamiAlert } from "./tsunami.ts";
 import type { EewEvent, EqEvent, UserquakeEvent } from "./types.ts";
 import { confidenceGrade, latestUserquake, userquakeShown } from "./userquake.ts";
 import { topLevel } from "./warnings.ts";
+import { loadTracks, updateBgm } from "./bgm.ts";
 import { numTag, renderBanner, renderDetail, renderList, renderMode, renderTsunamiBanner, updatePointsOpen } from "./view.ts";
 import { latestEew, summarizeQuake } from "./groups.ts";
 
@@ -69,8 +70,9 @@ export function tick(): void {
     $("#wave-info").textContent = "";
   }
   map.setTarget(box);
-  // 平時は地震の塗り分けを消して気象警報・注意報を塗る
-  const calm = renderWarnings(now, renderUserquake(now));
+  // 平時は地震の塗り分けを消して気象警報・注意報を塗る。BGM は地震・津波・揺れの報告の間とデモ中は止める
+  const { calm, quiet } = renderWarnings(now, renderUserquake(now));
+  updateBgm(quiet);
   map.setFade(app.selectedKey ? 1 : calm ? 0 : fadeOpacity(now - displayedInfoMs()));
   renderMode();
   renderSound();
@@ -180,10 +182,11 @@ function renderUserquake(now: number): boolean {
  * 平時 (地震・津波・揺れの報告の表示が無く、実際の情報を見ているとき) だけ気象警報・注意報を塗る。
  * 地震の情報が届けば地震の表示に切り替わり、落ち着けば平時に戻る
  */
-function renderWarnings(now: number, feeling: boolean): boolean {
+function renderWarnings(now: number, feeling: boolean): { calm: boolean; quiet: boolean } {
   const tsunami = activeAreas(app.world.tsunami).length > 0;
   const quiet = unsettledGroups(now).length === 0 && activeEews(now).length === 0 && waveSources(now).length === 0;
-  const calm = !app.demo && !app.selectedKey && !feeling && !tsunami && quiet;
+  const still = !app.demo && !feeling && !tsunami && quiet;
+  const calm = still && !app.selectedKey;
   // 地震の表示の間は、すぐ平時に戻すボタン (津波予報が出ている間とデモ中は出さない)
   $("#calm-now").hidden = calm || tsunami || app.demo != null;
   const w = calm ? app.warnings : null;
@@ -196,7 +199,7 @@ function renderWarnings(now: number, feeling: boolean): boolean {
   }
   map.setWarnings(items);
   $("#legend-warn").hidden = items.length === 0;
-  return calm;
+  return { calm, quiet: still };
 }
 let warningAreasLoading = false;
 
@@ -310,6 +313,7 @@ Promise.all([
   loadStations().catch(() => {}),
   loadUserquakeAreas().catch(() => {}),
   loadWarnings().catch(() => {}),
+  loadTracks().catch(() => {}),
 ])
   .catch((err) => {
     $("#detail").innerHTML = `<p class="error">${esc(String(err))}</p>`;
