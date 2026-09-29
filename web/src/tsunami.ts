@@ -15,7 +15,7 @@ export function activeAreas(t: TsunamiEvent | null): TsunamiArea[] {
   return !t || t.cancelled ? [] : t.areas;
 }
 
-export function maxRank(areas: TsunamiArea[]): number {
+function maxRank(areas: TsunamiArea[]): number {
   return Math.max(0, ...areas.map((a) => RANK[a.grade]));
 }
 

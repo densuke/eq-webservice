@@ -12,7 +12,7 @@ import json
 import sys
 import urllib.request
 
-from jma_eew import to_wolfx
+from jma_eew import issued, to_wolfx
 
 P2P = "https://api.p2pquake.net/v2/jma"
 DATE = "2024/01/01"
@@ -33,10 +33,6 @@ def get(path: str) -> list[dict]:
     req = urllib.request.Request(f"{P2P}/{path}", headers={"User-Agent": "eq-webservice scenario builder"})
     with urllib.request.urlopen(req, timeout=30) as res:
         return json.load(res)
-
-
-def issued(o: dict) -> str:
-    return o.get("AnnouncedTime") or o["issue"]["time"]
 
 
 def main(dst: str) -> None:

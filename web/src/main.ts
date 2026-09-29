@@ -24,18 +24,18 @@ import { numTag, renderBanner, renderDetail, renderList, renderMode, renderTsuna
 import { latestEew, summarizeQuake } from "./groups.ts";
 
 /** この時間内に続けて届いた情報では、前より強い音のときだけ鳴らす */
-export const ALERT_MERGE_MS = 3000;
+const ALERT_MERGE_MS = 3000;
 
-export let raf = 0;
+let raf = 0;
 
-export let lastPip = -1;
+let lastPip = -1;
 
-export let lastCurrentKey: string | undefined;
+let lastCurrentKey: string | undefined;
 
 /** 直前に鳴らした警戒音 (数秒以内に重なったら強い方だけ鳴らす) */
-export let lastAlert = { level: "info" as AlertLevel, at: 0 };
+let lastAlert = { level: "info" as AlertLevel, at: 0 };
 
-export let timer = 0;
+let timer = 0;
 
 export function tick(): void {
   cancelAnimationFrame(raf);
@@ -90,7 +90,7 @@ export function tick(): void {
 }
 
 /** 実際の情報のうち、デモモードを直ちに終えて見せるべきもの */
-export function urgent(e: EqEvent): boolean {
+function urgent(e: EqEvent): boolean {
   if (e.kind === "eew") return !e.test && !e.cancelled;
   if (e.kind === "quake") return e.max_scale >= 30;
   return e.kind === "tsunami" && !e.cancelled && e.areas.length > 0;
@@ -233,7 +233,7 @@ async function loadWarnings(): Promise<void> {
   if (res.ok) app.warnings = await res.json();
 }
 
-export async function loadUserquakeAreas(): Promise<void> {
+async function loadUserquakeAreas(): Promise<void> {
   const res = await fetch("userquake-areas.json");
   if (!res.ok) return;
   const rows: Record<string, [string, number, number]> = await res.json();
@@ -269,14 +269,14 @@ export function renderAll(): void {
   tick();
 }
 
-export async function loadStations(): Promise<void> {
+async function loadStations(): Promise<void> {
   const res = await fetch("stations.json");
   if (!res.ok) return;
   const rows: [string, number, number, string][] = await res.json();
   app.stations = new Map(rows.map(([name, lat, lon, area]) => [name, { lat, lon, area }]));
 }
 
-export function select(key: string): void {
+function select(key: string): void {
   app.selectedKey = key;
   app.selectedAt = now();
   map.release();

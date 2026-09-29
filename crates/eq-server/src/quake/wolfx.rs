@@ -5,7 +5,7 @@
 
 use serde::Deserialize;
 
-use crate::{aggregate_pref_max, area::area_pref, jst, Eew, EewArea, Event, EventBody, Hypocenter, Scale};
+use crate::quake::{aggregate_pref_max, area::area_pref, jst, Eew, EewArea, Event, EventBody, Hypocenter, Scale};
 
 pub const SOURCE: &str = "wolfx";
 

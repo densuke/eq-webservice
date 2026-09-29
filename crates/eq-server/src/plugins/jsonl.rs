@@ -2,13 +2,10 @@
 
 use std::path::PathBuf;
 
-use async_trait::async_trait;
-use eq_core::Event;
+use crate::quake::Event;
 use serde::Deserialize;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
-
-use super::Sink;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -30,9 +27,8 @@ impl JsonlSink {
     }
 }
 
-#[async_trait]
-impl Sink for JsonlSink {
-    async fn handle(&self, ev: &Event) -> anyhow::Result<()> {
+impl JsonlSink {
+    pub async fn handle(&self, ev: &Event) -> anyhow::Result<()> {
         let mut line = serde_json::to_string(ev)?;
         line.push('\n');
         let _g = self.lock.lock().await;

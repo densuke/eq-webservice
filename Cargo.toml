@@ -1,11 +1,11 @@
 [workspace]
 resolver = "2"
-members = ["crates/eq-core", "crates/eq-server"]
+members = ["crates/eq-server"]
 
 [workspace.package]
 edition = "2021"
 license = "GPL-3.0-or-later"
-version = "0.12.1"
+version = "0.12.2"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }

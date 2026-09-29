@@ -14,7 +14,7 @@ export interface EewGroup {
   updatedAt: number;
   events: EewEvent[];
 }
-export interface SingleGroup {
+interface SingleGroup {
   key: string;
   kind: "tsunami" | "eew_detection";
   updatedAt: number;
@@ -96,7 +96,7 @@ export class GroupStore {
   }
 }
 
-export interface QuakeSummary {
+interface QuakeSummary {
   latest: QuakeEvent;
   infoLabel: string;
   originTime: string;

@@ -4,7 +4,7 @@ use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use eq_core::{Event, EventBody};
+use crate::quake::{Event, EventBody};
 use tokio::sync::broadcast;
 
 /// 購読者が処理しきれない場合に溜めておける件数
@@ -117,7 +117,7 @@ impl Hub {
     }
 }
 
-fn serial(e: &eq_core::Eew) -> u32 {
+fn serial(e: &crate::quake::Eew) -> u32 {
     e.serial.parse().unwrap_or(0)
 }
 
@@ -131,7 +131,7 @@ pub fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use eq_core::{Eew, EewDetection, Scale, Tsunami};
+    use crate::quake::{Eew, EewDetection, Scale, Tsunami};
 
     fn ev(id: &str) -> Event {
         Event {

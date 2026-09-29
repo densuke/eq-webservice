@@ -4,14 +4,14 @@ import type { Scale } from "./types.ts";
 import { distanceKm } from "./waves.ts";
 
 /** EEW と地震情報を同じ地震とみなす発生時刻の差 (地震情報の発生時刻は分単位) */
-export const SAME_QUAKE_MS = 90_000;
+const SAME_QUAKE_MS = 90_000;
 /** 震央がこれ以上離れていれば別の地震 */
-export const SAME_QUAKE_KM = 200;
+const SAME_QUAKE_KM = 200;
 
 /** 最後の情報からこの時間がたち、揺れも描き終えたら、地震の表示をやめて平時 (日本全体・気象警報) に戻す */
 export const SETTLE_MS = 3 * 60_000;
 /** 軽い地震 (最大震度がこれ以下) は早く戻す */
-export const MINOR_SCALE = 20;
+const MINOR_SCALE = 20;
 export const MINOR_SETTLE_MS = 60_000;
 
 /** その地震の表示を続ける時間 (最大震度が分からないものは通常どおり) */

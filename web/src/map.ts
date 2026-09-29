@@ -55,7 +55,7 @@ export function project(lon: number, lat: number): [number, number] {
 }
 
 /** project の逆 (地図座標 → 経度・緯度) */
-export function unproject(x: number, y: number): { lat: number; lon: number } {
+function unproject(x: number, y: number): { lat: number; lon: number } {
   return { lon: x / KX + LON0, lat: LAT0 - y / KY };
 }
 
@@ -63,6 +63,30 @@ export function el<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<s
   const e = document.createElementNS(SVG_NS, tag);
   for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v));
   return e;
+}
+
+/** 点を色ごとに 1 本の path にまとめる (長さ 0 の線を丸い線端で描くと、ズームしても同じ大きさの点になる)。後の点ほど上に描く */
+export function dotPaths(points: { lat: number; lon: number; color: string }[], cls: string): SVGPathElement[] {
+  const byColor = new Map<string, string>();
+  for (const { lat, lon, color } of points) {
+    const [x, y] = project(lon, lat);
+    byColor.set(color, (byColor.get(color) ?? "") + `M${x.toFixed(1)} ${y.toFixed(1)}h0`);
+  }
+  return [...byColor].map(([color, d]) => {
+    const p = el("path", { d, class: cls });
+    p.style.stroke = color;
+    return p;
+  });
+}
+
+async function getJson<T>(url: string): Promise<T> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`地図データを取得できません (${url}: ${res.status})`);
+  return res.json();
+}
+
+function polygonPath(g: GeoFeature["geometry"]): string {
+  return g.coordinates.flatMap((poly) => poly.map((ring) => ringPath(ring as [number, number][]))).join("");
 }
 
 function ringPath(coords: [number, number][]): string {
@@ -197,12 +221,9 @@ export class JapanMap {
 
   /** 気象警報・注意報の区域 (市町村等)。初めて平時の地図を出すときに読む */
   async loadWarningAreas(url: string): Promise<void> {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`地図データを取得できません (${url}: ${res.status})`);
-    const data: { features: { properties: { code: string; name: string }; geometry: GeoFeature["geometry"] }[] } = await res.json();
+    const data = await getJson<{ features: { properties: { code: string; name: string }; geometry: GeoFeature["geometry"] }[] }>(url);
     for (const f of data.features) {
-      const d = f.geometry.coordinates.flatMap((poly) => poly.map((ring) => ringPath(ring as [number, number][]))).join("");
-      const path = el("path", { d, class: "warn" });
+      const path = el("path", { d: polygonPath(f.geometry), class: "warn" });
       path.dataset.warn = f.properties.code;
       path.dataset.wname = f.properties.name;
       this.warnLayer.append(path);
@@ -237,11 +258,9 @@ export class JapanMap {
   }
 
   private async loadPolygons(url: string, cls: string, layer: SVGGElement, into: Map<string, SVGPathElement>): Promise<void> {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`地図データを取得できません (${url}: ${res.status})`);
-    const data: { features: GeoFeature[] } = await res.json();
+    const data = await getJson<{ features: GeoFeature[] }>(url);
     for (const f of data.features) {
-      const d = f.geometry.coordinates.flatMap((poly) => poly.map((ring) => ringPath(ring as [number, number][]))).join("");
+      const d = polygonPath(f.geometry);
       if (cls !== "neighbor") {
         const rings = f.geometry.coordinates.flatMap((poly) => poly.map((ring) => ring.map(([lon, lat]) => project(lon, lat))));
         this.centers.set(f.properties.name, interiorPoint(rings));
@@ -285,30 +304,19 @@ export class JapanMap {
       this.areas.get(name)!.classList.toggle("forecast", this.areaForecast.has(name));
       this.areas.get(name)!.classList.toggle("dropped", this.areaDropped.has(name));
     }
-    // 点は震度ごとに 1 本の path にまとめる (長さ 0 の線を丸い線端で描くと、ズームしても同じ大きさの点になる)
-    const byScale = new Map<number, string>();
-    for (const { lat, lon, scale } of [...dots].sort((a, b) => a.scale - b.scale)) {
-      const [x, y] = project(lon, lat);
-      byScale.set(scale, (byScale.get(scale) ?? "") + `M${x.toFixed(1)} ${y.toFixed(1)}h0`);
-    }
-    const all = [...byScale.values()].join("");
-    this.dotLayer.replaceChildren(
-      el("path", { d: all, class: "dot-bg" }),
-      ...[...byScale].map(([scale, d]) => {
-        const p = el("path", { d, class: "dot" });
-        p.style.stroke = scaleColor(scale);
-        return p;
-      }),
+    // 観測点の点 (震度の大きいものほど上に)。下に黒い縁取りを敷く
+    const paths = dotPaths(
+      [...dots].sort((a, b) => a.scale - b.scale).map((d) => ({ ...d, color: scaleColor(d.scale) })),
+      "dot",
     );
+    this.dotLayer.replaceChildren(el("path", { d: paths.map((p) => p.getAttribute("d")).join(""), class: "dot-bg" }), ...paths);
     this.paintFade();
     this.updateInsets();
   }
 
   /** 津波予報区の沿岸線 */
   async loadTsunami(url: string): Promise<void> {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`津波予報区のデータを取得できません (${res.status})`);
-    const data: { features: LineFeature[] } = await res.json();
+    const data = await getJson<{ features: LineFeature[] }>(url);
     for (const f of data.features) {
       let d = "";
       let box: Box | null = null;

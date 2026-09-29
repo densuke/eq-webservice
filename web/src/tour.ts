@@ -3,7 +3,7 @@
 import { distanceKm } from "./waves.ts";
 
 /** 震央どうしがこれ以上離れていれば、1 つの画面に収めずに巡回する */
-export const TOUR_MIN_KM = 300;
+const TOUR_MIN_KM = 300;
 
 /** 巡回するか: 2 つ以上あり、どれか 2 つが TOUR_MIN_KM 以上離れている */
 export function worthTouring(epicenters: { lat: number; lon: number }[]): boolean {

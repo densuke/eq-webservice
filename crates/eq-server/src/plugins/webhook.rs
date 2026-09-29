@@ -3,11 +3,8 @@
 
 use std::time::Duration;
 
-use async_trait::async_trait;
-use eq_core::Event;
+use crate::quake::Event;
 use serde::Deserialize;
-
-use super::Sink;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -27,14 +24,13 @@ impl WebhookSink {
     pub fn new(cfg: WebhookConfig) -> anyhow::Result<Self> {
         Ok(WebhookSink {
             cfg,
-            client: reqwest::Client::builder().timeout(Duration::from_secs(10)).build()?,
+            client: crate::net::client(Duration::from_secs(10))?,
         })
     }
 }
 
-#[async_trait]
-impl Sink for WebhookSink {
-    async fn handle(&self, ev: &Event) -> anyhow::Result<()> {
+impl WebhookSink {
+    pub async fn handle(&self, ev: &Event) -> anyhow::Result<()> {
         let mut req = self.client.post(&self.cfg.url).json(ev);
         for (k, v) in &self.cfg.headers {
             req = req.header(k, v);

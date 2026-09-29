@@ -32,7 +32,7 @@ export function renderMarkers(now: number): void {
   map.setEpicenters([...byNum.values()].map(({ quake: _, ...m }) => m));
 }
 
-export interface Scene {
+interface Scene {
   center: Center | null;
   /** カメラの対象以外で波を描く地震 (ライブで複数の地震が重なったとき) */
   others: WaveSource[];

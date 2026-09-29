@@ -19,7 +19,7 @@ import json
 import sys
 
 from eqdb import fetch, points
-from jma_eew import to_wolfx
+from jma_eew import issued, to_wolfx
 
 SAIGAIJI = "https://www.jma.go.jp/jma/kishou/books/saigaiji/saigaiji_201101/saigaiji_201101_01.pdf"
 # 震度データベースの地震の ID と、緊急地震速報の発表状況のページの ID
@@ -101,10 +101,6 @@ def tsunamis() -> list[dict]:
         out.append({"code": 552, "id": f"tohoku2011-t{i + 1}", "cancelled": False, "issue": {"source": "気象庁", "time": t, "type": "Focus"}, "areas": areas})
     out.append({"code": 552, "id": "tohoku2011-t-clear", "cancelled": True, "issue": {"source": "気象庁", "time": TSUNAMI_CLEAR, "type": "Focus"}, "areas": []})
     return out
-
-
-def issued(o: dict) -> str:
-    return o.get("AnnouncedTime") or o["issue"]["time"]
 
 
 def main(stations_path: str, dst: str) -> None:

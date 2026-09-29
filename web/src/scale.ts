@@ -44,7 +44,3 @@ export function scaleTextColor(s: Scale): string {
 export function scaleLabel(s: Scale): string {
   return LABELS[s] ?? "不明";
 }
-
-export function isKnownScale(s: Scale): boolean {
-  return s > 0;
-}

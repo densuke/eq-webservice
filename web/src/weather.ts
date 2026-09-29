@@ -1,6 +1,6 @@
 // 平時に地図へ重ねる主要都市の天気と、アメダスの雨の地点 (GET /api/weather)。出典: 気象庁
 
-export interface City {
+interface City {
   name: string;
   lat: number;
   lon: number;

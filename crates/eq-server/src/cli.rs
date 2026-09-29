@@ -36,18 +36,8 @@ impl Cli {
     pub fn parse(args: impl IntoIterator<Item = String>) -> anyhow::Result<Cli> {
         let mut cli = Cli::default();
         let mut args = args.into_iter();
-        while let Some(a) = args.next() {
-            // --key=value 形式も受け付ける
-            let (key, inline) = match a.split_once('=') {
-                Some((k, v)) if k.starts_with("--") => (k.to_string(), Some(v.to_string())),
-                _ => (a.clone(), None),
-            };
-            let mut value = |name: &str| -> anyhow::Result<String> {
-                inline
-                    .clone()
-                    .or_else(|| args.next())
-                    .with_context(|| format!("{name} needs a value"))
-            };
+        while let Some(key) = args.next() {
+            let mut value = |name: &str| args.next().with_context(|| format!("{name} needs a value"));
             match key.as_str() {
                 "-c" | "--config" => cli.config = Some(value("--config")?.into()),
                 "-l" | "--listen" => cli.listen = Some(value("--listen")?),
@@ -102,7 +92,7 @@ mod tests {
 
     #[test]
     fn parses_options() {
-        let cli = parse(&["-c", "a.toml", "--port", "3000", "--static-dir=/srv/eq"]).unwrap();
+        let cli = parse(&["-c", "a.toml", "--port", "3000", "--static-dir", "/srv/eq"]).unwrap();
         assert_eq!(cli.config, Some("a.toml".into()));
         assert_eq!(cli.port, Some(3000));
         assert_eq!(cli.static_dir, Some("/srv/eq".into()));

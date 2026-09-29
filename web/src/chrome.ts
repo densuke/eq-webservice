@@ -6,9 +6,9 @@ import { onSoundStateChange, play, setSoundEnabled, soundEnabled, soundReady, un
 import { $, tapWord } from "./dom.ts";
 
 /** テロップの文を切り替える間隔 */
-export const TELOP_INTERVAL_MS = 8000;
+const TELOP_INTERVAL_MS = 8000;
 
-export let telopMessages: string[] = [];
+let telopMessages: string[] = [];
 
 /** テロップ。地震の情報を出している間は邪魔をしないよう消す */
 export function renderTelop(now: number, busy: boolean): void {
@@ -73,7 +73,7 @@ export function renderSound(): void {
   btn.classList.toggle("waiting", waiting);
 }
 
-export function enableSound(): void {
+function enableSound(): void {
   unlock();
   play("low"); // 確認用
 }

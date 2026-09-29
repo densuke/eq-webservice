@@ -17,8 +17,6 @@ pub struct WeatherConfig {
     pub enabled: bool,
     /// 防災情報XML の定時の配信 (Atom)
     pub feed_url: String,
-    /// 取得の間隔 (秒)。集約通報は 10 分ごと
-    pub interval_sec: u64,
 }
 
 impl Default for WeatherConfig {
@@ -26,7 +24,6 @@ impl Default for WeatherConfig {
         WeatherConfig {
             enabled: true,
             feed_url: "https://www.data.jma.go.jp/developer/xml/feed/regular.xml".into(),
-            interval_sec: 300,
         }
     }
 }
@@ -52,6 +49,8 @@ pub struct Kind {
 
 pub type Shared = Arc<RwLock<Option<Warnings>>>;
 
+/// 取得の間隔。集約通報は 10 分ごと
+const INTERVAL: Duration = Duration::from_secs(300);
 const FEED_NAMESPACE: &str = "http://www.w3.org/2005/Atom";
 const MUNICIPAL: &str = "気象警報・注意報（市町村等）";
 
@@ -134,11 +133,7 @@ pub fn parse_report(xml: &str) -> anyhow::Result<Warnings> {
 /// 定期的に取得して shared を更新する
 pub fn spawn(cfg: WeatherConfig, shared: Shared) {
     tokio::spawn(async move {
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(60))
-            .user_agent(concat!("eq-webservice/", env!("CARGO_PKG_VERSION")))
-            .build()
-        {
+        let client = match crate::net::client(Duration::from_secs(60)) {
             Ok(c) => c,
             Err(e) => return tracing::warn!("weather: {e:#}"),
         };
@@ -153,7 +148,7 @@ pub fn spawn(cfg: WeatherConfig, shared: Shared) {
                 Ok(None) => {}
                 Err(e) => tracing::warn!("weather: {e:#}"),
             }
-            tokio::time::sleep(Duration::from_secs(cfg.interval_sec.max(60))).await;
+            tokio::time::sleep(INTERVAL).await;
         }
     });
 }
@@ -163,14 +158,14 @@ async fn refresh(
     feed_url: &str,
     last_url: &str,
 ) -> anyhow::Result<Option<(String, Warnings)>> {
-    let feed = client.get(feed_url).send().await?.error_for_status()?.text().await?;
+    let feed = crate::net::text(client.get(feed_url)).await?;
     let Some(url) = latest_report_url(&feed)? else {
         return Ok(None);
     };
     if url == last_url {
         return Ok(None);
     }
-    let xml = client.get(&url).send().await?.error_for_status()?.text().await?;
+    let xml = crate::net::text(client.get(&url)).await?;
     Ok(Some((url, parse_report(&xml)?)))
 }
 

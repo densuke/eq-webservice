@@ -140,11 +140,7 @@ pub fn summarize(
 /// 定期的に取得して shared を更新する
 pub fn spawn(shared: Shared) {
     tokio::spawn(async move {
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(60))
-            .user_agent(concat!("eq-webservice/", env!("CARGO_PKG_VERSION")))
-            .build()
-        {
+        let client = match crate::net::client(Duration::from_secs(60)) {
             Ok(c) => c,
             Err(e) => return tracing::warn!("city weather: {e:#}"),
         };
@@ -182,7 +178,7 @@ pub fn spawn(shared: Shared) {
 }
 
 async fn get_json(client: &reqwest::Client, url: &str) -> anyhow::Result<Value> {
-    Ok(client.get(url).send().await?.error_for_status()?.json().await?)
+    crate::net::json(client.get(url)).await
 }
 
 /// 新しい実況があれば読んでまとめる (地点表は初回だけ読む)
@@ -192,13 +188,7 @@ async fn refresh(
     last_time: &str,
     forecasts: &BTreeMap<String, (String, String)>,
 ) -> anyhow::Result<Option<CityWeather>> {
-    let latest = client
-        .get(format!("{BOSAI}/amedas/data/latest_time.txt"))
-        .send()
-        .await?
-        .error_for_status()?
-        .text()
-        .await?;
+    let latest = crate::net::text(client.get(format!("{BOSAI}/amedas/data/latest_time.txt"))).await?;
     if latest.trim() == last_time {
         return Ok(None);
     }

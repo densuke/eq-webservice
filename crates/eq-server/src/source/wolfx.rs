@@ -2,8 +2,8 @@
 
 use std::time::Duration;
 
+use crate::quake::wolfx;
 use anyhow::Context;
-use eq_core::wolfx;
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::tungstenite::Message;
 
@@ -25,7 +25,7 @@ pub async fn run(url: &str, hub: &Hub) {
 }
 
 async fn session(url: &str, hub: &Hub) -> anyhow::Result<()> {
-    let (mut ws, _) = tokio_tungstenite::connect_async(url).await.context("connect")?;
+    let mut ws = crate::net::connect_ws(url).await?;
     tracing::info!("connected to Wolfx");
     let mut ping = tokio::time::interval(PING_INTERVAL);
     ping.tick().await;
@@ -68,7 +68,7 @@ fn handle_text(text: &str, hub: &Hub) {
 }
 
 /// 発表から MAX_AGE_MS を過ぎた速報か (再接続直後に届く古い速報を流さない)
-fn is_stale(ev: &eq_core::Event, now_ms: i64) -> bool {
+fn is_stale(ev: &crate::quake::Event, now_ms: i64) -> bool {
     ev.issued_at_ms().is_some_and(|t| now_ms - t > MAX_AGE_MS)
 }
 
