@@ -3,8 +3,8 @@
 import { FULL_MS } from "./fade.ts";
 import { type Group, latestEew, summarizeQuake } from "./groups.ts";
 import { assignNumbers } from "./numbering.ts";
-import { type Place, byPriority, sameQuake } from "./priority.ts";
-import { CAMERA_MS, EEW_BANNER_MS, WAVE_MAX_SEC, app, now } from "./state.ts";
+import { type Place, byPriority, sameQuake, settleMs } from "./priority.ts";
+import { EEW_BANNER_MS, WAVE_MAX_SEC, app, now } from "./state.ts";
 import { tourIndex, worthTouring } from "./tour.ts";
 import type { EewEvent, Hypocenter, Scale } from "./types.ts";
 
@@ -64,7 +64,7 @@ export function activeEews(now: number): EewEvent[] {
     .list()
     .filter((g) => g.kind === "eew")
     .map((g) => latestEew(g))
-    .filter((e) => !e.cancelled && now - e.received_at_ms < EEW_BANNER_MS);
+    .filter((e) => !e.cancelled && now - e.received_at_ms < EEW_BANNER_MS && e.received_at_ms > app.calmSince);
 }
 
 export function placeOf(origin: number | null, h: Hypocenter | null): Place {
@@ -86,8 +86,16 @@ export function groupScale(g: Group): Scale {
  * 最近 (FULL_MS 以内) の地震を優先度順に。揺れの大きい方 (EEW は予測、地震情報は観測) が先、同じなら新しい方。
  * 地震情報が届いた EEW はその地震情報に任せる (予測の震度で居座らないように)
  */
+/** まだ表示を続ける地震 (最後の情報から settleMs 以内。軽い地震は短い) */
+export function unsettledGroups(now: number): Group[] {
+  return priorityGroups(now).filter((g) => now - g.updatedAt <= settleMs(groupScale(g)));
+}
+
 export function priorityGroups(now: number): Group[] {
-  const recent = app.world.store.list().filter((g) => (g.kind === "quake" || g.kind === "eew") && geoOf(g) && now - g.updatedAt <= FULL_MS);
+  // 「警報・注意報」ボタンで平時に戻した後は、それ以前の地震は優先して見せない
+  const recent = app.world.store
+    .list()
+    .filter((g) => (g.kind === "quake" || g.kind === "eew") && geoOf(g) && now - g.updatedAt <= FULL_MS && g.updatedAt > app.calmSince);
   const quakes = recent.filter((g) => g.kind === "quake").map(groupPlace);
   return recent
     .filter((g) => g.kind === "quake" || !quakes.some((q) => sameQuake(groupPlace(g), q)))
@@ -130,7 +138,7 @@ export function waveSources(now: number): WaveSource[] {
   const groups = app.world.store.list().filter((g) => g.kind === "eew" || g.kind === "quake");
   for (const g of [...groups.filter((g) => g.kind === "eew"), ...groups.filter((g) => g.kind === "quake")]) {
     const geo = geoOf(g);
-    if (!geo?.center || geo.origin == null || now - geo.origin > WAVE_MAX_SEC * 1000) continue;
+    if (!geo?.center || geo.origin == null || now - geo.origin > WAVE_MAX_SEC * 1000 || g.updatedAt <= app.calmSince) continue;
     // EEW どうしは event_id で別の地震と分かっているので、重ねて消すのは地震情報だけ
     if (g.kind === "quake" && out.some((s) => s.group.kind === "eew" && sameQuake(groupPlace(s.group), groupPlace(g)))) continue;
     out.push({ ...geo.center, origin: geo.origin, group: g });
@@ -147,8 +155,7 @@ export function waveSources(now: number): WaveSource[] {
  */
 export function updateTour(now: number, manual: boolean): void {
   const hold = app.tourHold && now < app.tourHold.until && app.world.store.get(app.tourHold.key) ? app.tourHold.key : null;
-  const cands = priorityGroups(now)
-    .filter((g) => now - g.updatedAt <= CAMERA_MS)
+  const cands = unsettledGroups(now)
     .map((g) => ({ g, c: geoOf(g)?.center }))
     .filter((x): x is { g: Group; c: NonNullable<typeof x.c> } => x.c != null)
     .sort((a, b) => (app.numbers.get(a.g.key) ?? 0) - (app.numbers.get(b.g.key) ?? 0));
