@@ -22,6 +22,7 @@ target
 
 # eq-webservice
 /config.toml
+/broadcast.toml
 /data/
 web/node_modules/
 web/dist/
