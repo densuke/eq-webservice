@@ -42,9 +42,9 @@ body {
 .topbar > .telop { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font-size: 12px; transition: opacity 0.4s; }
 .telop.fading { opacity: 0; }
 
-/* 日時表示 (地図の右上)。枠の色で接続状態を示す: 緑=オンライン / 赤=切断中 */
+/* 日時表示 (地図の右下。全体図で北海道に重ならないよう、海の側に置く)。枠の色で接続状態を示す: 緑=オンライン / 赤=切断中 */
 .clock-panel {
-  position: absolute; top: 10px; right: 10px; z-index: 1; pointer-events: none;
+  position: absolute; bottom: 10px; right: 10px; z-index: 1; pointer-events: none;
   background: rgba(13, 17, 23, 0.85); border: 2px solid #d29922; border-radius: 8px;
   padding: 4px 10px 6px; line-height: 1.1; font-variant-numeric: tabular-nums;
 }
@@ -110,7 +110,8 @@ body {
 .inset::before { content: attr(data-title); position: absolute; left: 4px; top: 2px; font-size: 10px; color: var(--muted); }
 .inset svg { display: block; height: 100%; width: auto; }
 .inset-okinawa { left: 10px; top: 10px; height: 150px; }
-.inset-ogasawara { right: 10px; bottom: 10px; height: 150px; }
+/* 小笠原は右下の日時表示の上 */
+.inset-ogasawara { right: 10px; bottom: 96px; height: 150px; }
 
 /* 画面外の地震の方向 (地図の端)。色は最大震度 */
 .offscreen-layer { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
@@ -208,7 +209,7 @@ body {
 .map.picking { cursor: crosshair; }
 /* 自分の地点に主要動が届くまで (緊急地震速報を受けているとき) */
 .countdown {
-  /* 右上の日時表示と重ならないよう左上に置く (寄っている間は左上の離島の別枠も隠れる) */
+  /* 左上に置く (寄っている間は左上の離島の別枠も隠れる) */
   position: absolute; left: 12px; top: 12px; z-index: 2; pointer-events: none; max-width: calc(100% - 24px);
   background: rgba(90, 10, 16, 0.92); border: 2px solid #f85149; border-radius: 8px; padding: 6px 14px;
   font-weight: 700; text-align: center; white-space: nowrap;
@@ -251,7 +252,8 @@ body {
   .topbar h1 { font-size: 14px; }
   .version { display: none; }
   .mode { font-size: 11px; padding: 2px 6px; }
-  .clock-panel { top: 6px; right: 6px; padding: 3px 8px 4px; }
+  .clock-panel { bottom: 6px; right: 6px; padding: 3px 8px 4px; }
+  .inset-ogasawara { bottom: 70px; }
   .inset-okinawa, .inset-ogasawara { height: 100px; }
   .c-hm { font-size: 26px; }
   .c-day { font-size: 20px; }
