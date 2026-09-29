@@ -212,6 +212,26 @@ status = "stream/status-json.xsl"   # 再生中の曲名を出す (省略可)
 デモ中も止めます。ブラウザは一度操作するまで音を出させないことが多いので、そのときはボタンが「BGM ON (クリックで開始)」になります。
 曲のつなぎ目は前処理のフェード (フェードアウト → フェードイン) です (2 曲を重ねるクロスフェードは、その場で音を混ぜる処理が重いので行いません)。
 
+### ライブ配信 (YouTube など)
+
+`eq-server broadcast <broadcast.toml>` で、画面の無い Chrome で地図のページを開き、その画面を ffmpeg で配信し続けます。
+Chrome か ffmpeg が止まったら、両方を止めて 5 秒後に立ち上げ直します。必要なものは Chrome (Linux は Chromium) と ffmpeg です。
+
+- 開くページは `?broadcast=1` を付けた配信用の表示です。操作ボタンを隠し、警戒音と BGM を最初から鳴らします
+- 画面は DevTools の screencast で受け取り、設定した fps で ffmpeg に渡します (既定は 1280x720・30fps・x264)
+- 音は ffmpeg の入力で取り込みます (Mac は BlackHole、Linux は PulseAudio のモニタ)。省くと無音です
+- 送り先の `$VAR` は環境変数に置き換え、ffmpeg のログでは値を伏せます。ストリームキーは設定ファイルに書かないでください
+- YouTube への送信に API キーは要りません。YouTube Studio のストリームキーだけで配信できます
+
+設定例は [broadcast.example.toml](broadcast.example.toml) にあります。
+
+```sh
+set -a; . ~/.config/youtube-live-eq-webservice; set +a   # YOUTUBE_LIVE_API_KEY=...
+eq-server broadcast broadcast.toml
+```
+
+配信は数秒以上遅れて届きます。緊急地震速報は公式の手段で受け取るよう、画面の注意書きはそのまま残しています。
+
 ## プラグイン（配信先）
 
 `config.toml` の `[[sinks]]` に並べます。共通のキー:
