@@ -116,6 +116,11 @@ export class JapanMap {
   private fade = 1;
   private view: View;
   private epicenters: SVGGElement[] = [];
+  /** 気象警報・注意報の区域 (市町村等のコード -> 境界)。平時だけ塗る */
+  private warnLayer = el("g", { class: "warns" });
+  private warns = new Map<string, SVGPathElement>();
+  private warnText = new Map<string, string>();
+  private warnSig = "";
   private feels: SVGGElement[] = [];
   private feelSig = "[]";
   private epicenterSig = "";
@@ -142,7 +147,7 @@ export class JapanMap {
     // 外部の CSS は <use> の複製に効かないので、図形のスタイルは SVG の中に置く
     const style = el("style");
     style.textContent = mapCss;
-    base.append(style, this.neighborLayer, this.prefLayer, this.areaLayer, this.tsunamiLayer, this.dotLayer);
+    base.append(style, this.neighborLayer, this.prefLayer, this.warnLayer, this.areaLayer, this.tsunamiLayer, this.dotLayer);
     this.svg.append(base, this.waveLayer, this.labelLayer, this.markerLayer);
     for (const ins of INSETS) {
       const [x0, y0] = project(ins.lonMin, ins.latMax);
@@ -185,6 +190,41 @@ export class JapanMap {
   /** 周辺国の陸地 (観測範囲外。背景として描くだけ) */
   async loadNeighbors(url: string): Promise<void> {
     await this.loadPolygons(url, "neighbor", this.neighborLayer, new Map());
+  }
+
+  /** 気象警報・注意報の区域 (市町村等)。初めて平時の地図を出すときに読む */
+  async loadWarningAreas(url: string): Promise<void> {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`地図データを取得できません (${url}: ${res.status})`);
+    const data: { features: { properties: { code: string; name: string }; geometry: GeoFeature["geometry"] }[] } = await res.json();
+    for (const f of data.features) {
+      const d = f.geometry.coordinates.flatMap((poly) => poly.map((ring) => ringPath(ring as [number, number][]))).join("");
+      const path = el("path", { d, class: "warn" });
+      path.dataset.warn = f.properties.code;
+      path.dataset.wname = f.properties.name;
+      this.warnLayer.append(path);
+      this.warns.set(f.properties.code, path);
+    }
+    this.warnSig = "";
+  }
+
+  get warningAreasLoaded(): boolean {
+    return this.warns.size > 0;
+  }
+
+  /** 気象警報・注意報で塗る。空で消す */
+  setWarnings(items: { code: string; level: string; text: string }[]): void {
+    const sig = JSON.stringify(items);
+    if (sig === this.warnSig) return;
+    this.warnSig = sig;
+    for (const p of this.warns.values()) delete p.dataset.level;
+    this.warnText = new Map();
+    for (const { code, level, text } of items) {
+      const p = this.warns.get(code);
+      if (!p) continue;
+      p.dataset.level = level;
+      this.warnText.set(code, `${p.dataset.wname}: ${text}`);
+    }
   }
 
   /** 地震情報細分区域 (寄ったときに使う) */
@@ -713,6 +753,8 @@ export class JapanMap {
       }
       if (best) return `${best.name}${label(best.scale)}`;
     }
+    const warn = target.closest<SVGElement>("[data-warn][data-level]");
+    if (warn) return this.warnText.get(warn.dataset.warn ?? "") ?? null;
     const el = target.closest<SVGElement>("[data-name], .tsunami-line");
     if (!el) return null;
     if (el.classList.contains("tsunami-line")) {

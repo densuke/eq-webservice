@@ -15,6 +15,9 @@ pub struct Config {
     pub sinks: Vec<toml::Table>,
     #[serde(default)]
     pub telop: TelopConfig,
+    /// 気象警報・注意報 (平時の地図に出す)
+    #[serde(default)]
+    pub weather: crate::weather::WeatherConfig,
 }
 
 /// 平常時に画面上部で切り替えて表示する文

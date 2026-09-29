@@ -6,6 +6,7 @@ mod hub;
 mod plugins;
 mod source;
 mod telop;
+mod weather;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -59,6 +60,11 @@ async fn main() -> anyhow::Result<()> {
 
     let eew_enabled = matches!(&cfg.source, config::SourceConfig::P2pquake { eew_url, .. } if !eew_url.is_empty());
     routes.push(telop::router(telop::messages(&cfg.telop.messages, eew_enabled)));
+    let warnings = weather::Shared::default();
+    if cfg.weather.enabled {
+        weather::spawn(cfg.weather.clone(), warnings.clone());
+    }
+    routes.push(weather::router(warnings));
 
     let listener = tokio::net::TcpListener::bind(&cfg.server.listen)
         .await
