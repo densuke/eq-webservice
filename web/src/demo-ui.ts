@@ -8,8 +8,11 @@ import { type DemoState, app, demoPos, hooks, liveWorld, now, type World } from 
 
 /** 倍速の選択肢 */
 const SPEEDS = [1, 2, 4, 8];
-/** 最後の報の後も、揺れの広がりが終わってカメラが戻るまで位置を動かせるようにする */
+/** 最後の報の後も、揺れの広がりが終わってカメラが戻るまで再生する */
 const TAIL_MS = 4 * 60_000;
+
+/** 再生の長さ (最後の報 + TAIL_MS) */
+const lengthOf = (d: DemoState) => (d.plan ? d.plan.end + TAIL_MS : 0);
 
 export function showWorld(w: World): void {
   app.world = w;
@@ -114,7 +117,9 @@ export function renderDemoControls(): void {
   const d = app.demo;
   box.hidden = !d?.plan;
   if (!d?.plan) return;
-  const max = d.plan.end + TAIL_MS;
+  const max = lengthOf(d);
+  // 末尾まで来たら止める
+  if (!d.clock.paused && demoPos(d) >= max) setClock(d, { paused: true, pos: max });
   const pos = Math.min(demoPos(d), max);
   const play = $<HTMLButtonElement>("#demo-play");
   const label = d.clock.paused ? "再生" : "一時停止";
@@ -124,7 +129,7 @@ export function renderDemoControls(): void {
   range.max = String(max);
   // 利用者が動かしている最中は上書きしない
   if (document.activeElement !== range) range.value = String(pos);
-  const time = `${mmss(pos)} / ${mmss(d.plan.end)}`;
+  const time = `${mmss(pos)} / ${mmss(max)}`;
   const t = $("#demo-time");
   if (t.textContent !== time) t.textContent = time;
 }
@@ -144,7 +149,11 @@ $("#demo-controls").addEventListener("click", (e) => {
   const d = app.demo;
   const b = (e.target as HTMLElement).closest<HTMLButtonElement>("button");
   if (!d?.plan || !b) return;
-  if (b.id === "demo-play") setClock(d, { paused: !d.clock.paused });
+  // 末尾で止まっているときの「再生」は最初から
+  if (b.id === "demo-play" && d.clock.paused && demoPos(d) >= lengthOf(d)) {
+    seek(d, 0);
+    setClock(d, { paused: false });
+  } else if (b.id === "demo-play") setClock(d, { paused: !d.clock.paused });
   else if (b.dataset.speed) setClock(d, { speed: Number(b.dataset.speed) });
 });
 
