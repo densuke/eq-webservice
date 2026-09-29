@@ -250,6 +250,12 @@ a.banner-item:hover p { text-decoration: underline; }
 .credit { font-size: 11px; color: var(--muted); padding: 8px 16px; border-top: 1px solid var(--line); }
 .credit a { color: inherit; }
 
+/* 横向きのスマホなど高さの低い画面: 履歴が潰れないよう、出典は 1 行だけ (全文は上部のテロップで流れる)、詳細を低く、バナーは出さない */
+@media (max-height: 520px) and (min-width: 801px) {
+  .credit { max-height: 1.6em; overflow: hidden; padding-top: 4px; padding-bottom: 4px; }
+  .detail { max-height: 40%; }
+  .banner { display: none !important; }
+}
 @media (max-width: 800px) {
   /* スマホでは地図の下に詳細・履歴を並べ、ページ全体をスクロールさせる */
   html, body { height: auto; }
