@@ -1,5 +1,7 @@
 // 起動、情報の受信、周期的な描画 (tick)。
 
+// 配信用の表示の設定は、ほかのモジュールが設定を読む前に済ませる
+import "./broadcast.ts";
 import { type AlertLevel, alertLevel } from "./alert.ts";
 import { loadTelop, renderClock, renderSound, renderTelop, setStatus } from "./chrome.ts";
 import { Connection } from "./connection.ts";
