@@ -21,3 +21,8 @@ export function bgmNotice(wanted: boolean, volumePercent: number): Notice {
 export function changed(prev: Notice | null, next: Notice): Notice | null {
   return prev != null && JSON.stringify(prev) === JSON.stringify(next) ? null : next;
 }
+
+/** BGM が鳴っている扱いか。mixer はページで鳴らさないので、流す知らせを出している間 (wanted) を鳴っているとする */
+export function isPlaying(mixer: boolean, wanted: boolean, paused: boolean): boolean {
+  return mixer ? wanted : !paused;
+}
