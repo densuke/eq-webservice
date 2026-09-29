@@ -1,7 +1,7 @@
 // 平時の BGM。音楽は Icecast が配信し、この画面はその配信を鳴らすだけ。
 // 地震の表示の間とデモ中は直ちに止め (警戒音を優先。配信の受信もやめる)、平時に戻ればそのときの放送から少しずつ音を上げて流す。
 
-import { routeAudio } from "./broadcast.ts";
+import { mixerAudio, notifyBgm, routeAudio } from "./broadcast.ts";
 import { $, tapWord } from "./dom.ts";
 import { saveSettings } from "./personal.ts";
 import { app } from "./state.ts";
@@ -88,6 +88,8 @@ function stop(): void {
 /** 画面の更新 (tick) ごと: 平時なら流し、そうでなければ直ちに止める */
 export function updateBgm(quiet: boolean): void {
   allowed = quiet;
+  // 配信の mixer 音声: 流す・止めるを eq-server に知らせるだけ (音はページで鳴らさない)
+  if (mixerAudio) return notifyBgm(wanted(), app.settings.bgmVolume);
   if (!wanted()) stop();
   else if (audio.paused && !blocked && Date.now() >= retryAt) void start();
   if (!audio.paused && cfg?.status && Date.now() - titleAt > TITLE_MS) void loadTitle();

@@ -3,7 +3,7 @@
 // (サイトの設定で音声を許可していれば操作なしで鳴らせる)、だめならボタンやタップで unlock() する。
 
 import type { AlertLevel } from "./alert.ts";
-import { routeAudio } from "./broadcast.ts";
+import { mixerAudio, notifyAlert, routeAudio } from "./broadcast.ts";
 
 const KEY = "eq-sound";
 let ctx: AudioContext | null = null;
@@ -33,6 +33,7 @@ export function onSoundStateChange(f: () => void): void {
 
 /** 鳴らせる状態にする。操作の中で呼ぶのが確実だが、許可されていれば操作なしでも通る */
 export function unlock(): void {
+  if (mixerAudio) return; // 音は eq-server が作るので、ページでは鳴らさない
   if (!ctx) {
     ctx = new AudioContext();
     // 配信のときは出力先を切り替える (AudioContext.setSinkId は型定義にまだ無い)
@@ -46,7 +47,7 @@ export function unlock(): void {
 }
 
 export function soundReady(): boolean {
-  return ctx?.state === "running";
+  return mixerAudio || ctx?.state === "running";
 }
 
 function tone(c: AudioContext, freq: number, at: number, dur: number, type: OscillatorType, peak: number): void {
@@ -64,7 +65,9 @@ function tone(c: AudioContext, freq: number, at: number, dur: number, type: Osci
 }
 
 export function play(level: AlertLevel | "pip" | "feel"): void {
-  if (!soundEnabled() || !ctx || ctx.state !== "running") return;
+  if (!soundEnabled()) return;
+  if (mixerAudio) return notifyAlert(level);
+  if (!ctx || ctx.state !== "running") return;
   const c = ctx;
   switch (level) {
     case "low": // ピンポン 1 回
