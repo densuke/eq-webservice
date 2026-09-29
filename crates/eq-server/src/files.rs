@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use axum::extract::Request;
-use axum::http::StatusCode;
+use axum::http::{header, HeaderValue, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::IntoResponse;
 use axum::Router;
@@ -18,11 +18,17 @@ pub fn serve(prefix: &'static str, dir: PathBuf, exts: &'static [&'static str]) 
                 .extension()
                 .and_then(|x| x.to_str())
                 .is_some_and(|x| exts.contains(&x.to_ascii_lowercase().as_str()));
-            if allowed {
-                next.run(req).await
-            } else {
-                StatusCode::NOT_FOUND.into_response()
+            if !allowed {
+                return StatusCode::NOT_FOUND.into_response();
             }
+            let m4a = req.uri().path().to_ascii_lowercase().ends_with(".m4a");
+            let mut res = next.run(req).await;
+            // 推測では audio/m4a (正式な名前ではない) になるので、正式な audio/mp4 にする
+            if m4a {
+                res.headers_mut()
+                    .insert(header::CONTENT_TYPE, HeaderValue::from_static("audio/mp4"));
+            }
+            res
         }))
 }
 
@@ -37,7 +43,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("a.png"), b"png").unwrap();
         std::fs::write(dir.path().join("b.svg"), b"<svg/>").unwrap();
-        let app = serve("/banner", dir.path().to_path_buf(), &["png"]);
+        std::fs::write(dir.path().join("c.m4a"), b"m4a").unwrap();
+        let app = serve("/banner", dir.path().to_path_buf(), &["png", "m4a"]);
         let status = |path: &'static str| {
             let app = app.clone();
             async move {
@@ -50,5 +57,11 @@ mod tests {
         assert_eq!(status("/banner/a.png").await, StatusCode::OK);
         assert_eq!(status("/banner/b.svg").await, StatusCode::NOT_FOUND);
         assert_eq!(status("/banner/../Cargo.toml").await, StatusCode::NOT_FOUND);
+        // m4a は正式な種類名で返す
+        let res = app
+            .oneshot(Request::get("/banner/c.m4a").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(res.headers()[header::CONTENT_TYPE], "audio/mp4");
     }
 }
