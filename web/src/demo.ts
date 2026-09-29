@@ -1,7 +1,8 @@
 // デモモード: 場面の情報を、発生時刻を「今」にずらしてブラウザの中だけで再生する。
-// ずらし方はサーバの replay と同じ: 間隔は詰め (最大 MAX_GAP_MS)、発表時刻はそれぞれ「受け取った時刻」に、
-// 発生時刻は最初の報に合わせて固定する (同じ地震の続報が別の地震に見えないように)。
+// 報の間隔は、波を描いている間は実時間のまま、それ以外は詰める (最大 MAX_GAP_MS)。発表時刻はそれぞれ「受け取った時刻」に、
+// 発生時刻は同じ詰め方で写す (同じ地震の続報は同じ発生時刻のまま、後から起きた地震も自分の報より前になる)。
 
+import { WAVE_MAX_SEC } from "./waves.ts";
 import type { EqEvent } from "./types.ts";
 
 export const MAX_GAP_MS = 8000;
@@ -80,15 +81,37 @@ function playAt(t: number, timeline: [number, number][]): number {
   return Math.max(prevAt, Math.min(prevAt + (t - prevRec), nextAt - (nextRec - t)));
 }
 
-/** 再生の予定: at (再生開始からのミリ秒) と、その時刻に届いたことにする情報。run は再生ごとの番号 (ID の重複を避ける) */
+/** 区間 [a, b] のうち、どれかの地震の波を描いている間 (発生から WAVE_MAX_SEC) に重なる長さ */
+function waveOverlap(a: number, b: number, origins: number[]): number {
+  let covered = 0;
+  let end = a;
+  for (const o of origins) {
+    const from = Math.max(o, end);
+    const to = Math.min(o + WAVE_MAX_SEC * 1000, b);
+    if (to > from) {
+      covered += to - from;
+      end = to;
+    }
+  }
+  return covered;
+}
+
+/**
+ * 再生の予定: at (再生開始からのミリ秒) と、その時刻に届いたことにする情報。run は再生ごとの番号 (ID の重複を避ける)。
+ * 報の間は、波を描いている間は実時間のまま、それ以外は MAX_GAP_MS までに詰める (観測の震度が波より先に出ないように)
+ */
 export function schedule(events: EqEvent[], now: number, run: number): { at: number; event: EqEvent }[] {
+  const origins = [...new Set(events.map((e) => ("origin_time_ms" in e ? e.origin_time_ms : null)).filter((o): o is number => o != null))].sort((x, y) => x - y);
   const ats: number[] = [];
   const timeline: [number, number][] = [];
   let at = 0;
   let prev: number | null = null;
   for (const e of events) {
     const rec = issuedMs(e);
-    if (prev != null && rec != null && rec > prev) at += Math.min(rec - prev, MAX_GAP_MS);
+    if (prev != null && rec != null && rec > prev) {
+      const real = waveOverlap(prev, rec, origins);
+      at += real + Math.min(rec - prev - real, MAX_GAP_MS);
+    }
     if (rec != null) {
       prev = rec;
       timeline.push([rec, at]);

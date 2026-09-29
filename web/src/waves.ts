@@ -4,6 +4,9 @@
 // 地表での到達半径 r = √(R² − 深さ²) を求める。
 // 気象庁の走時表 (JMA2001) を使うとより正確になる (将来の改善点)。
 
+/** 発生からこの秒数を過ぎたら P波・S波の表示を止める */
+export const WAVE_MAX_SEC = 180;
+
 export const VP_KM_S = 6.5;
 export const VS_KM_S = 3.75;
 
