@@ -146,7 +146,12 @@ body {
 .lt.watch { border-bottom: 3px solid var(--t-watch); }
 .lt.warning { border-bottom: 3px solid var(--t-warning); }
 .lt.major_warning { border-bottom: 3px solid var(--t-major); }
-.bgm-now { font-size: 11px; max-width: 16em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bgm-now { font-size: 11px; max-width: 16em; overflow: hidden; white-space: nowrap; }
+/* 曲名が収まらないときは、端まで流して少し止まり、戻るのを繰り返す */
+.bgm-now .bgm-text { display: inline-block; }
+.bgm-now.scroll .bgm-text { animation: bgm-pingpong var(--bgm-sec, 10s) ease-in-out infinite; }
+@keyframes bgm-pingpong { 0%, 20% { transform: translateX(0); } 45%, 65% { transform: translateX(var(--bgm-shift)); } 90%, 100% { transform: translateX(0); } }
+@media (prefers-reduced-motion: reduce) { .bgm-now { text-overflow: ellipsis; } .bgm-now.scroll .bgm-text { animation: none; } }
 .lwn { padding-bottom: 1px; border-bottom: 3px solid; }
 .lwn.advisory { border-color: #f2e700; }
 .lwn.warning { border-color: #ff2800; }
