@@ -1,6 +1,7 @@
 mod banner;
 mod bgm;
 mod bgm_send;
+mod broadcast;
 mod city_weather;
 mod cli;
 mod config;
@@ -41,6 +42,10 @@ async fn main() -> anyhow::Result<()> {
     // eq-server bgm-send <MP3 のディレクトリ> <Icecast の URL>: 平時の BGM を Icecast へ送り続ける
     if args.first().map(String::as_str) == Some("bgm-send") {
         return bgm_send::run(&args[1..]);
+    }
+    // eq-server broadcast <broadcast.toml>: 地図のページを ffmpeg で配信し続ける
+    if args.first().map(String::as_str) == Some("broadcast") {
+        return broadcast::run(&args[1..]).await;
     }
     let cli = Cli::parse(args)?.with_env(|k| std::env::var(k).ok())?;
     if cli.help {

@@ -304,3 +304,7 @@ a.banner-item:hover p { text-decoration: underline; }
   .banner { flex: none; max-height: 50vh; }
   .banner-item img { max-height: 40vh; }
 }
+
+/* 配信用の表示 (?broadcast=1): 操作するものは出さない */
+.broadcast #settings-open, .broadcast #demo-open, .broadcast #sound, .broadcast #bgm, .broadcast #overview,
+.broadcast #calm-now, .broadcast #back-live, .broadcast #sound-hint { display: none !important; }

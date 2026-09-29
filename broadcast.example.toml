@@ -1,0 +1,28 @@
+# eq-server broadcast の設定例。broadcast.toml にコピーして使う。
+# 起動: set -a; . ~/.config/youtube-live-eq-webservice; set +a; eq-server broadcast broadcast.toml
+#   (ストリームキーは環境変数で渡す。このファイルには書かない)
+
+# 開くページ (?broadcast=1 で操作ボタンを隠し、警戒音と BGM を最初から鳴らす)
+url = "https://eq.fuga.jp/?broadcast=1"
+width = 1280
+height = 720
+fps = 30
+
+# Chrome (Mac の既定。Linux / Raspberry Pi は "chromium")
+# chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+# Linux で音を PulseAudio の配信用の出力に流す場合
+# chrome_env = { PULSE_SINK = "eq_broadcast" }
+
+# 音の入力 (ffmpeg の引数)。省くと無音
+# Mac: BlackHole 2ch に Chrome の音を流し、それを取り込む
+# audio = ["-f", "avfoundation", "-i", ":BlackHole 2ch"]
+# Linux: PulseAudio の配信用の出力のモニタ
+# audio = ["-f", "pulse", "-i", "eq_broadcast.monitor"]
+
+# 圧縮 (ffmpeg の引数)。既定は x264 (Raspberry Pi 5 にはハードの H.264 エンコーダが無い)
+# encode = ["-c:v", "libx264", "-preset", "veryfast", "-b:v", "3000k", "-maxrate", "3000k", "-bufsize", "6000k"]
+
+# 送り先 (ffmpeg の引数)。$VAR は環境変数に置き換え、ログでは伏せる
+output = ["-f", "flv", "rtmps://a.rtmps.youtube.com/live2/$YOUTUBE_LIVE_API_KEY"]
+# 手元で確かめるだけならファイルに保存する
+# output = ["-t", "60", "-f", "mpegts", "broadcast-test.ts"]
