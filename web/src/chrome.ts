@@ -3,7 +3,7 @@
 import { clockParts } from "./clock.ts";
 import type { Status } from "./connection.ts";
 import { onSoundStateChange, play, setSoundEnabled, soundEnabled, soundReady, unlock } from "./sound.ts";
-import { $ } from "./dom.ts";
+import { $, tapWord } from "./dom.ts";
 
 /** テロップの文を切り替える間隔 */
 export const TELOP_INTERVAL_MS = 8000;
@@ -66,7 +66,7 @@ export function renderSound(): void {
   // 設定は ON だがブラウザの制限でまだ鳴らせないときは、地図の上に案内を出す
   $("#sound-hint").hidden = !waiting;
   const btn = $("#sound");
-  const text = !soundEnabled() ? "音 OFF" : waiting ? "音 ON (タップで有効化)" : "音 ON";
+  const text = !soundEnabled() ? "音 OFF" : waiting ? `音 ON (${tapWord}で有効化)` : "音 ON";
   if (btn.textContent === text) return;
   btn.textContent = text;
   btn.classList.toggle("active", soundEnabled() && !waiting);
@@ -79,7 +79,7 @@ export function enableSound(): void {
 }
 
 $("#sound").addEventListener("click", () => {
-  // 「タップで有効化」の状態で押したら、OFF にせず有効化する
+  // 「タップ (クリック) で有効化」の状態で押したら、OFF にせず有効化する
   if (soundEnabled() && !soundReady()) enableSound();
   else {
     setSoundEnabled(!soundEnabled());
@@ -88,6 +88,7 @@ $("#sound").addEventListener("click", () => {
   renderSound();
 });
 
+$("#sound-hint").textContent = `${tapWord}すると警戒音が鳴るようになります`;
 $("#sound-hint").addEventListener("click", enableSound);
 
 onSoundStateChange(renderSound);
