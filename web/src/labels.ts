@@ -58,7 +58,7 @@ export function interiorPoint(rings: Pt[][], grid = 12): Pt {
   return best;
 }
 
-export interface LabelBox {
+interface LabelBox {
   key: string;
   /** 中心と大きさ (どれも同じ座標系) */
   x: number;

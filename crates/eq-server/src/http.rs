@@ -8,16 +8,16 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::quake::Event;
 use axum::extract::ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
-use axum::http::{header, HeaderValue};
-use axum::response::IntoResponse;
+use axum::http::{header, HeaderValue, StatusCode};
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
-use eq_core::Event;
 use serde::Serialize;
 use tokio::sync::broadcast::error::RecvError;
-use tower_http::compression::predicate::{DefaultPredicate, NotForContentType, Predicate};
+use tokio::sync::Semaphore;
 use tower_http::compression::CompressionLayer;
 use tower_http::services::ServeDir;
 use tower_http::set_header::SetResponseHeaderLayer;
@@ -44,6 +44,10 @@ const CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsa
 /// ブラウザから届くメッセージの上限。ブラウザは閉じる・ping への応答くらいしか送らない
 const MAX_CLIENT_MESSAGE: usize = 16 * 1024;
 
+/// 同時につなげるブラウザの数。つなぎっぱなしで大量に開かれてもメモリを使い切らないように (e2 はメモリ 1GB)
+const MAX_CLIENTS: usize = 500;
+static CLIENTS: Semaphore = Semaphore::const_new(MAX_CLIENTS);
+
 pub fn router(hub: Arc<Hub>, static_dir: &std::path::Path, extra: Vec<Router>) -> Router {
     let mut app = Router::new()
         .route("/ws", get(ws_handler))
@@ -66,10 +70,7 @@ pub fn router(hub: Arc<Hub>, static_dir: &std::path::Path, extra: Vec<Router>) -
         .layer(header(header::X_CONTENT_TYPE_OPTIONS, "nosniff"))
         .layer(header(header::X_FRAME_OPTIONS, "SAMEORIGIN"))
         .layer(header(header::REFERRER_POLICY, "same-origin"))
-        // 音声 (BGM) は既に圧縮されているので圧縮しない
-        .layer(
-            CompressionLayer::new().compress_when(DefaultPredicate::new().and(NotForContentType::const_new("audio/"))),
-        )
+        .layer(CompressionLayer::new())
 }
 
 async fn events_handler(State(hub): State<Arc<Hub>>) -> impl IntoResponse {
@@ -77,9 +78,16 @@ async fn events_handler(State(hub): State<Arc<Hub>>) -> impl IntoResponse {
     Json(events.iter().map(|e| e.as_ref()).cloned().collect::<Vec<Event>>())
 }
 
-async fn ws_handler(ws: WebSocketUpgrade, State(hub): State<Arc<Hub>>) -> impl IntoResponse {
+async fn ws_handler(ws: WebSocketUpgrade, State(hub): State<Arc<Hub>>) -> Response {
+    let Ok(permit) = CLIENTS.try_acquire() else {
+        tracing::warn!("too many WebSocket clients");
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
     ws.max_message_size(MAX_CLIENT_MESSAGE)
-        .on_upgrade(move |socket| client(socket, hub))
+        .on_upgrade(move |socket| async move {
+            client(socket, hub).await;
+            drop(permit);
+        })
 }
 
 async fn client(mut socket: WebSocket, hub: Arc<Hub>) {

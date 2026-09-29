@@ -3,14 +3,11 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use crate::quake::{Event, EventBody, Scale, TsunamiGrade};
 use anyhow::Context;
-use async_trait::async_trait;
-use eq_core::{Event, EventBody, Scale, TsunamiGrade};
 use serde::Deserialize;
 use serde_json::json;
 use tokio::sync::Mutex;
-
-use super::Sink;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -41,7 +38,7 @@ impl DiscordSink {
         Ok(DiscordSink {
             url,
             username: cfg.username,
-            client: reqwest::Client::builder().timeout(Duration::from_secs(10)).build()?,
+            client: crate::net::client(Duration::from_secs(10))?,
             eew_notified: Mutex::new(HashMap::new()),
         })
     }
@@ -66,9 +63,8 @@ impl DiscordSink {
     }
 }
 
-#[async_trait]
-impl Sink for DiscordSink {
-    async fn handle(&self, ev: &Event) -> anyhow::Result<()> {
+impl DiscordSink {
+    pub async fn handle(&self, ev: &Event) -> anyhow::Result<()> {
         if !self.should_post(ev).await {
             return Ok(());
         }
@@ -144,7 +140,7 @@ fn color(ev: &Event) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use eq_core::Eew;
+    use crate::quake::Eew;
 
     fn sink() -> DiscordSink {
         DiscordSink::new(DiscordConfig {

@@ -1,7 +1,7 @@
 // 平時の地図に重ねる天気: アメダスの雨の地点 (強さで色分けした点) と、主要都市の天気の絵文字と気温。
 
 import { map } from "./dom.ts";
-import { el, project } from "./map.ts";
+import { dotPaths, el, project } from "./map.ts";
 import { type CityWeather, rainColor, tempLabel, weatherIcon } from "./weather.ts";
 
 let data: CityWeather | null = null;
@@ -21,24 +21,11 @@ export function renderCityWeather(show: boolean, now: number): void {
   const next = w ? `${w.observed_at}|${night}` : "";
   if (next === sig) return;
   sig = next;
-  map.rainLayer.replaceChildren(...(w ? rainPaths(w.rain) : []));
+  // 雨の強い地点ほど上に
+  const rain = w ? [...w.rain].sort((a, b) => a[2] - b[2]).map(([lat, lon, mm]) => ({ lat, lon, color: rainColor(mm) })) : [];
+  map.rainLayer.replaceChildren(...dotPaths(rain, "rain-dot"));
   map.cityLayer.replaceChildren(...(w ? w.cities.map((c) => cityMarker(c, night)) : []));
   map.refreshCities();
-}
-
-/** 雨の点は色ごとに 1 本の path にまとめる (長さ 0 の線を丸い線端で描くと、ズームしても同じ大きさの点になる) */
-function rainPaths(rain: CityWeather["rain"]): SVGPathElement[] {
-  const byColor = new Map<string, string>();
-  for (const [lat, lon, mm] of [...rain].sort((a, b) => a[2] - b[2])) {
-    const [x, y] = project(lon, lat);
-    const c = rainColor(mm);
-    byColor.set(c, (byColor.get(c) ?? "") + `M${x.toFixed(1)} ${y.toFixed(1)}h0`);
-  }
-  return [...byColor].map(([color, d]) => {
-    const p = el("path", { d, class: "rain-dot" });
-    p.style.stroke = color;
-    return p;
-  });
 }
 
 /** 札の向き (無ければ上)。大阪と神戸、東京と千葉は近いので左右に分ける */

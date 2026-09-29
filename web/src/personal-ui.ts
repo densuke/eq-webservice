@@ -12,10 +12,10 @@ import { GRADE_LABEL } from "./view.ts";
 
 
 /** 自分の地点が属する細分区域 (地点に最も近い震度観測点の区域) */
-export let homeArea: string | null = null;
+let homeArea: string | null = null;
 
 /** 通知済みの地震 (グループのキー → 通知したときの深刻さ)。深刻さが上がったときだけまた通知する */
-export const notified = new Map<string, number>();
+const notified = new Map<string, number>();
 
 export function updateHome(): void {
   homeArea = app.settings.home ? nearestArea(app.settings.home, app.stations) : null;
@@ -23,7 +23,7 @@ export function updateHome(): void {
   renderSettings();
 }
 
-export function renderSettings(): void {
+function renderSettings(): void {
   const h = app.settings.home;
   $("#home-label").textContent = h ? `${homeArea ?? "地点"} (北緯${h.lat.toFixed(2)} 東経${h.lon.toFixed(2)})` : "未設定";
   $<HTMLSelectElement>("#notify-level").value = app.settings.notify;
@@ -32,14 +32,14 @@ export function renderSettings(): void {
   $<HTMLSelectElement>("#list-min").value = String(app.settings.listMin);
 }
 
-export function setSettings(next: typeof app.settings): void {
+function setSettings(next: typeof app.settings): void {
   app.settings = next;
   saveSettings(app.settings);
   updateHome();
 }
 
 /** 自分の地点の震度 (緊急地震速報は予測、地震情報は観測) */
-export function homeScaleOf(e: EqEvent): number | null {
+function homeScaleOf(e: EqEvent): number | null {
   if (!homeArea) return null;
   if (e.kind === "eew") return eewAreaScales(e.areas).find((a) => a.name === homeArea)?.scale ?? null;
   if (e.kind === "quake") return quakeDetail(e.points, app.stations).areas.find((a) => a.name === homeArea)?.scale ?? null;

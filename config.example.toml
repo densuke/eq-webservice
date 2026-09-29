@@ -45,7 +45,6 @@ type = "rss"
 kinds = ["quake", "tsunami"]
 route = "/feed.xml"
 state_path = "data/rss-state.json"
-# path = "data/feed.xml"   # ファイルにも書き出す場合
 title = "地震情報"
 link = "https://example.com/"
 max_items = 50
@@ -75,7 +74,6 @@ url = "http://127.0.0.1:9000/hook"
 [weather]
 enabled = true
 # feed_url = "https://www.data.jma.go.jp/developer/xml/feed/regular.xml"
-# interval_sec = 300
 
 # 平時の BGM。音楽は Icecast が配信し (送り出しは eq-server bgm-send、前処理は tools/bgm_prepare.sh)、画面はその URL を鳴らす。
 # 同じサイトの中の URL にする (リバースプロキシで Icecast へ中継する)。空なら使わない

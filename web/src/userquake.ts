@@ -4,9 +4,9 @@ import { parseJst } from "./demo.ts";
 import type { UserquakeEvent } from "./types.ts";
 
 /** 最後の更新からこの時間は地図に出す */
-export const USERQUAKE_SHOW_MS = 2 * 60_000;
+const USERQUAKE_SHOW_MS = 2 * 60_000;
 /** 報告の始まりのこの時間前以降に気象庁の地震の情報が届いていれば、その揺れの報告とみなして出さない */
-export const OFFICIAL_LEAD_MS = 30_000;
+const OFFICIAL_LEAD_MS = 30_000;
 
 /** 同じ揺れの評価は新しい方を残す。別の揺れなら新しく始まった方 */
 export function latestUserquake(prev: UserquakeEvent | null, e: UserquakeEvent): UserquakeEvent {

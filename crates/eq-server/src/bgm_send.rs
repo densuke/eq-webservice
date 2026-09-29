@@ -11,8 +11,6 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context};
-use lofty::file::TaggedFileExt;
-use lofty::tag::Accessor;
 
 pub const USAGE: &str = "usage: eq-server bgm-send <MP3 のディレクトリ> <http://127.0.0.1:8010/bgm.mp3>  (パスワードは ICECAST_SOURCE_PASSWORD)";
 
@@ -117,40 +115,60 @@ fn base64(input: &[u8]) -> String {
     out
 }
 
-fn percent(s: &str) -> String {
-    s.bytes()
-        .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
-            _ => format!("%{b:02X}"),
-        })
-        .collect()
-}
-
-/// 曲名: タグの「アーティスト - タイトル」、無ければファイル名 (拡張子なし)
-fn song_name(path: &Path) -> String {
-    let stem = path
-        .file_stem()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_default();
-    // 曲名のタグだけを読む (再生時間などは読まない)
-    let tagged = lofty::probe::Probe::open(path)
-        .map(|p| p.options(lofty::config::ParseOptions::new().read_properties(false)))
-        .and_then(|p| p.read())
-        .ok();
-    let tag = tagged.as_ref().and_then(|t| t.primary_tag().or_else(|| t.first_tag()));
-    let title = tag
-        .and_then(|t| t.title())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
-    let artist = tag
-        .and_then(|t| t.artist())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
-    match (artist, title) {
+/// 曲名: ID3v2 のタグの「アーティスト - タイトル」、無ければファイル名 (拡張子なし)
+fn song_name(path: &Path, data: &[u8]) -> String {
+    match (id3_text(data, b"TPE1"), id3_text(data, b"TIT2")) {
         (Some(a), Some(t)) => format!("{a} - {t}"),
         (None, Some(t)) => t,
-        _ => stem,
+        _ => path
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default(),
     }
+}
+
+/// ID3v2.3 / 2.4 のテキストフレーム (TIT2 = 曲名、TPE1 = アーティスト) の値。無い・読めなければ None
+fn id3_text(data: &[u8], id: &[u8; 4]) -> Option<String> {
+    let end = id3v2_len(data).min(data.len());
+    // フレームの大きさは 2.4 だけ 7 ビットずつ (synchsafe)
+    let bits = if data.get(3) == Some(&4) { 7 } else { 8 };
+    let mut i = 10;
+    while i + 10 <= end && data[i] != 0 {
+        let size = data[i + 4..i + 8]
+            .iter()
+            .fold(0usize, |acc, b| (acc << bits) | *b as usize);
+        let body = data.get(i + 10..(i + 10 + size).min(end))?;
+        if &data[i..i + 4] == id {
+            let (enc, raw) = body.split_first()?;
+            let text = match enc {
+                0 => raw.iter().map(|&b| b as char).collect(),
+                3 => String::from_utf8_lossy(raw).into_owned(),
+                // UTF-16: 1 は先頭の BOM で順序を決める。2 はビッグエンディアン
+                _ => {
+                    let (le, raw) = match raw {
+                        [0xFF, 0xFE, rest @ ..] => (true, rest),
+                        [0xFE, 0xFF, rest @ ..] => (false, rest),
+                        _ => (false, raw),
+                    };
+                    let units: Vec<u16> = raw
+                        .chunks_exact(2)
+                        .map(|c| {
+                            if le {
+                                u16::from_le_bytes([c[0], c[1]])
+                            } else {
+                                u16::from_be_bytes([c[0], c[1]])
+                            }
+                        })
+                        .collect();
+                    String::from_utf16_lossy(&units)
+                }
+            };
+            let text = text.trim_matches(|c: char| c == '\0' || c.is_whitespace()).to_string();
+            return (!text.is_empty()).then_some(text);
+        }
+        i += 10 + size;
+    }
+    None
 }
 
 fn mp3_files(dir: &Path) -> Vec<PathBuf> {
@@ -200,8 +218,8 @@ impl Target {
                 s,
                 "GET /admin/metadata?mount={}&mode=updinfo&charset=UTF-8&song={} HTTP/1.0\r\nHost: {}\r\n\
                  Authorization: Basic {}\r\nUser-Agent: eq-server bgm-send\r\n\r\n",
-                percent(&self.mount),
-                percent(song),
+                crate::banner::encode(&self.mount),
+                crate::banner::encode(song),
                 self.host,
                 self.auth
             )?;
@@ -274,7 +292,7 @@ fn stream(target: &Target, dir: &Path, last: &mut Option<PathBuf>) -> anyhow::Re
             tracing::warn!(file = %next.display(), "bgm-send: no MP3 frames, skipped");
             continue;
         }
-        let song = song_name(&next);
+        let song = song_name(&next, &data);
         tracing::info!(%song, "bgm-send now playing");
         target.set_song(&song);
         for f in fs {
@@ -337,6 +355,43 @@ mod tests {
         assert!(parse_url("https://x/bgm.mp3").is_err());
         assert_eq!(base64(b"source:hackme"), "c291cmNlOmhhY2ttZQ==");
         assert_eq!(base64(b"ab"), "YWI=");
-        assert_eq!(percent("A - B/曲"), "A%20-%20B%2F%E6%9B%B2");
+        assert_eq!(crate::banner::encode("A - B/曲"), "A%20-%20B%2F%E6%9B%B2");
+    }
+
+    /// ID3v2.3 のタグ (フレームの大きさは 8 ビットずつ)
+    fn id3(frames: &[(&[u8; 4], &[u8])]) -> Vec<u8> {
+        let body: Vec<u8> = frames
+            .iter()
+            .flat_map(|(id, v)| {
+                let mut f = id.to_vec();
+                f.extend((v.len() as u32).to_be_bytes());
+                f.extend([0, 0]);
+                f.extend(*v);
+                f
+            })
+            .collect();
+        let mut tag = b"ID3\x03\x00\x00".to_vec();
+        tag.extend((0..4).rev().map(|i| (body.len() >> (7 * i)) as u8 & 0x7f));
+        tag.extend(body);
+        tag
+    }
+
+    #[test]
+    fn song_name_comes_from_the_id3_tag() {
+        let p = Path::new("dir/01 track.mp3");
+        let latin1 = id3(&[
+            (b"TXXX", b"\0x\0y"),
+            (b"TIT2", b"\0Afternoon 07\0"),
+            (b"TPE1", b"\0Fuga"),
+        ]);
+        assert_eq!(song_name(p, &latin1), "Fuga - Afternoon 07");
+        // UTF-16 (BOM 付き、リトルエンディアン) の日本語
+        let utf16: Vec<u8> = [0x01u8, 0xFF, 0xFE]
+            .into_iter()
+            .chain("午後".encode_utf16().flat_map(u16::to_le_bytes))
+            .collect();
+        assert_eq!(song_name(p, &id3(&[(b"TIT2", &utf16)])), "午後");
+        // タグが無ければファイル名
+        assert_eq!(song_name(p, &frame()), "01 track");
     }
 }

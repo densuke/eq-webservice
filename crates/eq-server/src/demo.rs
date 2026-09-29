@@ -8,8 +8,8 @@
 
 use std::path::Path;
 
+use crate::quake::Event;
 use anyhow::Context;
-use eq_core::Event;
 use serde::Serialize;
 
 use crate::source::replay;

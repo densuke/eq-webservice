@@ -1,6 +1,6 @@
 // 直近の地震に一時的な番号を振る (地図の震央・一覧・バナーで同じ地震を見分けるため)。
 
-export interface Numbered {
+interface Numbered {
   key: string;
   /** 同じ地震の EEW のグループ (あれば同じ番号にする) */
   linkedTo?: string;

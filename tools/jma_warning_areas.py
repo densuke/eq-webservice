@@ -19,13 +19,9 @@ import sys
 
 import shapefile
 
+from jma_areas import rings_of
 from simplify_geojson import DIGITS, TOLERANCE, area, douglas_peucker, simplify_ring
 from tsunami_areas import thin
-
-
-def rings_of(shape):
-    bounds = list(shape.parts) + [len(shape.points)]
-    return [shape.points[s:e] for s, e in zip(bounds, bounds[1:])]
 
 
 def main(src: str, dst: str) -> None:

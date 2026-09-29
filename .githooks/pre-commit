@@ -1,0 +1,17 @@
+#!/bin/sh
+# コミット前のチェック (CI と同じもの)。有効にするには: git config core.hooksPath .githooks
+set -e
+# macOS の /usr/bin/git はフックに SDKROOT (Command Line Tools の SDK) を渡す。Xcode のリンカと版が合わないとリンクに失敗するので外す
+unset SDKROOT
+cd "$(git rev-parse --show-toplevel)"
+cargo fmt --all --check
+cargo clippy -q --all-targets -- -D warnings
+cargo test -q
+(cd web && npx tsc --noEmit && npm test --silent >/dev/null)
+# 依存の既知の脆弱性 (cargo-audit が無ければ省く。入れるなら brew install cargo-audit)
+if command -v cargo-audit >/dev/null; then
+  cargo audit -q
+else
+  echo "pre-commit: cargo-audit が無いので依存の監査を省きます" >&2
+fi
+(cd web && npm audit --omit=dev --audit-level=moderate >/dev/null)

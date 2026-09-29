@@ -106,6 +106,11 @@ def to_wolfx(event_id: str, date: str, origin: str, hypocenter: str) -> list[dic
     return out
 
 
+def issued(o: dict) -> str:
+    """記録の発表時刻 (Wolfx の緊急地震速報と P2P地震情報のどちらも)"""
+    return o.get("AnnouncedTime") or o["issue"]["time"]
+
+
 if __name__ == "__main__":
     # 読み取りの確認: python3 jma_eew.py 20240101161010
     import sys

@@ -13,8 +13,6 @@ impl Scale {
     pub const S3: Scale = Scale(30);
     pub const S4: Scale = Scale(40);
     pub const S5_LOWER: Scale = Scale(45);
-    /// 震度5弱以上と推定されるが震度情報を入手していない
-    pub const S5_LOWER_ESTIMATED: Scale = Scale(46);
     pub const S5_UPPER: Scale = Scale(50);
     pub const S6_LOWER: Scale = Scale(55);
     pub const S6_UPPER: Scale = Scale(60);
@@ -48,6 +46,7 @@ impl Scale {
             30 => "3",
             40 => "4",
             45 => "5弱",
+            // 震度5弱以上と推定されるが震度情報を入手していない
             46 => "5弱以上(推定)",
             50 => "5強",
             55 => "6弱",

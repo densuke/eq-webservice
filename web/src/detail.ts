@@ -14,7 +14,7 @@ export interface AreaScale {
   scale: Scale;
 }
 
-export interface QuakeDetail {
+interface QuakeDetail {
   dots: { name: string; lat: number; lon: number; scale: Scale }[];
   areas: AreaScale[];
   /** 位置が分からない観測点 (一覧に無い新しい観測点など) */
@@ -56,7 +56,7 @@ export function overlayForecast(observed: AreaScale[], forecast: AreaScale[]): (
 }
 
 /** 予測を残す上限 (観測の震度がまだ届かないとき。震度の塗りが消えるまでと同じ 1 時間) */
-export const FORECAST_KEEP_MS = 60 * 60_000;
+const FORECAST_KEEP_MS = 60 * 60_000;
 
 /**
  * 地震情報を表示しているときに、同じ地震の緊急地震速報の予測を重ねて残すか。
@@ -67,7 +67,7 @@ export function keepForecast(active: boolean, observed: boolean, sinceLastReport
 }
 
 /** 続報で外された予測の地域を、外されてからこの時間は薄れながら残す (いきなり消えると不自然なので) */
-export const DROPPED_MS = 8000;
+const DROPPED_MS = 8000;
 
 /**
  * 続報で外された予測の地域のうち、外されてから ms 以内のもの (最後に予測されたときの震度)。

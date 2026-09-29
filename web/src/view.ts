@@ -5,7 +5,7 @@ import { type EewGroup, type Group, latestEew, summarizeQuake } from "./groups.t
 import { esc } from "./html.ts";
 import { byPriority, sameQuake } from "./priority.ts";
 import { activeEews, currentGroup, groupPlace, groupScale, relatedQuake } from "./quakes.ts";
-import { isKnownScale, scaleColor, scaleLabel, scaleTextColor } from "./scale.ts";
+import { scaleColor, scaleLabel, scaleTextColor } from "./scale.ts";
 import { $, map } from "./dom.ts";
 import { listOpen, shownInList } from "./personal.ts";
 import { app, now } from "./state.ts";
@@ -13,20 +13,20 @@ import { activeAreas } from "./tsunami.ts";
 import type { EewEvent, Hypocenter, PrefScale, Scale, TsunamiEvent } from "./types.ts";
 
 /** EEW バナーに並べる件数 (残りは「ほか N 件」) */
-export const EEW_BANNER_MAX = 3;
+const EEW_BANNER_MAX = 3;
 
 export function numTag(key: string): string {
   const n = app.numbers.get(key);
   return n == null ? "" : `<span class="num">${n}</span>`;
 }
 
-export function badge(s: Scale, big = false): string {
+function badge(s: Scale, big = false): string {
   return `<span class="badge${big ? " big" : ""}" style="background:${scaleColor(s)};color:${scaleTextColor(s)}">${
-    isKnownScale(s) ? scaleLabel(s) : "-"
+    s > 0 ? scaleLabel(s) : "-"
   }</span>`;
 }
 
-export function hypoText(h: Hypocenter | null): string {
+function hypoText(h: Hypocenter | null): string {
   if (!h) return "震源調査中";
   const parts = [esc(h.name || "震源不明")];
   if (h.magnitude != null) parts.push(`M${h.magnitude.toFixed(1)}`);
@@ -35,7 +35,7 @@ export function hypoText(h: Hypocenter | null): string {
   return parts.join(" / ");
 }
 
-export const TSUNAMI_TEXT: Record<string, string> = {
+const TSUNAMI_TEXT: Record<string, string> = {
   None: "この地震による津波の心配はありません",
   NonEffective: "若干の海面変動 (被害の心配なし)",
   Checking: "津波の有無を調査中",
@@ -50,7 +50,7 @@ export const GRADE_LABEL: Record<string, string> = {
   unknown: "不明",
 };
 
-export function groupRow(g: Group): string {
+function groupRow(g: Group): string {
   switch (g.kind) {
     case "quake": {
       const q = summarizeQuake(g);
@@ -123,7 +123,7 @@ function forecastLayers(g: EewGroup): { prefs: (AreaScale & { dropped?: boolean 
 }
 
 /** 地図の塗り分けと震央 */
-export function paintMap(g: Group | undefined): void {
+function paintMap(g: Group | undefined): void {
   if (g?.kind === "quake") {
     const q = summarizeQuake(g);
     const d = quakeDetail(q.points, app.stations);

@@ -14,7 +14,7 @@ const TAIL_MS = 4 * 60_000;
 /** 再生の長さ (最後の報 + TAIL_MS) */
 const lengthOf = (d: DemoState) => (d.plan ? d.plan.end + TAIL_MS : 0);
 
-export function showWorld(w: World): void {
+function showWorld(w: World): void {
   app.world = w;
   app.numbers = new Map();
   app.selectedKey = null;

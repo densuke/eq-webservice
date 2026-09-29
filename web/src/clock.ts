@@ -3,7 +3,7 @@
 const JST_MS = 9 * 3600_000;
 const WEEKDAYS = "日月火水木金土";
 
-export interface ClockParts {
+interface ClockParts {
   year: string;
   month: string;
   day: string;

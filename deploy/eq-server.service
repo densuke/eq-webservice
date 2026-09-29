@@ -19,6 +19,8 @@ Environment=RUST_LOG=info
 EnvironmentFile=-/etc/default/eq-server
 Restart=always
 RestartSec=5
+# 上流の異常や大量の接続でメモリを使い切っても、ほかのサービスを巻き込まないように
+MemoryMax=256M
 
 NoNewPrivileges=true
 ProtectSystem=strict

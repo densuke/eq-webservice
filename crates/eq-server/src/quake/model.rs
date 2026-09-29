@@ -5,8 +5,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::jst;
-use crate::scale::Scale;
+use crate::quake::jst;
+use crate::quake::scale::Scale;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Event {
@@ -446,7 +446,7 @@ pub fn aggregate_pref_max<'a>(items: impl IntoIterator<Item = (&'a str, Scale)>)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{p2pquake, wolfx};
+    use crate::quake::{p2pquake, wolfx};
 
     /// デモの場面のデータを読む (P2P地震情報 / Wolfx 形式)
     fn scenario(text: &str) -> Vec<Event> {
@@ -464,10 +464,10 @@ mod tests {
 
     fn all() -> Vec<Event> {
         [
-            include_str!("../../../samples/scenarios/standard.jsonl"),
-            include_str!("../../../samples/scenarios/forecast.jsonl"),
-            include_str!("../../../samples/scenarios/tsunami.jsonl"),
-            include_str!("../../../samples/scenarios/islands.jsonl"),
+            include_str!("../../../../samples/scenarios/standard.jsonl"),
+            include_str!("../../../../samples/scenarios/forecast.jsonl"),
+            include_str!("../../../../samples/scenarios/tsunami.jsonl"),
+            include_str!("../../../../samples/scenarios/islands.jsonl"),
         ]
         .into_iter()
         .flat_map(scenario)

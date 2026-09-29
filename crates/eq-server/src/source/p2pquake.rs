@@ -1,14 +1,17 @@
 use std::time::Duration;
 
+use crate::quake::{p2pquake, Event};
 use anyhow::Context;
-use eq_core::{p2pquake, Event};
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::hub::Hub;
+use crate::net;
 
 /// これだけ無通信なら接続が死んでいるとみなす (上流はピア情報を頻繁に流すので十分長い)
 const IDLE_TIMEOUT: Duration = Duration::from_secs(180);
+/// 履歴・津波予報の取得
+const TIMEOUT: Duration = Duration::from_secs(15);
 
 /// WebSocket に接続し続ける。
 /// 接続のたびに現在の津波予報を読み直す (切断中に出た予報・解除を取りこぼさないため)。
@@ -17,7 +20,7 @@ pub async fn run(url: &str, tsunami_url: &str, hub: &Hub) {
 }
 
 async fn session(url: &str, tsunami_url: &str, hub: &Hub) -> anyhow::Result<()> {
-    let (mut ws, _) = tokio_tungstenite::connect_async(url).await.context("connect")?;
+    let mut ws = crate::net::connect_ws(url).await?;
     tracing::info!("connected to upstream");
     if !tsunami_url.is_empty() {
         // 既に受け取っている予報なら重複として捨てられる
@@ -66,15 +69,7 @@ pub async fn fetch_history(base: &str, limit: u32) -> anyhow::Result<Vec<Event>>
         .map(|c| ("codes", c.to_string()))
         .collect();
     query.push(("limit", limit.to_string()));
-    let items: Vec<serde_json::Value> = reqwest::Client::new()
-        .get(base)
-        .query(&query)
-        .timeout(Duration::from_secs(15))
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
+    let items: Vec<serde_json::Value> = net::json(net::client(TIMEOUT)?.get(base).query(&query)).await?;
     let mut events: Vec<Event> = items
         .into_iter()
         .filter_map(|v| match p2pquake::parse_value(v) {
@@ -93,15 +88,7 @@ pub async fn fetch_history(base: &str, limit: u32) -> anyhow::Result<Vec<Event>>
 
 /// 現在の津波予報 (最新の 1 件。解除済みならその解除の情報)。
 pub async fn fetch_latest_tsunami(url: &str) -> anyhow::Result<Option<Event>> {
-    let items: Vec<serde_json::Value> = reqwest::Client::new()
-        .get(url)
-        .query(&[("limit", "1")])
-        .timeout(Duration::from_secs(15))
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
+    let items: Vec<serde_json::Value> = net::json(net::client(TIMEOUT)?.get(url).query(&[("limit", "1")])).await?;
     let Some(item) = items.into_iter().next() else {
         return Ok(None);
     };

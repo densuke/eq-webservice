@@ -6,11 +6,17 @@
 //! - 同じ名前の画像とテキストは、画像に文字を添えた 1 枚になる
 
 use std::collections::BTreeMap;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
+use axum::extract::Request;
+use axum::http::StatusCode;
+use axum::middleware::{self, Next};
+use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
+use tower_http::services::ServeDir;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields, default)]
@@ -77,10 +83,13 @@ pub fn list(dir: &Path) -> Vec<Banner> {
             let b = by_stem.entry(stem.to_string()).or_default();
             b.image.get_or_insert_with(|| format!("banner/{}", encode(name)));
         } else if ext == "txt" {
-            let Ok(raw) = std::fs::read_to_string(&path) else {
+            // 上限を超える部分は読まない (本文は MAX_TEXT までしか使わない)
+            let mut raw = Vec::new();
+            let read = std::fs::File::open(&path).and_then(|f| f.take(MAX_TEXT as u64 * 4).read_to_end(&mut raw));
+            if read.is_err() {
                 continue;
-            };
-            let (text, link) = parse_text(&raw);
+            }
+            let (text, link) = parse_text(&String::from_utf8_lossy(&raw));
             let b = by_stem.entry(stem.to_string()).or_default();
             b.text = text;
             b.link = link;
@@ -110,8 +119,8 @@ fn parse_text(raw: &str) -> (Option<String>, Option<String>) {
     ((!text.is_empty()).then_some(text), link)
 }
 
-/// URL のパスに使えるようにする (ファイル名に空白や日本語があっても取れるように)
-fn encode(name: &str) -> String {
+/// URL のパスやクエリに使えるようにする (空白や日本語があっても取れるように)
+pub fn encode(name: &str) -> String {
     name.bytes()
         .map(|b| match b {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
@@ -144,10 +153,28 @@ pub fn router(cfg: &BannerConfig) -> Router {
     );
     // 決めた種類のファイルだけを配信する (ディレクトリの外も返さない)
     if enabled {
-        r.merge(crate::files::serve("/banner", dir, &IMAGES))
+        r.merge(serve_images(dir))
     } else {
         r
     }
+}
+
+/// `/banner/<ファイル名>` で決めた種類 (IMAGES) の画像だけを配信する。
+/// ディレクトリの外 (../ など) は ServeDir が返さない。SVG・HTML などを置いても配信しない
+fn serve_images(dir: PathBuf) -> Router {
+    Router::new()
+        .nest_service("/banner", ServeDir::new(dir))
+        .layer(middleware::from_fn(|req: Request, next: Next| async move {
+            let allowed = Path::new(req.uri().path())
+                .extension()
+                .and_then(|x| x.to_str())
+                .is_some_and(|x| IMAGES.contains(&x.to_ascii_lowercase().as_str()));
+            if allowed {
+                next.run(req).await
+            } else {
+                StatusCode::NOT_FOUND.into_response()
+            }
+        }))
 }
 
 #[cfg(test)]
@@ -189,6 +216,28 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn serves_only_image_files_inside_the_directory() {
+        use axum::body::Body;
+        use tower::ServiceExt;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.png"), b"png").unwrap();
+        std::fs::write(dir.path().join("b.svg"), b"<svg/>").unwrap();
+        let app = serve_images(dir.path().to_path_buf());
+        let status = |path: &'static str| {
+            let app = app.clone();
+            async move {
+                app.oneshot(Request::get(path).body(Body::empty()).unwrap())
+                    .await
+                    .unwrap()
+                    .status()
+            }
+        };
+        assert_eq!(status("/banner/a.png").await, StatusCode::OK);
+        assert_eq!(status("/banner/b.svg").await, StatusCode::NOT_FOUND);
+        assert_eq!(status("/banner/../Cargo.toml").await, StatusCode::NOT_FOUND);
     }
 
     #[test]

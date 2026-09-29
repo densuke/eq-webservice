@@ -4,7 +4,7 @@ import type { EqEvent, ServerMessage } from "./types.ts";
 
 export type Status = "connecting" | "open" | "closed";
 
-export interface Handlers {
+interface Handlers {
   onSnapshot(events: EqEvent[]): void;
   onEvent(event: EqEvent): void;
   onStatus(status: Status): void;

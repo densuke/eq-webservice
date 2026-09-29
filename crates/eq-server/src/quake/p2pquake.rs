@@ -5,9 +5,9 @@
 
 use serde::Deserialize;
 
-use crate::jst;
-use crate::model::*;
-use crate::scale::Scale;
+use crate::quake::jst;
+use crate::quake::model::*;
+use crate::quake::scale::Scale;
 
 pub const SOURCE: &str = "p2pquake";
 
@@ -406,7 +406,7 @@ impl From<RawEew> for Eew {
             .into_iter()
             .map(|a| EewArea {
                 // pref は「北海道道北」のような地方名のことがあるので、区域名から都道府県を求める
-                pref: Some(crate::area::area_pref(&a.name))
+                pref: Some(crate::quake::area::area_pref(&a.name))
                     .filter(|p| !p.is_empty())
                     .map_or(a.pref, str::to_string),
                 name: a.name,

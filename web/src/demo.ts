@@ -5,7 +5,7 @@
 import { WAVE_MAX_SEC } from "./waves.ts";
 import type { EqEvent } from "./types.ts";
 
-export const MAX_GAP_MS = 8000;
+const MAX_GAP_MS = 8000;
 const JST_MS = 9 * 3600_000;
 
 export interface ScenarioSummary {
@@ -73,7 +73,7 @@ function shift(e: EqEvent, delta: number, run: number): EqEvent {
 }
 
 /** 再生を始める位置: 最初の地震 (無ければ最初の報) のこの時間前から */
-export const LEAD_MS = 5000;
+const LEAD_MS = 5000;
 
 export interface Plan {
   /** at は再生位置 (ミリ秒)。時刻順 */

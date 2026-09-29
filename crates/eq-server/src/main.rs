@@ -5,10 +5,11 @@ mod city_weather;
 mod cli;
 mod config;
 mod demo;
-mod files;
 mod http;
 mod hub;
+mod net;
 mod plugins;
+mod quake;
 mod source;
 mod telop;
 mod weather;
@@ -60,7 +61,7 @@ async fn main() -> anyhow::Result<()> {
     for table in &cfg.sinks {
         let Some(loaded) = plugins::build(table)? else { continue };
         tracing::info!(sink = %loaded.name, "sink enabled");
-        if let Some(r) = loaded.sink.clone().routes() {
+        if let Some(r) = loaded.sink.routes() {
             routes.push(r);
         }
         seeders.push((loaded.name.clone(), loaded.sink.clone(), loaded.filter.clone()));
@@ -91,7 +92,7 @@ async fn main() -> anyhow::Result<()> {
     let source_hub = hub.clone();
     tokio::spawn(source::run(cfg.source, source_hub, move |seeded| {
         for (name, sink, filter) in seeders {
-            let events: Vec<Arc<eq_core::Event>> = seeded.iter().filter(|e| filter.accepts(e)).cloned().collect();
+            let events: Vec<Arc<crate::quake::Event>> = seeded.iter().filter(|e| filter.accepts(e)).cloned().collect();
             tokio::spawn(async move {
                 if let Err(e) = sink.seed(&events).await {
                     tracing::warn!(sink = %name, "seed failed: {e:#}");

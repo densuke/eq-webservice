@@ -4,8 +4,8 @@
 use std::path::Path;
 use std::time::Duration;
 
+use crate::quake::{p2pquake, wolfx, Event};
 use anyhow::Context;
-use eq_core::{p2pquake, wolfx, Event};
 
 use crate::hub::{now_ms, Hub};
 
@@ -81,7 +81,7 @@ async fn play(events: &[Event], opts: &Options, round: u32, hub: &Hub) {
         ev.id = format!("{}#replay{round}", ev.id);
         // 画面側で「再生データ」と分かるように (訓練報でも警戒音を鳴らす)
         ev.source = "replay".into();
-        if let eq_core::EventBody::Eew(e) = &mut ev.body {
+        if let crate::quake::EventBody::Eew(e) = &mut ev.body {
             // EEW の続報は event_id でまとめられるので、これも周回ごとに変える
             e.event_id = format!("{}#replay{round}", e.event_id);
         }

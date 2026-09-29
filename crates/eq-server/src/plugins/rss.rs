@@ -1,27 +1,22 @@
 //! RSS 2.0 フィードを生成・蓄積する。
-//! HTTP (`route`) で配信しつつ、`path` を指定すればファイルにも書き出す
-//! (nginx などから静的に配信したい場合)。蓄積内容は `state_path` に保存し再起動後も引き継ぐ。
+//! HTTP (`route`) で配信する。蓄積内容は `state_path` に保存し再起動後も引き継ぐ。
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use async_trait::async_trait;
+use crate::quake::{jst, Event};
 use axum::http::header;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::Router;
-use eq_core::{jst, Event};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
-
-use super::Sink;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RssConfig {
     #[serde(default = "default_route")]
     route: String,
-    path: Option<PathBuf>,
     state_path: Option<PathBuf>,
     #[serde(default = "default_title")]
     title: String,
@@ -59,7 +54,7 @@ pub struct RssSink {
     /// 新しい順
     items: Mutex<Vec<Item>>,
     /// 生成済みの XML (HTTP 配信用のキャッシュ)
-    xml: Mutex<String>,
+    xml: Arc<Mutex<String>>,
 }
 
 impl RssSink {
@@ -72,7 +67,7 @@ impl RssSink {
         Ok(RssSink {
             cfg,
             items: Mutex::new(items),
-            xml: Mutex::new(xml),
+            xml: Arc::new(Mutex::new(xml)),
         })
     }
 
@@ -95,37 +90,30 @@ impl RssSink {
         if let Some(p) = &self.cfg.state_path {
             write_atomic(p, serde_json::to_string(&*items)?.as_bytes()).await?;
         }
-        if let Some(p) = &self.cfg.path {
-            write_atomic(p, xml.as_bytes()).await?;
-        }
         *self.xml.lock().await = xml;
         Ok(())
     }
 }
 
-#[async_trait]
-impl Sink for RssSink {
-    async fn handle(&self, ev: &Event) -> anyhow::Result<()> {
+impl RssSink {
+    pub async fn handle(&self, ev: &Event) -> anyhow::Result<()> {
         self.add([ev]).await
     }
 
-    async fn seed(&self, events: &[Arc<Event>]) -> anyhow::Result<()> {
+    pub async fn seed(&self, events: &[Arc<Event>]) -> anyhow::Result<()> {
         // フィルタは起動処理側で適用済み
         self.add(events.iter().map(|e| e.as_ref())).await
     }
 
-    fn routes(self: Arc<Self>) -> Option<Router> {
-        let route = self.cfg.route.clone();
-        Some(Router::new().route(
-            &route,
-            get(move || {
-                let this = self.clone();
-                async move {
-                    let xml = this.xml.lock().await.clone();
-                    ([(header::CONTENT_TYPE, "application/rss+xml; charset=utf-8")], xml).into_response()
-                }
+    pub fn routes(&self) -> Router {
+        let xml = self.xml.clone();
+        Router::new().route(
+            &self.cfg.route,
+            get(move || async move {
+                let xml = xml.lock().await.clone();
+                ([(header::CONTENT_TYPE, "application/rss+xml; charset=utf-8")], xml).into_response()
             }),
-        ))
+        )
     }
 }
 
@@ -242,14 +230,13 @@ mod tests {
     async fn persists_and_renders() {
         let dir = tempfile::tempdir().unwrap();
         let cfg: RssConfig = toml::from_str(&format!(
-            "path = {:?}\nstate_path = {:?}\nmax_items = 1",
-            dir.path().join("feed.xml"),
+            "state_path = {:?}\nmax_items = 1",
             dir.path().join("state.json")
         ))
         .unwrap();
         let sink = RssSink::new(cfg).unwrap();
         let ev = |id: &str, t: &str| {
-            eq_core::p2pquake::parse(&format!(
+            crate::quake::p2pquake::parse(&format!(
                 r#"{{"code":551,"id":"{id}","issue":{{"time":"{t}","type":"ScalePrompt"}},
                    "earthquake":{{"time":"{t}","maxScale":30,"domesticTsunami":"None"}},
                    "points":[{{"pref":"東京都","addr":"23区","isArea":true,"scale":30}}]}}"#
@@ -259,7 +246,7 @@ mod tests {
         };
         sink.handle(&ev("a", "2026/09/28 10:00:00")).await.unwrap();
         sink.handle(&ev("b<&>", "2026/09/28 11:00:00")).await.unwrap();
-        let xml = std::fs::read_to_string(dir.path().join("feed.xml")).unwrap();
+        let xml = sink.xml.lock().await.clone();
         assert!(xml.contains("<guid isPermaLink=\"false\">b&lt;&amp;&gt;</guid>"));
         assert!(!xml.contains(">a</guid>"), "max_items で古いものは消える");
 
