@@ -80,6 +80,16 @@ pub struct ObservationPoint {
     pub addr: String,
     pub is_area: bool,
     pub scale: Scale,
+    /// 観測点の位置と属する細分区域。P2P地震情報には無く、今は無い観測点を含む過去の記録 (デモ) でだけ使う
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub station: Option<StationPos>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StationPos {
+    pub lat: f64,
+    pub lon: f64,
+    pub area: String,
 }
 
 /// 都道府県ごとの最大震度。地図の塗り分けに使う。
