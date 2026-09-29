@@ -2,7 +2,7 @@
 
 use anyhow::Context;
 use serde_json::Value;
-use tiny_skia::{Path, PathBuilder};
+use tiny_skia::{Path, PathBuilder, Transform};
 
 const LON0: f64 = 137.0;
 const LAT0: f64 = 37.0;
@@ -28,8 +28,13 @@ pub struct View {
 impl View {
     /// 日本全体が、縦横比を保って rect (x, y, w, h) の中央に収まるようにする
     pub fn fit_home(rect: (f64, f64, f64, f64)) -> View {
-        let (x0, y0) = project(HOME.0, HOME.3);
-        let (x1, y1) = project(HOME.1, HOME.2);
+        View::fit((HOME.0, HOME.1, HOME.2, HOME.3), rect)
+    }
+
+    /// 経度 lon0..lon1・緯度 lat0..lat1 が、縦横比を保って rect (x, y, w, h) の中央に収まるようにする
+    pub fn fit((lon0, lon1, lat0, lat1): (f64, f64, f64, f64), rect: (f64, f64, f64, f64)) -> View {
+        let (x0, y0) = project(lon0, lat1);
+        let (x1, y1) = project(lon1, lat0);
         let (rx, ry, rw, rh) = rect;
         let scale = (rw / (x1 - x0)).min(rh / (y1 - y0));
         View {
@@ -37,6 +42,19 @@ impl View {
             ox: rx + (rw - (x1 - x0) * scale) / 2.0 - x0 * scale,
             oy: ry + (rh - (y1 - y0) * scale) / 2.0 - y0 * scale,
         }
+    }
+
+    /// main の画面の座標を、この表示 (別枠) の画面の座標に移す変換 (main で作った path を別枠に映すのに使う)
+    pub fn transform_from(&self, main: &View) -> Transform {
+        let k = (self.scale / main.scale) as f32;
+        Transform::from_row(
+            k,
+            0.0,
+            0.0,
+            k,
+            (self.ox - main.ox * k as f64) as f32,
+            (self.oy - main.oy * k as f64) as f32,
+        )
     }
 
     /// 経度・緯度の画面の座標
@@ -134,6 +152,27 @@ mod tests {
         let (_, top) = v.px(137.0, 45.8);
         let (_, bottom) = v.px(137.0, 30.0);
         assert!((top - 36.0).abs() < 0.01 && (bottom - 720.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn an_inset_view_maps_points_like_the_main_view_through_the_transform() {
+        let main = View::fit_home((0.0, 36.0, 900.0, 684.0));
+        let (w, h) = ((131.4f64 - 122.9) * 37f64.to_radians().cos() * 100.0, 600.0);
+        let rect = (10.0, 46.0, 150.0 * w / h, 150.0);
+        let inset = View::fit((122.9, 131.4, 24.0, 30.0), rect);
+        // 枠の四隅が枠に収まる (縦横比が合っているので、ちょうど埋まる)
+        let (l, t) = inset.px(122.9, 30.0);
+        let (r, b) = inset.px(131.4, 24.0);
+        assert!((l - 10.0).abs() < 0.01 && (t - 46.0).abs() < 0.01, "{l},{t}");
+        assert!(
+            (r as f64 - rect.0 - rect.2).abs() < 0.01 && (b - 196.0).abs() < 0.01,
+            "{r},{b}"
+        );
+        // 那覇: 本図の座標を変換で映した位置 = 別枠の投影
+        let ts = inset.transform_from(&main);
+        let (mx, my) = main.px(127.68, 26.21);
+        let (ix, iy) = inset.px(127.68, 26.21);
+        assert!((ts.sx * mx + ts.tx - ix).abs() < 0.01 && (ts.sy * my + ts.ty - iy).abs() < 0.01);
     }
 
     #[test]

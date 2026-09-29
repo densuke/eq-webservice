@@ -119,7 +119,7 @@ y=720 └───────────────────────�
   - Linux: `/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc`
   フォントのファイルはリポジトリに入れない。
 - 地図のデータ (geojson) は `web/dist` か `web/public` から読む (`broadcast.toml` の `map_dir`、既定 `web/public`)。
-- ffmpeg への映像: native のときは RGBA の生データで渡す (`-f rawvideo -pix_fmt rgba -s 1280x720 -framerate <fps> -i -`)。
+- ffmpeg への映像: native のときは I420 の生データで渡す (`-f rawvideo -pix_fmt yuv420p -s 1280x720 -framerate <fps> -i -`。N1 は RGBA だったが、8.2 で変えた)。
   Chrome のとき (JPEG) の引数は変えない。
 - 既存の `session()` は、`source` によって Chrome と native を選ぶ。3 章の trait を無理に入れなくてよい
   (enum で分けるくらいでよい。W5 でつなぎ目を整える)。
