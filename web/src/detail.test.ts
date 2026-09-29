@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { droppedForecast, eewAreaScales, overlayForecast, quakeDetail, type Station } from "./detail.ts";
+import { droppedForecast, eewAreaScales, keepForecast, overlayForecast, quakeDetail, type Station } from "./detail.ts";
 import type { EewArea, ObservationPoint } from "./types.ts";
 
 const stations = new Map<string, Station>([
@@ -73,4 +73,15 @@ test("areas dropped by a later report stay for a while with their last forecast,
   assert.deepEqual(droppedForecast(reports, 10_001, 8000), []);
   // 最後の報にある地域・報が 1 つだけのときは無い
   assert.deepEqual(droppedForecast(reports.slice(0, 1), 0, 8000), []);
+});
+
+test("the forecast stays until observed intensities arrive, even after the warning ends", () => {
+  // 速報が続いている間は残す
+  assert.equal(keepForecast(true, true, 0), true);
+  // 速報が終わっても、震源の情報だけ (観測の震度なし) なら残す (2011 年: 14:49 の震源、16:00 の各地の震度)
+  assert.equal(keepForecast(false, false, 5 * 60_000), true);
+  // 観測の震度が届いたら、速報が終わった後は残さない
+  assert.equal(keepForecast(false, true, 60_000), false);
+  // 観測が無くても上限 (1 時間) を過ぎたら残さない
+  assert.equal(keepForecast(false, false, 60 * 60_000 + 1), false);
 });

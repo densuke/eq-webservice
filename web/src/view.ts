@@ -1,6 +1,6 @@
 // 画面の文字情報: 一覧・詳細・緊急地震速報と津波予報のバナー・表示モード、地図の塗り分け。
 
-import { type AreaScale, droppedForecast, eewAreaScales, overlayForecast, quakeDetail } from "./detail.ts";
+import { type AreaScale, droppedForecast, eewAreaScales, keepForecast, overlayForecast, quakeDetail } from "./detail.ts";
 import { type EewGroup, type Group, latestEew, summarizeQuake } from "./groups.ts";
 import { esc } from "./html.ts";
 import { byPriority, sameQuake } from "./priority.ts";
@@ -124,11 +124,18 @@ export function paintMap(g: Group | undefined): void {
   if (g?.kind === "quake") {
     const q = summarizeQuake(g);
     const d = quakeDetail(q.points, app.stations);
-    // 同じ地震の緊急地震速報がまだ出ていれば、観測の無い地域は予測のまま残す (観測を予測の上に重ねる)
+    // 同じ地震の緊急地震速報の予測を重ねて残す (観測の無い地域は予測のまま)。観測の震度が届くまでは速報が終わっても残す
     const active = new Set(activeEews(now()));
+    const observed = q.points.length > 0;
     const eg = app.world.store
       .list()
-      .find((x): x is EewGroup => x.kind === "eew" && active.has(latestEew(x)) && sameQuake(groupPlace(x), groupPlace(g)));
+      .find(
+        (x): x is EewGroup =>
+          x.kind === "eew" &&
+          !latestEew(x).cancelled &&
+          sameQuake(groupPlace(x), groupPlace(g)) &&
+          keepForecast(active.has(latestEew(x)), observed, now() - latestEew(x).received_at_ms),
+      );
     const f = eg ? forecastLayers(eg) : { prefs: [], areas: [] };
     const prefs = overlayForecast(byName(q.prefMax), f.prefs);
     map.setPrefScales(prefs.map(({ name, ...rest }) => ({ pref: name, ...rest })));
