@@ -34,6 +34,15 @@
 .label.dropped { animation: dropped-fade-label 8s linear forwards; }
 @media (prefers-reduced-motion: reduce) { .pref.forecast, .area.forecast, .label.forecast { animation: none; } }
 .home-marker { pointer-events: none; }
+/* 地震感知情報 (利用者の「揺れた」報告): 広がる輪。信頼度が低いほど薄く */
+@keyframes uq-pulse { from { transform: scale(0.3); opacity: 0.9; } to { transform: scale(1.4); opacity: 0; } }
+.userquake .uq-ring { fill: none; stroke: #7ee0ff; stroke-width: 2.5; transform-box: fill-box; transform-origin: center; animation: uq-pulse 1.6s ease-out infinite; }
+.userquake .uq-dot { fill: #7ee0ff; stroke: #0b2530; stroke-width: 1.5; }
+.userquake.grade-B { opacity: 0.85; }
+.userquake.grade-C { opacity: 0.7; }
+.userquake.grade-D { opacity: 0.55; }
+.userquake.grade-E, .userquake.grade-F { opacity: 0.4; }
+@media (prefers-reduced-motion: reduce) { .userquake .uq-ring { animation: none; } }
 .home-ring { fill: none; stroke: #fff; stroke-width: 2.5; }
 .home-dot { fill: #58a6ff; stroke: #fff; stroke-width: 1.5; }
 .epicenter[data-key] { cursor: pointer; }

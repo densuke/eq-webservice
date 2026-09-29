@@ -6,7 +6,7 @@ import type { Plan, ScenarioSummary } from "./demo.ts";
 import type { Station } from "./detail.ts";
 import { GroupStore } from "./groups.ts";
 import { loadSettings } from "./personal.ts";
-import type { EqEvent, TsunamiEvent } from "./types.ts";
+import type { EqEvent, TsunamiEvent, UserquakeEvent } from "./types.ts";
 
 export { WAVE_MAX_SEC } from "./waves.ts";
 /** EEW 警報バナーを出し続ける時間 */
@@ -21,8 +21,10 @@ export interface World {
   store: GroupStore;
   /** 受け取った最新の津波予報 (解除を含む)。一覧の整理で消えないよう別に持つ */
   tsunami: TsunamiEvent | null;
+  /** 最新の地震感知情報 (利用者の「揺れた」報告の集計) */
+  userquake: UserquakeEvent | null;
 }
-export const liveWorld: World = { store: new GroupStore(), tsunami: null };
+export const liveWorld: World = { store: new GroupStore(), tsunami: null, userquake: null };
 
 /** デモモードの状態 */
 export interface DemoState {
@@ -56,6 +58,8 @@ export const app = {
   conn: null as Connection | null,
   /** 震度観測点の位置と属する細分区域 (観測点名 → 位置) */
   stations: new Map<string, Station>(),
+  /** P2P地震情報の地域コード -> [地域名, 緯度, 経度] (地震感知情報の位置) */
+  userquakeAreas: new Map<number, [string, number, number]>(),
   /** デモモードの状態。null ならデモモードではない */
   demo: null as DemoState | null,
   /** 利用者の設定 (端末の中に保存) */

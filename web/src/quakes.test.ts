@@ -49,7 +49,7 @@ const quake = (id: string, name: string, lat: number, lon: number, scale: number
 });
 
 function world(events: EqEvent[]): void {
-  app.world = { store: new GroupStore(), tsunami: null };
+  app.world = { store: new GroupStore(), tsunami: null, userquake: null };
   app.selectedKey = null;
   app.numbers = new Map();
   events.forEach((e) => app.world.store.add(e));

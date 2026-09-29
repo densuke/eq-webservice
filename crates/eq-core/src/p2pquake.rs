@@ -20,7 +20,10 @@ pub const CODE_EEW_DETECTION: u32 = 554;
 /// 緊急地震速報 (警報)
 pub const CODE_EEW: u32 = 556;
 
-/// このクレートが扱う code。履歴 API のクエリにも使う。
+/// 地震感知情報の評価結果
+pub const CODE_USERQUAKE_EVALUATION: u32 = 9611;
+
+/// このクレートが扱う code。履歴 API のクエリにも使う (地震感知情報は過去のものを取り込まない)。
 pub const HANDLED_CODES: [u32; 4] = [CODE_QUAKE, CODE_TSUNAMI, CODE_EEW_DETECTION, CODE_EEW];
 
 #[derive(Debug)]
@@ -61,7 +64,7 @@ pub fn parse(json: &str) -> Result<Option<Event>, ParseError> {
 
 pub fn parse_value(value: serde_json::Value) -> Result<Option<Event>, ParseError> {
     let env: Envelope = serde_json::from_value(value.clone())?;
-    if !HANDLED_CODES.contains(&env.code) {
+    if !HANDLED_CODES.contains(&env.code) && env.code != CODE_USERQUAKE_EVALUATION {
         return Ok(None);
     }
     let id = env.id.ok_or(ParseError::MissingId)?;
@@ -75,6 +78,14 @@ pub fn parse_value(value: serde_json::Value) -> Result<Option<Event>, ParseError
             })
         }
         CODE_EEW => EventBody::Eew(serde_json::from_value::<RawEew>(value)?.into()),
+        CODE_USERQUAKE_EVALUATION => {
+            let raw: RawUserquakeEvaluation = serde_json::from_value(value)?;
+            // 信頼度 0 は P2P地震情報でも表示しない評価
+            if raw.confidence <= 0.0 {
+                return Ok(None);
+            }
+            EventBody::Userquake(raw.into())
+        }
         _ => unreachable!(),
     };
     Ok(Some(Event {
@@ -128,6 +139,48 @@ struct RawHypocenter {
     longitude: Option<f64>,
     depth: Option<f64>,
     magnitude: Option<f64>,
+}
+
+#[derive(Deserialize)]
+struct RawUserquakeEvaluation {
+    count: u32,
+    confidence: f64,
+    #[serde(default)]
+    started_at: String,
+    #[serde(default)]
+    updated_at: String,
+    #[serde(default)]
+    area_confidences: std::collections::BTreeMap<String, RawAreaConfidence>,
+}
+
+#[derive(Deserialize)]
+struct RawAreaConfidence {
+    #[serde(default)]
+    confidence: f64,
+    #[serde(default)]
+    count: u32,
+}
+
+impl From<RawUserquakeEvaluation> for Userquake {
+    fn from(r: RawUserquakeEvaluation) -> Self {
+        Userquake {
+            started_at: r.started_at,
+            updated_at: r.updated_at,
+            count: r.count,
+            confidence: r.confidence,
+            areas: r
+                .area_confidences
+                .into_iter()
+                .filter_map(|(code, a)| {
+                    Some(UserquakeArea {
+                        code: code.parse().ok()?,
+                        count: a.count,
+                        confidence: a.confidence,
+                    })
+                })
+                .collect(),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -410,6 +463,35 @@ mod tests {
         {"addr": "福島金山町川口", "isArea": false, "pref": "福島県", "scale": 10}
       ]
     }"#;
+
+    #[test]
+    fn parses_userquake_evaluation_and_skips_hidden_ones() {
+        let json = r#"{"code":9611,"id":"u1","count":12,"confidence":0.97015,
+          "started_at":"2026/09/29 07:33:29.873","updated_at":"2026/09/29 07:33:41.100","time":"2026/09/29 07:33:42.000",
+          "area_confidences":{"270":{"confidence":0.85,"count":8,"display":"A"},"275":{"confidence":0.3,"count":4,"display":"D"}}}"#;
+        let ev = parse(json).unwrap().unwrap();
+        assert_eq!(ev.kind(), "userquake");
+        let EventBody::Userquake(u) = &ev.body else { panic!() };
+        assert_eq!((u.count, u.started_at.as_str()), (12, "2026/09/29 07:33:29.873"));
+        assert_eq!(
+            u.areas,
+            vec![
+                UserquakeArea {
+                    code: 270,
+                    count: 8,
+                    confidence: 0.85
+                },
+                UserquakeArea {
+                    code: 275,
+                    count: 4,
+                    confidence: 0.3
+                },
+            ]
+        );
+        // 信頼度 0 (P2P地震情報でも非表示) は扱わない
+        let hidden = r#"{"code":9611,"id":"u2","count":1,"confidence":0,"started_at":"s","updated_at":"u","area_confidences":{}}"#;
+        assert!(parse(hidden).unwrap().is_none());
+    }
 
     #[test]
     fn keeps_station_position_given_in_past_records() {

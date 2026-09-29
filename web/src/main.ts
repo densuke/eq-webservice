@@ -14,7 +14,8 @@ import { play } from "./sound.ts";
 import { $, map } from "./dom.ts";
 import { type World, app, hooks, liveWorld, now, now as serverNow } from "./state.ts";
 import { activeAreas, latestTsunami, tsunamiAlert } from "./tsunami.ts";
-import type { EewEvent, EqEvent } from "./types.ts";
+import type { EewEvent, EqEvent, UserquakeEvent } from "./types.ts";
+import { confidenceGrade, latestUserquake, userquakeShown } from "./userquake.ts";
 import { numTag, renderBanner, renderDetail, renderList, renderMode, renderTsunamiBanner, updatePointsOpen } from "./view.ts";
 import { latestEew, summarizeQuake } from "./groups.ts";
 
@@ -73,6 +74,7 @@ export function tick(): void {
   renderCountdown(now);
   updatePointsOpen();
   renderDemoControls();
+  renderUserquake(now);
   // 波の表示中は滑らかに、そうでなければ時計の更新だけ
   if (waving) raf = requestAnimationFrame(tick);
   // デモの再生中は倍速でも情報が遅れないよう細かく
@@ -87,9 +89,13 @@ export function urgent(e: EqEvent): boolean {
 }
 
 /** target は情報を入れる先。デモモード中も実際の情報は liveWorld に入れ続ける */
-export function onEvents(events: EqEvent[], live: boolean, target: World = liveWorld): void {
+export function onEvents(all: EqEvent[], live: boolean, target: World = liveWorld): void {
   const rank: Record<AlertLevel, number> = { info: 0, low: 1, medium: 2, strong: 3 };
   let alert: AlertLevel | null = null;
+  // 地震感知情報は一覧に入れず、最新のものだけ持つ (地図の印は tick で描く)
+  for (const e of all) if (e.kind === "userquake") receiveUserquake(e, live, target);
+  const events = all.filter((e) => e.kind !== "userquake");
+  if (!events.length) return;
   // デモを見ている間に届いた実際の情報: 裏で蓄えるだけ。大事な情報ならデモを終えて表示する
   if (target !== app.world) {
     for (const e of events) {
@@ -135,11 +141,52 @@ export function onEvents(events: EqEvent[], live: boolean, target: World = liveW
 
 let toastTimer = 0;
 /** 巡回で次の地震へ移ったとき、番号と名前を短く出す */
+function receiveUserquake(e: UserquakeEvent, live: boolean, target: World): void {
+  const prev = target.userquake;
+  target.userquake = latestUserquake(prev, e);
+  // 新しい揺れの報告が始まったときだけ知らせる (同じ揺れの評価の更新では鳴らさない)
+  if (!live || target !== app.world || prev?.started_at === e.started_at) return;
+  const names = [...e.areas]
+    .sort((a, b) => b.count - a.count)
+    .map((a) => app.userquakeAreas.get(a.code)?.[0])
+    .filter((n): n is string => !!n);
+  play("feel");
+  showToast(`揺れの報告: ${esc(names.slice(0, 3).join("、") || "地域不明")}${names.length > 3 ? " ほか" : ""}`);
+}
+
+/** 地震感知情報の印を地図に出す (出す間だけ) */
+function renderUserquake(now: number): void {
+  const u = app.world.userquake;
+  const official = app.world.store
+    .list()
+    .filter((g) => g.kind === "eew" || g.kind === "quake")
+    .map((g) => g.updatedAt);
+  if (!u || !userquakeShown(u, now, official)) return map.setUserquake([]);
+  map.setUserquake(
+    u.areas.flatMap((a) => {
+      const p = app.userquakeAreas.get(a.code);
+      return p ? [{ name: p[0], lat: p[1], lon: p[2], count: a.count, grade: confidenceGrade(a.confidence) }] : [];
+    }),
+  );
+}
+
+export async function loadUserquakeAreas(): Promise<void> {
+  const res = await fetch("userquake-areas.json");
+  if (!res.ok) return;
+  const rows: Record<string, [string, number, number]> = await res.json();
+  app.userquakeAreas = new Map(Object.entries(rows).map(([code, v]) => [Number(code), v]));
+}
+
 function showTourToast(key: string): void {
   const g = app.world.store.get(key);
   const name = g && (g.kind === "quake" ? summarizeQuake(g).hypocenter?.name : g.kind === "eew" ? latestEew(g).hypocenter?.name : "");
+  showToast(`${numTag(key)}${esc(name || "震源調査中")}`);
+}
+
+/** 画面上部に短く知らせる (html はエスケープ済みのもの) */
+function showToast(html: string): void {
   const el = $("#tour-toast");
-  el.innerHTML = `${numTag(key)}${esc(name || "震源調査中")}`;
+  el.innerHTML = html;
   el.hidden = false;
   el.classList.remove("show");
   void el.offsetWidth;
@@ -216,6 +263,7 @@ Promise.all([
   map.loadAreas("areas.geojson").catch(() => {}),
   map.loadNeighbors("neighbors.geojson").catch(() => {}),
   loadStations().catch(() => {}),
+  loadUserquakeAreas().catch(() => {}),
 ])
   .catch((err) => {
     $("#detail").innerHTML = `<p class="error">${esc(String(err))}</p>`;

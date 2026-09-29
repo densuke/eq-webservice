@@ -28,7 +28,7 @@ export async function enterDemo(): Promise<void> {
   const res = await fetch("demo/index.json");
   const scenarios: ScenarioSummary[] = res.ok ? await res.json() : [];
   app.demo = { scenarios, running: null, plan: null, world: null, applied: 0, run: 0, clock: { pos: 0, anchor: performance.now(), speed: 1, paused: false } };
-  showWorld({ store: new GroupStore(), tsunami: null });
+  showWorld({ store: new GroupStore(), tsunami: null, userquake: null });
   hooks.renderAll();
 }
 
@@ -58,7 +58,7 @@ export async function runScenario(id: string): Promise<void> {
 
 /** 場面の世界をまっさらにする (最初から、または巻き戻したとき) */
 function rebuild(d: DemoState): void {
-  d.world = { store: new GroupStore(), tsunami: null };
+  d.world = { store: new GroupStore(), tsunami: null, userquake: null };
   d.applied = 0;
   showWorld(d.world);
 }
