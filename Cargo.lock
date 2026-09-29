@@ -267,7 +267,7 @@ dependencies = [
 
 [[package]]
 name = "eq-server"
-version = "0.13.3"
+version = "0.13.4"
 dependencies = [
  "anyhow",
  "axum",
