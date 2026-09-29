@@ -4,6 +4,7 @@
 //! Chrome か ffmpeg が止まったら、両方を止めて少し待ってから立ち上げ直す。
 //! 送り先 (ストリームキー入りの URL) は `$VAR` で環境変数から読み、ログには出さない。
 
+mod audio;
 mod chrome;
 
 use std::collections::BTreeMap;
@@ -32,6 +33,8 @@ pub struct BroadcastConfig {
     pub ffmpeg: String,
     /// 音の入力 (ffmpeg の引数)。空なら無音
     pub audio: Vec<String>,
+    /// 音を取り込むコマンド (sox など)。指定すると audio より優先し、その標準出力 (s16le・48kHz・ステレオ) を使う
+    pub audio_command: Vec<String>,
     /// 映像・音の圧縮 (ffmpeg の引数)
     pub encode: Vec<String>,
     /// 送り先 (ffmpeg の引数)。`$VAR` / `${VAR}` は環境変数に置き換える
@@ -55,6 +58,7 @@ impl Default for BroadcastConfig {
             profile: String::new(),
             ffmpeg: "ffmpeg".into(),
             audio: Vec::new(),
+            audio_command: Vec::new(),
             encode: s(&[
                 "-c:v", "libx264", "-preset", "veryfast", "-b:v", "3000k", "-maxrate", "3000k", "-bufsize", "6000k",
             ]),
@@ -89,8 +93,15 @@ pub async fn run(args: &[String]) -> anyhow::Result<()> {
 /// Chrome と ffmpeg を 1 組起動し、どちらかが止まるまで画面を送り続ける
 async fn session(cfg: &BroadcastConfig, output: &[String], secrets: &[String]) -> anyhow::Result<()> {
     let (mut screen, mut chrome) = chrome::launch(cfg).await?;
+    let mut audio_cmd = match cfg.audio_command.is_empty() {
+        true => None,
+        false => Some(audio::AudioCommand::start(&cfg.audio_command)?),
+    };
+    let audio_in = audio_cmd
+        .as_ref()
+        .map_or_else(|| cfg.audio.clone(), |a| a.ffmpeg_input());
     let mut ffmpeg = Command::new(&cfg.ffmpeg)
-        .args(ffmpeg_args(cfg, output))
+        .args(ffmpeg_args(cfg, &audio_in, output))
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -125,11 +136,17 @@ async fn session(cfg: &BroadcastConfig, output: &[String], secrets: &[String]) -
                 None => anyhow::bail!("ffmpeg exited: {}", ffmpeg.wait().await?),
             },
             status = chrome.wait() => anyhow::bail!("chrome exited: {}", status?),
+            status = async {
+                match audio_cmd.as_mut() {
+                    Some(a) => a.child.wait().await,
+                    None => std::future::pending().await,
+                }
+            } => anyhow::bail!("audio_command exited: {}", status?),
         }
     }
 }
 
-fn ffmpeg_args(cfg: &BroadcastConfig, output: &[String]) -> Vec<String> {
+fn ffmpeg_args(cfg: &BroadcastConfig, audio: &[String], output: &[String]) -> Vec<String> {
     let fps = cfg.fps.max(1).to_string();
     let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
     let mut a = s(&[
@@ -142,11 +159,11 @@ fn ffmpeg_args(cfg: &BroadcastConfig, output: &[String]) -> Vec<String> {
         "mjpeg",
     ]);
     a.extend(s(&["-framerate", &fps, "-i", "-"]));
-    if cfg.audio.is_empty() {
+    if audio.is_empty() {
         // 無音も実時間の速さで作る (そうしないと音だけ先に進み、映像とずれる)
         a.extend(s(&["-re", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo"]));
     } else {
-        a.extend(cfg.audio.iter().cloned());
+        a.extend(audio.iter().cloned());
     }
     a.extend(s(&["-map", "0:v", "-map", "1:a"]));
     // 画面の大きさをそろえる (Chrome の最初の画面は表示の大きさを決める前のもので、縦が足りないことがある)
@@ -249,7 +266,7 @@ mod tests {
     #[test]
     fn silent_audio_is_used_without_an_audio_input() {
         let cfg = BroadcastConfig::default();
-        let a = ffmpeg_args(&cfg, &["out.flv".to_string()]);
+        let a = ffmpeg_args(&cfg, &[], &["out.flv".to_string()]);
         assert!(a.windows(2).any(|w| w == ["-i", "anullsrc=r=44100:cl=stereo"]));
         assert_eq!(a.last().unwrap(), "out.flv");
         assert!(a.windows(2).any(|w| w == ["-g", "60"]));

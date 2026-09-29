@@ -5,7 +5,7 @@ members = ["crates/eq-server"]
 [workspace.package]
 edition = "2021"
 license = "GPL-3.0-or-later"
-version = "0.13.1"
+version = "0.13.2"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
