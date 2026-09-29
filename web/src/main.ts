@@ -3,7 +3,7 @@
 import { type AlertLevel, alertLevel } from "./alert.ts";
 import { loadTelop, renderClock, renderSound, renderTelop, setStatus } from "./chrome.ts";
 import { Connection } from "./connection.ts";
-import { enterDemo, exitDemo, renderDemoPanel, runScenario } from "./demo-ui.ts";
+import { advanceDemo, enterDemo, exitDemo, renderDemoControls, renderDemoPanel, runScenario } from "./demo-ui.ts";
 import { fadeOpacity } from "./fade.ts";
 import { esc } from "./html.ts";
 import { notify, renderCountdown, updateHome } from "./personal-ui.ts";
@@ -35,6 +35,7 @@ export let timer = 0;
 export function tick(): void {
   cancelAnimationFrame(raf);
   clearTimeout(timer);
+  advanceDemo();
   const now = serverNow();
   renderClock(now);
   if (updateNumbers(now)) {
@@ -49,7 +50,7 @@ export function tick(): void {
   const sc = scene(now);
   const { box, waving } = renderScene(sc);
   // 波の広がり中 (ライブのみ) は 2 秒ごとに短い音で警戒中を知らせる (地震が重なっても 1 本)
-  const pip = waving && !sc!.replay ? Math.floor(now / 2000) : -1;
+  const pip = waving && !sc!.replay && (app.demo?.clock.speed ?? 1) <= 1 ? Math.floor(now / 2000) : -1;
   if (pip > lastPip && lastPip !== -1) play("pip");
   lastPip = pip;
   // 優先度は時間で入れ替わる (大きい方が古くなるなど) ので、表示中の地震が変わったら描き直す
@@ -71,9 +72,11 @@ export function tick(): void {
   renderSound();
   renderCountdown(now);
   updatePointsOpen();
+  renderDemoControls();
   // 波の表示中は滑らかに、そうでなければ時計の更新だけ
   if (waving) raf = requestAnimationFrame(tick);
-  else timer = window.setTimeout(tick, 1000);
+  // デモの再生中は倍速でも情報が遅れないよう細かく
+  else timer = window.setTimeout(tick, app.demo?.plan && !app.demo.clock.paused ? 200 : 1000);
 }
 
 /** 実際の情報のうち、デモモードを直ちに終えて見せるべきもの */

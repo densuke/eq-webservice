@@ -55,7 +55,8 @@ def quake(issued: str, mag: float, pts: list[dict]) -> dict:
         "id": f"tohoku2011-{issued[-8:].replace(':', '')}-{issued[8:10]}",
         "issue": {"source": "気象庁", "time": issued, "type": "DetailScale" if pts else "Destination", "correct": "None"},
         "earthquake": {
-            "time": "2011/03/11 14:46:00",
+            # 発生時刻は秒まで (P2P地震情報は分までだが、波の描画を発生に合わせるため)
+            "time": ORIGIN,
             "maxScale": max((p["scale"] for p in pts), default=-1),
             "domesticTsunami": "Warning",
             "foreignTsunami": "Unknown",

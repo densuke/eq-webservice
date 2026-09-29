@@ -223,6 +223,10 @@ body {
 .demo-text { flex: 1; min-width: 0; font-size: 13px; }
 .demo-text .muted { font-size: 11px; }
 .demo-list li.running .follow { border-color: #d29922; color: #d29922; }
+.demo-controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+.demo-controls .speed.active { border-color: #d29922; color: #d29922; }
+.demo-controls input[type="range"] { flex: 1 1 160px; min-width: 120px; accent-color: #d29922; }
+.demo-controls #demo-time { font-variant-numeric: tabular-nums; font-size: 12px; }
 .list { list-style: none; margin: 0; padding: 0 8px; overflow: auto; flex: 1; }
 .list li { display: flex; gap: 10px; align-items: center; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
 .list li:hover { background: #1c2430; }

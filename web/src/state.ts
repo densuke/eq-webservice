@@ -2,7 +2,7 @@
 // モジュールをまたいで書き換える状態は app にまとめる (import した変数は書き換えられないため)。
 
 import type { Connection } from "./connection.ts";
-import type { ScenarioSummary } from "./demo.ts";
+import type { Plan, ScenarioSummary } from "./demo.ts";
 import type { Station } from "./detail.ts";
 import { GroupStore } from "./groups.ts";
 import { loadSettings } from "./personal.ts";
@@ -27,9 +27,21 @@ export const liveWorld: World = { store: new GroupStore(), tsunami: null };
 /** デモモードの状態 */
 export interface DemoState {
   scenarios: ScenarioSummary[];
+  /** 読み込んだ場面 (まだなら null) */
   running: string | null;
-  timers: number[];
+  plan: Plan | null;
+  /** 場面を再生している世界と、そこへ流し終えた情報の数 */
+  world: World | null;
+  applied: number;
   run: number;
+  /** デモ専用の時計: anchor (performance.now) の時点で再生位置 pos。speed 倍で進む */
+  clock: { pos: number; anchor: number; speed: number; paused: boolean };
+}
+
+/** デモの再生位置 (ミリ秒) */
+export function demoPos(d: DemoState): number {
+  const c = d.clock;
+  return c.paused ? c.pos : c.pos + (performance.now() - c.anchor) * c.speed;
 }
 
 export const app = {
@@ -65,5 +77,7 @@ export const hooks = {
 
 /** サーバの時刻 (接続前はブラウザの時刻) */
 export function now(): number {
+  // デモの場面を再生している間は、デモの時計 (記録の場面は当時の日時)
+  if (app.demo?.plan) return app.demo.plan.toReal(demoPos(app.demo));
   return app.conn ? app.conn.now() : Date.now();
 }
