@@ -8,7 +8,6 @@ use axum::{Json, Router};
 use lofty::file::TaggedFileExt;
 use lofty::tag::Accessor;
 use serde::{Deserialize, Serialize};
-use tower_http::services::ServeDir;
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields, default)]
@@ -90,9 +89,9 @@ pub fn router(cfg: &BgmConfig) -> Router {
             }
         }),
     );
-    // ServeDir はディレクトリの外 (../ など) を返さない
+    // 決めた種類のファイルだけを配信する (ディレクトリの外も返さない)
     if enabled {
-        r.nest_service("/bgm", ServeDir::new(dir))
+        r.merge(crate::files::serve("/bgm", dir, &AUDIO))
     } else {
         r
     }

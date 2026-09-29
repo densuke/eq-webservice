@@ -1,7 +1,9 @@
+mod banner;
 mod bgm;
 mod cli;
 mod config;
 mod demo;
+mod files;
 mod http;
 mod hub;
 mod plugins;
@@ -67,6 +69,7 @@ async fn main() -> anyhow::Result<()> {
     }
     routes.push(weather::router(warnings));
     routes.push(bgm::router(&cfg.bgm));
+    routes.push(banner::router(&cfg.banner));
 
     let listener = tokio::net::TcpListener::bind(&cfg.server.listen)
         .await
