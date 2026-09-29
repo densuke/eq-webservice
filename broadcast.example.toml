@@ -16,6 +16,12 @@ fps = 30
 # Linux で音を PulseAudio の配信用の出力に流す場合
 # chrome_env = { PULSE_SINK = "eq_broadcast" }
 
+# 音を eq-server の中で作る (BGM と警戒音を混ぜて ffmpeg に渡す)。BlackHole・sox は要らない。
+# true にすると、下の audio・audio_command より優先し、ページには &audio=mixer を付けて開く (&sink= は要らない)
+# mixer = true
+# mixer が流す BGM (Icecast の MP3)。空なら BGM は流さない
+# bgm_url = "https://eq.fuga.jp/stream/bgm.mp3"
+
 # 音の取り込み。省くと無音
 # Mac: BlackHole 2ch に流した Chrome の音を sox で取り込む (brew install sox)。
 #   ffmpeg の avfoundation は音を 1 割ほど落として途切れるので使わない。出力は s16le・48kHz・ステレオにする

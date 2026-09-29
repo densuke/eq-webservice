@@ -1,7 +1,8 @@
 // 平時の BGM。音楽は Icecast が配信し、この画面はその配信を鳴らすだけ。
 // 地震の表示の間とデモ中は直ちに止め (警戒音を優先。配信の受信もやめる)、平時に戻ればそのときの放送から少しずつ音を上げて流す。
 
-import { routeAudio } from "./broadcast.ts";
+import { mixerAudio, notifyBgm, routeAudio } from "./broadcast.ts";
+import { isPlaying } from "./notice.ts";
 import { $, tapWord } from "./dom.ts";
 import { saveSettings } from "./personal.ts";
 import { app } from "./state.ts";
@@ -34,6 +35,8 @@ let title = "";
 let titleAt = 0;
 let fadeTimer = 0;
 
+/** 鳴っている扱いか (mixer はページで鳴らさないので、流す知らせを出している間) */
+const playing = () => isPlaying(mixerAudio, wanted(), audio.paused);
 const level = () => app.settings.bgmVolume / 100;
 const wanted = () => cfg != null && app.settings.bgm && allowed;
 
@@ -88,9 +91,11 @@ function stop(): void {
 /** 画面の更新 (tick) ごと: 平時なら流し、そうでなければ直ちに止める */
 export function updateBgm(quiet: boolean): void {
   allowed = quiet;
-  if (!wanted()) stop();
+  // 配信の mixer 音声: 流す・止めるを eq-server に知らせるだけ (音はページで鳴らさない)
+  if (mixerAudio) notifyBgm(wanted(), app.settings.bgmVolume);
+  else if (!wanted()) stop();
   else if (audio.paused && !blocked && Date.now() >= retryAt) void start();
-  if (!audio.paused && cfg?.status && Date.now() - titleAt > TITLE_MS) void loadTitle();
+  if (playing() && cfg?.status && Date.now() - titleAt > TITLE_MS) void loadTitle();
   renderBgm();
 }
 
@@ -115,7 +120,7 @@ function renderBgm(): void {
   if (btn.textContent !== text) btn.textContent = text;
   btn.classList.toggle("active", app.settings.bgm && !blocked);
   btn.classList.toggle("waiting", app.settings.bgm && blocked);
-  const on = !audio.paused;
+  const on = playing();
   const now = on ? `BGM: ${title || "再生中"}` : "";
   const label = $("#bgm-now");
   label.hidden = !on;

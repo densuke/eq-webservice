@@ -1,11 +1,12 @@
 //! ライブ配信 (`eq-server broadcast <broadcast.toml>`)。画面の無い Chrome で地図のページを開き、
 //! 画面の変化を受け取って (chrome.rs)、決まった fps で ffmpeg に渡して配信する。
-//! 音は ffmpeg の入力で取り込む (Mac は BlackHole、Linux は PulseAudio のモニタなど)。
+//! 音は mixer (eq-server 自身が BGM と警戒音を混ぜる) か、ffmpeg の入力 (Mac は BlackHole、Linux は PulseAudio のモニタなど) で取り込む。
 //! Chrome か ffmpeg が止まったら、両方を止めて少し待ってから立ち上げ直す。
 //! 送り先 (ストリームキー入りの URL) は `$VAR` で環境変数から読み、ログには出さない。
 
 mod audio;
 mod chrome;
+mod mixer;
 
 use std::collections::BTreeMap;
 use std::process::Stdio;
@@ -35,6 +36,11 @@ pub struct BroadcastConfig {
     pub audio: Vec<String>,
     /// 音を取り込むコマンド (sox など)。指定すると audio より優先し、その標準出力 (s16le・48kHz・ステレオ) を使う
     pub audio_command: Vec<String>,
+    /// 音を eq-server の中で作る (BGM と警戒音を混ぜて ffmpeg に渡す。BlackHole・sox が要らない)。
+    /// 指定すると audio・audio_command より優先し、ページには &audio=mixer を付けて開く
+    pub mixer: bool,
+    /// mixer が流す BGM (Icecast の MP3)。空なら BGM は流さない
+    pub bgm_url: String,
     /// 映像・音の圧縮 (ffmpeg の引数)
     pub encode: Vec<String>,
     /// 送り先 (ffmpeg の引数)。`$VAR` / `${VAR}` は環境変数に置き換える
@@ -59,6 +65,8 @@ impl Default for BroadcastConfig {
             ffmpeg: "ffmpeg".into(),
             audio: Vec::new(),
             audio_command: Vec::new(),
+            mixer: false,
+            bgm_url: "https://eq.fuga.jp/stream/bgm.mp3".into(),
             encode: s(&[
                 "-c:v", "libx264", "-preset", "veryfast", "-b:v", "3000k", "-maxrate", "3000k", "-bufsize", "6000k",
             ]),
@@ -104,14 +112,27 @@ pub async fn run(args: &[String]) -> anyhow::Result<()> {
 
 /// Chrome と ffmpeg を 1 組起動し、どちらかが止まるまで画面を送り続ける
 async fn session(cfg: &BroadcastConfig, output: &[String], secrets: &[String]) -> anyhow::Result<()> {
-    let (mut screen, mut chrome) = chrome::launch(cfg).await?;
-    let mut audio_cmd = match cfg.audio_command.is_empty() {
+    let (notice_tx, notice_rx) = tokio::sync::mpsc::unbounded_channel();
+    let page = if cfg.mixer {
+        with_query(&cfg.url, "audio=mixer")
+    } else {
+        cfg.url.clone()
+    };
+    let (mut screen, mut chrome) = chrome::launch(cfg, &page, cfg.mixer.then_some(notice_tx)).await?;
+    // mixer の音 (fifo は mixer より後に捨てる。宣言の順を変えないこと)
+    let mixer_fifo = if cfg.mixer { Some(audio::Fifo::create()?) } else { None };
+    let _mixer = mixer_fifo
+        .as_ref()
+        .map(|f| mixer::spawn(notice_rx, f.path().to_path_buf(), cfg.bgm_url.clone()));
+    let mut audio_cmd = match cfg.audio_command.is_empty() || cfg.mixer {
         true => None,
         false => Some(audio::AudioCommand::start(&cfg.audio_command)?),
     };
-    let audio_in = audio_cmd
-        .as_ref()
-        .map_or_else(|| cfg.audio.clone(), |a| a.ffmpeg_input());
+    let audio_in = match (&mixer_fifo, &audio_cmd) {
+        (Some(f), _) => f.ffmpeg_input(mixer::RATE),
+        (None, Some(a)) => a.ffmpeg_input(),
+        (None, None) => cfg.audio.clone(),
+    };
     let mut ffmpeg = Command::new(&cfg.ffmpeg)
         .args(ffmpeg_args(cfg, &audio_in, output))
         .stdin(Stdio::piped())
@@ -156,6 +177,18 @@ async fn session(cfg: &BroadcastConfig, output: &[String], secrets: &[String]) -
             } => anyhow::bail!("audio_command exited: {}", status?),
         }
     }
+}
+
+/// URL に問い合わせの項目を足す (# の前に入れる)
+fn with_query(url: &str, item: &str) -> String {
+    let (base, frag) = url.split_once('#').map_or((url, ""), |(b, f)| (b, f));
+    let sep = if base.contains('?') { '&' } else { '?' };
+    let hash = if frag.is_empty() {
+        String::new()
+    } else {
+        format!("#{frag}")
+    };
+    format!("{base}{sep}{item}{hash}")
 }
 
 fn ffmpeg_args(cfg: &BroadcastConfig, audio: &[String], output: &[String]) -> Vec<String> {
@@ -273,6 +306,29 @@ mod tests {
             redact("rtmps://x/live2/abc-123: I/O error", &secrets),
             "rtmps://x/live2/***: I/O error"
         );
+    }
+
+    #[test]
+    fn the_page_is_told_to_use_the_mixer() {
+        assert_eq!(
+            with_query("https://x/?broadcast=1", "audio=mixer"),
+            "https://x/?broadcast=1&audio=mixer"
+        );
+        assert_eq!(with_query("https://x/", "audio=mixer"), "https://x/?audio=mixer");
+        assert_eq!(
+            with_query("https://x/?a=1#top", "audio=mixer"),
+            "https://x/?a=1&audio=mixer#top"
+        );
+    }
+
+    #[test]
+    fn mixer_audio_is_read_as_s16le_44100_stereo() {
+        let fifo = audio::Fifo::create().unwrap();
+        let a = fifo.ffmpeg_input(mixer::RATE);
+        assert_eq!(&a[..6], ["-f", "s16le", "-ar", "44100", "-ac", "2"]);
+        assert_eq!(a[6], "-i");
+        assert!(toml::from_str::<BroadcastConfig>("mixer = true").unwrap().mixer);
+        assert!(!BroadcastConfig::default().mixer);
     }
 
     #[test]

@@ -10,18 +10,29 @@ use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::TcpStream;
 use tokio::process::{Child, Command};
+use tokio::sync::mpsc::UnboundedSender;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 use super::BroadcastConfig;
 
+/// ページが window.eqBroadcast(json) で知らせてくる口の名前 (mixer の音の知らせ)
+const BINDING: &str = "eqBroadcast";
+
 pub struct Screencast {
     ws: WebSocketStream<MaybeTlsStream<TcpStream>>,
     next_id: u64,
+    /// ページからの知らせの送り先 (mixer を使うときだけ)
+    notices: Option<UnboundedSender<String>>,
 }
 
-/// Chrome を起動して画面の受け取りを始める。Chrome のプロセス (止まったか見張る) も返す
-pub async fn launch(cfg: &BroadcastConfig) -> anyhow::Result<(Screencast, Child)> {
+/// Chrome を起動して画面の受け取りを始める。Chrome のプロセス (止まったか見張る) も返す。
+/// url を開く。notices があれば、ページの window.eqBroadcast(json) の json をそこへ送る
+pub async fn launch(
+    cfg: &BroadcastConfig,
+    url: &str,
+    notices: Option<UnboundedSender<String>>,
+) -> anyhow::Result<(Screencast, Child)> {
     // 普段使いの Chrome のプロファイルとは分ける。指定が無ければ毎回まっさらな一時ディレクトリ
     let profile = if cfg.profile.is_empty() {
         let tmp = std::env::temp_dir().join(format!("eq-broadcast-{}", std::process::id()));
@@ -49,7 +60,8 @@ pub async fn launch(cfg: &BroadcastConfig) -> anyhow::Result<(Screencast, Child)
             "--disable-background-timer-throttling".to_string(),
             "--disable-renderer-backgrounding".to_string(),
             "--disable-backgrounding-occluded-windows".to_string(),
-            cfg.url.clone(),
+            // 知らせの口 (addBinding) を作ってから開く。開いたあとに作ると、読み込み済みのページには付かないことがある
+            "about:blank".to_string(),
         ])
         .envs(&cfg.chrome_env)
         .stdout(Stdio::null())
@@ -75,9 +87,17 @@ pub async fn launch(cfg: &BroadcastConfig) -> anyhow::Result<(Screencast, Child)
     let (ws, _) = tokio_tungstenite::connect_async(&page)
         .await
         .context("connect to the page")?;
-    let mut sc = Screencast { ws, next_id: 0 };
+    let mixer = notices.is_some();
+    let mut sc = Screencast {
+        ws,
+        next_id: 0,
+        notices,
+    };
     // ページの警告 (音の出力先が見つからない、など) をログに出す
     sc.send("Runtime.enable", json!({})).await?;
+    if mixer {
+        sc.send("Runtime.addBinding", json!({ "name": BINDING })).await?;
+    }
     sc.send(
         "Emulation.setDeviceMetricsOverride",
         json!({ "width": cfg.width, "height": cfg.height, "deviceScaleFactor": 1, "mobile": false }),
@@ -88,6 +108,7 @@ pub async fn launch(cfg: &BroadcastConfig) -> anyhow::Result<(Screencast, Child)
         json!({ "format": "jpeg", "quality": 80, "maxWidth": cfg.width, "maxHeight": cfg.height, "everyNthFrame": 1 }),
     )
     .await?;
+    sc.send("Page.navigate", json!({ "url": url })).await?;
     Ok((sc, child))
 }
 
@@ -150,6 +171,11 @@ impl Screencast {
                     })
                     .collect();
                 tracing::warn!("page: {}", text.join(" "));
+            }
+            if v["method"] == "Runtime.bindingCalled" && v["params"]["name"] == BINDING {
+                if let (Some(tx), Some(payload)) = (&self.notices, v["params"]["payload"].as_str()) {
+                    let _ = tx.send(payload.to_string());
+                }
             }
             if v["method"] == "Page.screencastFrame" {
                 let p = &v["params"];
