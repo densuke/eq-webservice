@@ -21,6 +21,9 @@ pub struct Config {
     /// 平時の BGM
     #[serde(default)]
     pub bgm: crate::bgm::BgmConfig,
+    /// 平時のバナー (案内・お知らせ)
+    #[serde(default)]
+    pub banner: crate::banner::BannerConfig,
 }
 
 /// 平常時に画面上部で切り替えて表示する文

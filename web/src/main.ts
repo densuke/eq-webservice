@@ -18,6 +18,7 @@ import type { EewEvent, EqEvent, UserquakeEvent } from "./types.ts";
 import { confidenceGrade, latestUserquake, userquakeShown } from "./userquake.ts";
 import { topLevel } from "./warnings.ts";
 import { loadTracks, updateBgm } from "./bgm.ts";
+import { loadBanners, updateBanner } from "./banner.ts";
 import { numTag, renderBanner, renderDetail, renderList, renderMode, renderTsunamiBanner, updatePointsOpen } from "./view.ts";
 import { latestEew, summarizeQuake } from "./groups.ts";
 
@@ -73,6 +74,7 @@ export function tick(): void {
   // 平時は地震の塗り分けを消して気象警報・注意報を塗る。BGM は地震・津波・揺れの報告の間とデモ中は止める
   const { calm, quiet } = renderWarnings(now, renderUserquake(now));
   updateBgm(quiet);
+  updateBanner(quiet);
   map.setFade(app.selectedKey ? 1 : calm ? 0 : fadeOpacity(now - displayedInfoMs()));
   renderMode();
   renderSound();
@@ -314,6 +316,7 @@ Promise.all([
   loadUserquakeAreas().catch(() => {}),
   loadWarnings().catch(() => {}),
   loadTracks().catch(() => {}),
+  loadBanners().catch(() => {}),
 ])
   .catch((err) => {
     $("#detail").innerHTML = `<p class="error">${esc(String(err))}</p>`;

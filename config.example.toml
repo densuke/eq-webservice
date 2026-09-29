@@ -81,3 +81,9 @@ enabled = true
 [bgm]
 dir = ""
 # dir = "/home/eq/bgm"
+
+# 平時のバナー (案内・お知らせ)。ディレクトリの画像 (png/jpg/webp/gif) とテキスト (.txt) を名前順に切り替える。空なら使わない
+[banner]
+dir = ""
+# dir = "/home/eq/banner"
+interval_sec = 20
