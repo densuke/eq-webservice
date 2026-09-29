@@ -81,13 +81,25 @@ pub async fn run(args: &[String]) -> anyhow::Result<()> {
     let output = expand_all(&cfg.output, get)?;
     // 送り先に埋めた値 (ストリームキーなど) はログで伏せる
     let secrets = secrets_of(&cfg.output, get);
+    // 止める合図 (Ctrl+C・SIGTERM) を受けたら、動かしている Chrome・ffmpeg・音のコマンドを止めてから終える
+    // (session を途中で捨てると kill_on_drop で子のプロセスが止まる。止めないと ffmpeg が送り先につないだまま残る)
+    let stop = crate::shutdown_signal();
+    tokio::pin!(stop);
     loop {
-        match session(&cfg, &output, &secrets).await {
-            Ok(()) => tracing::warn!("broadcast: stopped"),
-            Err(e) => tracing::warn!("broadcast: {}", redact(&format!("{e:#}"), &secrets)),
+        tokio::select! {
+            r = session(&cfg, &output, &secrets) => match r {
+                Ok(()) => tracing::warn!("broadcast: stopped"),
+                Err(e) => tracing::warn!("broadcast: {}", redact(&format!("{e:#}"), &secrets)),
+            },
+            _ = &mut stop => break,
         }
-        tokio::time::sleep(RESTART_AFTER).await;
+        tokio::select! {
+            _ = tokio::time::sleep(RESTART_AFTER) => {}
+            _ = &mut stop => break,
+        }
     }
+    tracing::info!("broadcast: stopping");
+    Ok(())
 }
 
 /// Chrome と ffmpeg を 1 組起動し、どちらかが止まるまで画面を送り続ける
