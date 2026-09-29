@@ -6,6 +6,7 @@
 
 mod audio;
 mod chrome;
+mod mixer;
 
 use std::collections::BTreeMap;
 use std::process::Stdio;
