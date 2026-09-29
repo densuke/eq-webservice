@@ -109,8 +109,18 @@ function renderBgm(): void {
   const on = !audio.paused;
   const now = on ? `BGM: ${title || "再生中"}` : "";
   const label = $("#bgm-now");
-  if (label.textContent !== now) label.textContent = now;
   label.hidden = !on;
+  const inner = label.querySelector<HTMLElement>(".bgm-text")!;
+  // 曲名や幅が変わったときだけ、収まらなければ流すかを判定し直す
+  const sig = `${now}|${label.clientWidth}`;
+  if (label.dataset.sig !== sig) {
+    label.dataset.sig = sig;
+    inner.textContent = now;
+    const over = inner.scrollWidth - label.clientWidth;
+    label.classList.toggle("scroll", on && over > 0);
+    label.style.setProperty("--bgm-shift", `${-over}px`);
+    label.style.setProperty("--bgm-sec", `${8 + Math.round(over / 15)}s`);
+  }
   btn.title = on && title ? `再生中: ${title}` : "平時に BGM を流します (地震の表示の間は止まります)";
 }
 

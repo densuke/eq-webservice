@@ -8,7 +8,7 @@ import { fadeOpacity } from "./fade.ts";
 import { esc } from "./html.ts";
 import { notify, renderCountdown, updateHome } from "./personal-ui.ts";
 import { sameQuake } from "./priority.ts";
-import { activeEews, currentGroup, displayedInfoMs, placeOf, priorityGroups, unsettledGroups, updateNumbers, updateTour, waveSources } from "./quakes.ts";
+import { activeEews, calmState, currentGroup, displayedInfoMs, placeOf, priorityGroups, updateNumbers, updateTour } from "./quakes.ts";
 import { renderMarkers, renderScene, scene } from "./scene.ts";
 import { play } from "./sound.ts";
 import { $, map } from "./dom.ts";
@@ -185,10 +185,7 @@ function renderUserquake(now: number): boolean {
  * 地震の情報が届けば地震の表示に切り替わり、落ち着けば平時に戻る
  */
 function renderWarnings(now: number, feeling: boolean): { calm: boolean; quiet: boolean } {
-  const tsunami = activeAreas(app.world.tsunami).length > 0;
-  const quiet = unsettledGroups(now).length === 0 && activeEews(now).length === 0 && waveSources(now).length === 0;
-  const still = !app.demo && !feeling && !tsunami && quiet;
-  const calm = still && !app.selectedKey;
+  const { quiet: still, calm, tsunami } = calmState(now, feeling);
   // 地震の表示の間は、すぐ平時に戻すボタン (津波予報が出ている間とデモ中は出さない)
   $("#calm-now").hidden = calm || tsunami || app.demo != null;
   const w = calm ? app.warnings : null;

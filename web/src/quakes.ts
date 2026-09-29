@@ -6,6 +6,7 @@ import { assignNumbers } from "./numbering.ts";
 import { type Place, byPriority, sameQuake, settleMs } from "./priority.ts";
 import { EEW_BANNER_MS, WAVE_MAX_SEC, app, now } from "./state.ts";
 import { tourIndex, worthTouring } from "./tour.ts";
+import { activeAreas } from "./tsunami.ts";
 import type { EewEvent, Hypocenter, Scale } from "./types.ts";
 
 /** 津波予報などに対応する地震 (その情報より前に届いた直近の地震情報・EEW) */
@@ -166,4 +167,16 @@ export function updateTour(now: number, manual: boolean): void {
   }
   app.tourStart ??= now;
   app.tourKey = hold ?? cands[tourIndex(app.tourStart, now, app.settings.tourSec, cands.length)].g.key;
+}
+
+/**
+ * 平時かどうか。quiet: 地震・緊急地震速報・津波予報・揺れの報告の表示が無く、デモでもない (BGM・バナーなど平時の楽しみを出してよい)。
+ * calm: quiet で、しかも過去の地震を選んでいない (気象警報・注意報の地図を出す)。tsunami: 津波予報が出ている。
+ * feeling は揺れの報告 (地震感知情報) を出しているか
+ */
+export function calmState(now: number, feeling: boolean): { quiet: boolean; calm: boolean; tsunami: boolean } {
+  const tsunami = activeAreas(app.world.tsunami).length > 0;
+  const settled = unsettledGroups(now).length === 0 && activeEews(now).length === 0 && waveSources(now).length === 0;
+  const quiet = !app.demo && !feeling && !tsunami && settled;
+  return { quiet, calm: quiet && !app.selectedKey, tsunami };
 }
