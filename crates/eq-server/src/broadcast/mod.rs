@@ -108,7 +108,15 @@ async fn session(cfg: &BroadcastConfig, output: &[String], secrets: &[String]) -
                 frame = chrome::decode_base64(&data)?;
             }
             // 変化が無くても同じ画面を送り続け、fps を一定にする (ffmpeg は枚数から時刻を決める)
-            _ = tick.tick(), if !frame.is_empty() => stdin.write_all(&frame).await.context("writing to ffmpeg")?,
+            _ = tick.tick(), if !frame.is_empty() => {
+                if stdin.write_all(&frame).await.is_err() {
+                    // ffmpeg が止まった。理由は ffmpeg の出力に出ているので、残りを読んでから終える
+                    while let Ok(Some(l)) = log.next_line().await {
+                        tracing::warn!("ffmpeg: {}", redact(&l, secrets));
+                    }
+                    anyhow::bail!("ffmpeg exited: {}", ffmpeg.wait().await?);
+                }
+            }
             line = log.next_line() => match line? {
                 Some(l) => tracing::warn!("ffmpeg: {}", redact(&l, secrets)),
                 None => anyhow::bail!("ffmpeg exited: {}", ffmpeg.wait().await?),
@@ -138,6 +146,10 @@ fn ffmpeg_args(cfg: &BroadcastConfig, output: &[String]) -> Vec<String> {
         a.extend(cfg.audio.iter().cloned());
     }
     a.extend(s(&["-map", "0:v", "-map", "1:a"]));
+    // 画面の大きさをそろえる (Chrome の最初の画面は表示の大きさを決める前のもので、縦が足りないことがある)
+    let (w, h) = (cfg.width, cfg.height);
+    let fit = format!("scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1");
+    a.extend(["-vf".to_string(), fit]);
     a.extend(cfg.encode.iter().cloned());
     // YouTube などはキーフレームの間隔を 4 秒以下に求める (2 秒ごとにする)
     let gop = (cfg.fps.max(1) * 2).to_string();
