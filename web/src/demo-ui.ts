@@ -72,7 +72,7 @@ export function renderDemoPanel(): void {
     .map(
       (s) => `<li class="${s.id === d.running ? "running" : ""}"><div class="demo-text"><b>${esc(s.name)}</b><div class="muted">${esc(
         s.description,
-      )}</div></div><button type="button" class="follow" data-id="${esc(s.id)}">${s.id === d.running ? "再生中" : "実行"}</button></li>`,
+      )}</div>${s.source ? `<div class="muted">出典: ${esc(s.source)}</div>` : ""}</div><button type="button" class="follow" data-id="${esc(s.id)}">${s.id === d.running ? "再生中" : "実行"}</button></li>`,
     )
     .join("");
   const list = $("#demo-list");

@@ -11,6 +11,8 @@ export interface ScenarioSummary {
   id: string;
   name: string;
   description: string;
+  /** 過去の地震の記録を再生する場面の出典 */
+  source?: string;
 }
 
 export interface Scenario extends ScenarioSummary {
@@ -65,19 +67,39 @@ function shift(e: EqEvent, issuedDelta: number, originDelta: number, run: number
   }
 }
 
+/**
+ * 実時刻 t を再生の時刻に写す。timeline は各報の [実時刻, 再生時刻] (時刻順)。
+ * 詰めた間に入る時刻は、次の報までの間隔を保つ側に寄せる (後から起きた地震の発生時刻が、自分の最初の報より後にならない)
+ */
+function playAt(t: number, timeline: [number, number][]): number {
+  const i = timeline.findIndex(([rec]) => rec > t);
+  if (i === 0) return timeline[0][1] - (timeline[0][0] - t);
+  const [prevRec, prevAt] = timeline[(i === -1 ? timeline.length : i) - 1];
+  if (i === -1) return prevAt + (t - prevRec);
+  const [nextRec, nextAt] = timeline[i];
+  return Math.max(prevAt, Math.min(prevAt + (t - prevRec), nextAt - (nextRec - t)));
+}
+
 /** 再生の予定: at (再生開始からのミリ秒) と、その時刻に届いたことにする情報。run は再生ごとの番号 (ID の重複を避ける) */
 export function schedule(events: EqEvent[], now: number, run: number): { at: number; event: EqEvent }[] {
-  const out: { at: number; event: EqEvent }[] = [];
+  const ats: number[] = [];
+  const timeline: [number, number][] = [];
   let at = 0;
   let prev: number | null = null;
-  let originDelta: number | null = null;
   for (const e of events) {
     const rec = issuedMs(e);
     if (prev != null && rec != null && rec > prev) at += Math.min(rec - prev, MAX_GAP_MS);
-    if (rec != null) prev = rec;
-    const issuedDelta = rec == null ? 0 : now + at - rec;
-    originDelta ??= rec == null ? null : issuedDelta;
-    out.push({ at, event: { ...shift(e, issuedDelta, originDelta ?? issuedDelta, run), received_at_ms: now + at } });
+    if (rec != null) {
+      prev = rec;
+      timeline.push([rec, at]);
+    }
+    ats.push(at);
   }
-  return out;
+  return events.map((e, i) => {
+    const rec = issuedMs(e);
+    const issuedDelta = rec == null ? 0 : now + ats[i] - rec;
+    const origin = "origin_time_ms" in e ? e.origin_time_ms : null;
+    const originDelta = origin != null && timeline.length ? now + playAt(origin, timeline) - origin : issuedDelta;
+    return { at: ats[i], event: { ...shift(e, issuedDelta, originDelta, run), received_at_ms: now + ats[i] } };
+  });
 }
