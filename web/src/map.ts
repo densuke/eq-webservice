@@ -59,7 +59,7 @@ export function unproject(x: number, y: number): { lat: number; lon: number } {
   return { lon: x / KX + LON0, lat: LAT0 - y / KY };
 }
 
-function el<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number> = {}) {
+export function el<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number> = {}) {
   const e = document.createElementNS(SVG_NS, tag);
   for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v));
   return e;
@@ -121,6 +121,9 @@ export class JapanMap {
   private warns = new Map<string, SVGPathElement>();
   private warnText = new Map<string, string>();
   private warnSig = "";
+  /** 平時の天気: 雨の地点 (本図の層なので別枠にも映る) と主要都市の天気 (画面上で同じ大きさ) */
+  readonly rainLayer = el("g", { class: "rain" });
+  readonly cityLayer = el("g", { class: "cities" });
   private feels: SVGGElement[] = [];
   private feelSig = "[]";
   private epicenterSig = "";
@@ -147,8 +150,8 @@ export class JapanMap {
     // 外部の CSS は <use> の複製に効かないので、図形のスタイルは SVG の中に置く
     const style = el("style");
     style.textContent = mapCss;
-    base.append(style, this.neighborLayer, this.prefLayer, this.warnLayer, this.areaLayer, this.tsunamiLayer, this.dotLayer);
-    this.svg.append(base, this.waveLayer, this.labelLayer, this.markerLayer);
+    base.append(style, this.neighborLayer, this.prefLayer, this.warnLayer, this.rainLayer, this.areaLayer, this.tsunamiLayer, this.dotLayer);
+    this.svg.append(base, this.waveLayer, this.labelLayer, this.cityLayer, this.markerLayer);
     for (const ins of INSETS) {
       const [x0, y0] = project(ins.lonMin, ins.latMax);
       const [x1, y1] = project(ins.lonMax, ins.latMin);
@@ -364,6 +367,17 @@ export class JapanMap {
             t.textContent = String(m.label);
             g.append(t);
           }
+          return g;
+        }),
+      // 主要都市の天気 (那覇など)
+      ...[...this.cityLayer.children]
+        .filter((c) => {
+          const [x, y] = [Number((c as SVGElement).dataset.x), Number((c as SVGElement).dataset.y)];
+          return x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1;
+        })
+        .map((c) => {
+          const g = c.cloneNode(true) as SVGGElement;
+          g.setAttribute("transform", `translate(${g.dataset.x} ${g.dataset.y}) scale(${k})`);
           return g;
         }),
     );
@@ -707,9 +721,16 @@ export class JapanMap {
     this.updateMarkerScale();
   }
 
+  /** 主要都市の天気を差し替えたあと、大きさと別枠を合わせる */
+  refreshCities(): void {
+    this.updateInsets();
+    this.updateMarkerScale();
+  }
+
   private updateMarkerScale(): void {
     const k = this.unitsPerPixel();
-    for (const g of [...this.epicenters, ...this.feels, ...(this.home ? [this.home] : [])]) {
+    const cities = [...this.cityLayer.children] as SVGGElement[];
+    for (const g of [...this.epicenters, ...this.feels, ...cities, ...(this.home ? [this.home] : [])]) {
       const { x, y, k: size } = g.dataset;
       g.setAttribute("transform", `translate(${x} ${y}) scale(${k * Number(size)})`);
     }

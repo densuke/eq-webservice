@@ -19,6 +19,7 @@ import { confidenceGrade, latestUserquake, userquakeShown } from "./userquake.ts
 import { type Warnings, topLevel, warningSummary } from "./warnings.ts";
 import { loadBgmConfig, updateBgm } from "./bgm.ts";
 import { loadBanners, updateBanner } from "./banner.ts";
+import { loadCityWeather, renderCityWeather } from "./weather-layer.ts";
 import { numTag, renderBanner, renderDetail, renderList, renderMode, renderTsunamiBanner, updatePointsOpen } from "./view.ts";
 import { latestEew, summarizeQuake } from "./groups.ts";
 
@@ -75,6 +76,7 @@ export function tick(): void {
   const { calm, quiet } = renderWarnings(now, renderUserquake(now));
   updateBgm(quiet);
   updateBanner(quiet);
+  renderCityWeather(calm, now);
   map.setFade(app.selectedKey ? 1 : calm ? 0 : fadeOpacity(now - displayedInfoMs()));
   renderMode();
   renderSound();
@@ -324,6 +326,8 @@ hooks.onEvents = onEvents;
 loadTelop();
 // 気象警報・注意報は 5 分ごとに取り直す
 window.setInterval(() => void loadWarnings().catch(() => {}), 5 * 60_000);
+// 主要都市の天気とアメダスの雨も 5 分ごと (サーバは 10 分ごとに取得)
+window.setInterval(() => void loadCityWeather().catch(() => {}), 5 * 60_000);
 
 Promise.all([
   map.load("japan.geojson"),
@@ -335,6 +339,7 @@ Promise.all([
   loadStations().catch(() => {}),
   loadUserquakeAreas().catch(() => {}),
   loadWarnings().catch(() => {}),
+  loadCityWeather().catch(() => {}),
   loadBgmConfig().catch(() => {}),
   loadBanners().catch(() => {}),
 ])

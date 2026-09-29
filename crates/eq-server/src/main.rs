@@ -1,6 +1,7 @@
 mod banner;
 mod bgm;
 mod bgm_send;
+mod city_weather;
 mod cli;
 mod config;
 mod demo;
@@ -73,6 +74,11 @@ async fn main() -> anyhow::Result<()> {
         weather::spawn(cfg.weather.clone(), warnings.clone());
     }
     routes.push(weather::router(warnings));
+    let city = city_weather::Shared::default();
+    if cfg.weather.enabled {
+        city_weather::spawn(city.clone());
+    }
+    routes.push(city_weather::router(city));
     routes.push(bgm::router(&cfg.bgm));
     routes.push(banner::router(&cfg.banner));
 
