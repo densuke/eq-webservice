@@ -140,6 +140,9 @@ struct RawPoint {
     #[serde(default)]
     is_area: bool,
     scale: i32,
+    /// 過去の記録のデモ用の拡張 (P2P地震情報には無い): 観測点の位置と細分区域
+    #[serde(default)]
+    station: Option<StationPos>,
 }
 
 #[derive(Deserialize, Default)]
@@ -193,6 +196,7 @@ impl From<RawQuake> for Quake {
                 addr: p.addr,
                 is_area: p.is_area,
                 scale: Scale(p.scale),
+                station: p.station,
             })
             .collect();
         let pref_max = aggregate_pref_max(points.iter().map(|p| (p.pref.as_str(), p.scale)));
@@ -406,6 +410,25 @@ mod tests {
         {"addr": "福島金山町川口", "isArea": false, "pref": "福島県", "scale": 10}
       ]
     }"#;
+
+    #[test]
+    fn keeps_station_position_given_in_past_records() {
+        let json = QUAKE.replace(
+            r#"{"addr": "福島金山町川口", "isArea": false, "pref": "福島県", "scale": 10}"#,
+            r#"{"addr": "旧観測点", "isArea": false, "pref": "福島県", "scale": 10, "station": {"lat": 37.1, "lon": 139.2, "area": "福島県会津"}}"#,
+        );
+        let ev = parse(&json).unwrap().unwrap();
+        let EventBody::Quake(q) = &ev.body else { panic!() };
+        assert_eq!(q.points[0].station, None);
+        assert_eq!(
+            q.points[2].station,
+            Some(StationPos {
+                lat: 37.1,
+                lon: 139.2,
+                area: "福島県会津".into()
+            })
+        );
+    }
 
     #[test]
     fn parses_quake() {

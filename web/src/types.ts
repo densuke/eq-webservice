@@ -20,6 +20,8 @@ export interface ObservationPoint {
   addr: string;
   is_area: boolean;
   scale: Scale;
+  /** 過去の記録のデモだけ: 今は無い観測点の位置と細分区域 */
+  station?: { lat: number; lon: number; area: string };
 }
 
 interface EventBase {

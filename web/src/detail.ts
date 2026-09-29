@@ -38,7 +38,7 @@ export function quakeDetail(points: ObservationPoint[], stations: Map<string, St
       areas.push({ name: p.addr, scale: p.scale });
       continue;
     }
-    const s = stations.get(p.addr);
+    const s = p.station ?? stations.get(p.addr);
     if (!s) {
       missing.push(p.addr);
       continue;

@@ -40,6 +40,8 @@ export interface Scene {
   t: number | null;
   shaken: Box | null;
   replay: boolean;
+  /** 緊急地震速報の予測: 予測の出た地域 (shaken) を最初から収める (S波に合わせて引くのを待たない) */
+  forecast?: boolean;
 }
 
 /** いま地図で見せる地震。null なら日本全体 */
@@ -63,6 +65,7 @@ export function scene(now: number): Scene | null {
         t: mine ? (now - mine.origin) / 1000 : null,
         shaken: map.prefBox(geo.prefs),
         replay: false,
+        forecast: g.kind === "eew",
       };
     }
   }
@@ -80,6 +83,7 @@ export function scene(now: number): Scene | null {
     t: src ? (now - src.origin) / 1000 : null,
     shaken: geo ? map.prefBox(geo.prefs) : null,
     replay: false,
+    forecast: g.kind === "eew",
   };
 }
 
@@ -96,5 +100,6 @@ export function renderScene(sc: Scene | null): { box: Box | null; waving: boolea
   const wave = (w: Center, t: number) => ({ ...w, pKm: surfaceRadiusKm(VP_KM_S, w.depth, t), sKm: surfaceRadiusKm(VS_KM_S, w.depth, t) });
   map.setWaves([wave(c, sc.t!), ...sc.others.map((o) => wave(o, (now() - o.origin) / 1000))]);
   $("#wave-info").textContent = sc.replay ? `再生中 ${sc.t!.toFixed(0)}秒 (×${REPLAY_SPEED})` : `発生から${sc.t!.toFixed(0)}秒`;
-  return { box: pad(pointBox(x, y, followRadiusKm(s, stop))), waving };
+  const follow = pointBox(x, y, followRadiusKm(s, stop));
+  return { box: pad(sc.forecast ? union(follow, sc.shaken)! : follow), waving };
 }

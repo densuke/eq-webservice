@@ -19,42 +19,35 @@ ORDER = ["1", "2", "3", "4", "5-", "5+", "6-", "6+", "7"]
 
 
 def fetch_text(event_id: str) -> str:
+    """ページの文字だけを 1 行に (年によって表の 1 マスごとに改行があるので、空白と改行を 1 つの空白にそろえる)"""
     url = f"{BASE}/{event_id[:4]}/{event_id[4:6]}/{event_id}/content/content_out.html"
     with urllib.request.urlopen(url, timeout=30) as res:
         s = res.read().decode("utf-8", "replace")
     s = re.sub(r"<(script|style)[\s\S]*?</\1>", "", s)
-    s = re.sub(r"<br\s*/?>|</tr>|</p>|</h\d>", "\n", s)
     s = html.unescape(re.sub(r"<[^>]+>", " ", s))
-    s = re.sub(r"[ \t　]+", " ", s)
-    return re.sub(r"\n\s*\n+", "\n", s).translate(Z2H)
+    return re.sub(r"\s+", " ", s).translate(Z2H)
 
 
 def parse_notes(text: str) -> dict[str, list[dict]]:
-    """※番号 -> [{Chiiki, Shindo1 (上限), Shindo2 (下限)}]。長周期地震動の行は使わない"""
+    """※番号 -> [{Chiiki, Shindo1 (上限), Shindo2 (下限)}]。長周期地震動は使わない"""
+    start = re.search(r"※1 (震度|長周期)", text)
+    if not start:
+        return {}
     notes: dict[str, list[dict]] = {}
-    cur: list[dict] | None = None
-    for line in text.splitlines():
-        line = line.strip()
-        m = re.match(r"※(\d+) (.*)", line)
-        if m:
-            cur = notes.setdefault(m.group(1), [])
-            line = m.group(2)
-        if cur is None:
-            continue
-        m = re.match(r"震度(\d[弱強]?)(?:から(\d[弱強]?))?程度(以上)? (.+)", line)
-        if not m:
-            continue
-        lo, hi = SHINDO[m.group(1)], SHINDO[m.group(2) or m.group(1)]
-        cur.extend({"Chiiki": a, "Shindo1": hi, "Shindo2": lo} for a in m.group(4).split("、"))
+    for n, body in re.findall(r"※(\d+) (.*?)(?= ※\d+ |$)", text[start.start():]):
+        notes[n] = [
+            {"Chiiki": a, "Shindo1": SHINDO[hi or lo], "Shindo2": SHINDO[lo]}
+            for lo, hi, _, areas in re.findall(r"(?<!最大)震度(\d[弱強]?)(?:から(\d[弱強]?))?程度(以上)? (\S+)", body)
+            for a in areas.split("、")
+        ]
     return notes
 
 
 def parse_reports(text: str) -> list[dict]:
-    """[{serial, time (HH:MM:SS), lat, lon, depth, mag, note (※番号 or None)}]"""
+    """[{serial, time (HH:MM:SS), lat, lon, depth, mag, note (※番号 or None), top (「最大震度X程度以上」の X or None)}]"""
     rows = re.findall(
-        r"^ ?(\d+) (\d+)時(\d+)分([\d.]+)秒 [\d.]+ ([\d.]+) ([\d.]+) (\d+)km ([\d.]+|不明) (※(\d+)|予測震度なし)",
+        r"(\d+) (\d+)時(\d+)分([\d.]+)秒 [\d.]+ ([\d.]+) ([\d.]+) (\d+)km ([\d.]+|不明) (※(\d+)|予測震度なし|最大震度(\d[弱強]?)程度以上)",
         text,
-        re.M,
     )
     return [
         {
@@ -65,13 +58,14 @@ def parse_reports(text: str) -> list[dict]:
             "depth": int(dep),
             "mag": None if mag == "不明" else float(mag),
             "note": note or None,
+            "top": SHINDO[top] if top else None,
         }
-        for n, h, mi, sec, lat, lon, dep, mag, _, note in rows
+        for n, h, mi, sec, lat, lon, dep, mag, _, note, top in rows
     ]
 
 
 def warning_serials(text: str) -> list[int]:
-    m = re.search(r"背景が灰色\[?(.*?)\]", text.replace(" ", ""))
+    m = re.search(r"背景が灰色\[(.*?)\]", text.replace(" ", ""))
     return [int(x) for x in re.findall(r"第(\d+)報", m.group(1))] if m else []
 
 
@@ -84,7 +78,7 @@ def to_wolfx(event_id: str, date: str, origin: str, hypocenter: str) -> list[dic
     out = []
     for i, r in enumerate(reports):
         areas = notes.get(r["note"], []) if r["note"] else []
-        top = max((a["Shindo1"] for a in areas), key=ORDER.index, default="不明")
+        top = max((a["Shindo1"] for a in areas), key=ORDER.index, default=r["top"] or "不明")
         warn = r["serial"] >= first_warn
         out.append(
             {

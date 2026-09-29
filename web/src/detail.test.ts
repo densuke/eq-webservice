@@ -24,6 +24,13 @@ test("stations become dots and the max per area colors the area", () => {
   assert.deepEqual(d.missing, ["未登録の観測点"]);
 });
 
+test("a point that carries its own position (old stations in past records) is drawn without the station list", () => {
+  const old: ObservationPoint = { ...pt("栗原市築館（旧）＊", 70), station: { lat: 38.73, lon: 141.02, area: "宮城県北部" } };
+  const d = quakeDetail([old], stations);
+  assert.deepEqual(d.dots, [{ name: "栗原市築館（旧）＊", lat: 38.73, lon: 141.02, scale: 70 }]);
+  assert.deepEqual(d.areas, [{ name: "宮城県北部", scale: 70 }]);
+});
+
 test("scale prompt reports areas directly", () => {
   const d = quakeDetail([pt("茨城県南部", 40, true), pt("茨城県南部", 30, true)], stations);
   assert.deepEqual(d.areas, [{ name: "茨城県南部", scale: 40 }]);
