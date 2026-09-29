@@ -45,11 +45,11 @@ export function updateNumbers(now: number): boolean {
 }
 
 /** 地図に塗っている地震の発生時刻 (無ければ受信時刻) */
-export function displayedOriginMs(): number {
+/** 表示中の地震の塗りを薄くし始める起点: 最後の情報が届いた時刻 (震度が後から届いても、届いた震度は見えるように) */
+export function displayedInfoMs(): number {
   const g = currentGroup();
   const q = g && relatedQuake(g);
-  if (!q) return 0;
-  return geoOf(q)?.origin ?? q.updatedAt;
+  return q ? q.updatedAt : 0;
 }
 
 export function currentGroup(): Group | undefined {

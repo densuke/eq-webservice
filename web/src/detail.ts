@@ -55,6 +55,17 @@ export function overlayForecast(observed: AreaScale[], forecast: AreaScale[]): (
   return [...observed.map((o) => ({ ...o, forecast: false })), ...forecast.filter((f) => !seen.has(f.name)).map((f) => ({ ...f, forecast: true }))];
 }
 
+/** 予測を残す上限 (観測の震度がまだ届かないとき。震度の塗りが消えるまでと同じ 1 時間) */
+export const FORECAST_KEEP_MS = 60 * 60_000;
+
+/**
+ * 地震情報を表示しているときに、同じ地震の緊急地震速報の予測を重ねて残すか。
+ * 速報が続いている間 (active) は残す。速報が終わっても、観測の震度がまだ届いていなければ (震源の情報だけなど) 上限まで残す
+ */
+export function keepForecast(active: boolean, observed: boolean, sinceLastReportMs: number): boolean {
+  return active || (!observed && sinceLastReportMs <= FORECAST_KEEP_MS);
+}
+
 /** 続報で外された予測の地域を、外されてからこの時間は薄れながら残す (いきなり消えると不自然なので) */
 export const DROPPED_MS = 8000;
 

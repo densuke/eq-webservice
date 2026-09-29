@@ -8,7 +8,7 @@ import { fadeOpacity } from "./fade.ts";
 import { esc } from "./html.ts";
 import { notify, renderCountdown, updateHome } from "./personal-ui.ts";
 import { sameQuake } from "./priority.ts";
-import { activeEews, currentGroup, displayedOriginMs, placeOf, priorityGroups, updateNumbers, updateTour } from "./quakes.ts";
+import { activeEews, currentGroup, displayedInfoMs, placeOf, priorityGroups, updateNumbers, updateTour } from "./quakes.ts";
 import { renderMarkers, renderScene, scene } from "./scene.ts";
 import { play } from "./sound.ts";
 import { $, map } from "./dom.ts";
@@ -67,7 +67,7 @@ export function tick(): void {
     $("#wave-info").textContent = "";
   }
   map.setTarget(box);
-  map.setFade(app.selectedKey ? 1 : fadeOpacity(now - displayedOriginMs()));
+  map.setFade(app.selectedKey ? 1 : fadeOpacity(now - displayedInfoMs()));
   renderMode();
   renderSound();
   renderCountdown(now);
