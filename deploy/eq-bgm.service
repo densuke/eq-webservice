@@ -1,0 +1,25 @@
+# 平時の BGM の送り出し (systemd ユニット例)。前処理した MP3 を Icecast へ送り続ける。
+#   Icecast (icecast2) は 127.0.0.1 だけで待ち受け、source-password を変えておく。
+#   パスワードは /etc/default/eq-bgm に ICECAST_SOURCE_PASSWORD=... と書く (権限は 600)
+#   sudo cp deploy/eq-bgm.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now eq-bgm
+[Unit]
+Description=eq-server bgm-send (平時の BGM を Icecast へ送る)
+After=network-online.target icecast2.service
+
+[Service]
+Type=simple
+User=eq
+ExecStart=/opt/eq-server/eq-server bgm-send /opt/eq-server/data/bgm-mp3 http://127.0.0.1:8010/bgm.mp3
+EnvironmentFile=/etc/default/eq-bgm
+Environment=RUST_LOG=info
+Restart=always
+RestartSec=10
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

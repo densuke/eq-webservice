@@ -7,6 +7,8 @@ use anyhow::Context;
 pub const USAGE: &str = "\
 usage: eq-server [options]
        eq-server convert <samples/scenarios> <web/public/demo>   (デモモード用の JSON を作る)
+       eq-server bgm-send <MP3 のディレクトリ> <http://127.0.0.1:8010/bgm.mp3>
+                                                          (平時の BGM を Icecast へ送る。パスワードは ICECAST_SOURCE_PASSWORD)
 
 options:
   -c, --config <path>      設定ファイル (省略時は ./config.toml、無ければ既定値)

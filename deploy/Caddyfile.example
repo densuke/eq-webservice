@@ -13,3 +13,19 @@ eq.example.jp {
 # 		reverse_proxy 127.0.0.1:8080
 # 	}
 # }
+
+# 平時の BGM (Icecast を 127.0.0.1:8010 で待ち受け) を同じサイトの /stream/ で中継する場合
+# (config.toml の [bgm] stream = "stream/bgm.mp3", status = "stream/status-json.xsl")
+# eq.example.jp {
+# 	@stream path /stream/bgm.mp3 /stream/status-json.xsl
+# 	handle @stream {
+# 		uri strip_prefix /stream
+# 		reverse_proxy 127.0.0.1:8010 {
+# 			flush_interval -1
+# 		}
+# 	}
+# 	handle {
+# 		encode zstd gzip
+# 		reverse_proxy 127.0.0.1:8080
+# 	}
+# }

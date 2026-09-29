@@ -1,93 +1,63 @@
-// 平時の BGM。サーバに置いた曲をファイル名順に流し、曲の変わり目はクロスフェードでつなぐ。
-// 地震の表示の間とデモ中は直ちに一時停止し (警戒音を優先)、平時に戻れば続きから少しずつ音を上げて流す。
+// 平時の BGM。音楽は Icecast が配信し、この画面はその配信を鳴らすだけ。
+// 地震の表示の間とデモ中は直ちに止め (警戒音を優先。配信の受信もやめる)、平時に戻ればそのときの放送から少しずつ音を上げて流す。
 
 import { $, tapWord } from "./dom.ts";
 import { saveSettings } from "./personal.ts";
-import { nextTrack } from "./playlist.ts";
 import { app } from "./state.ts";
 
-interface Track {
-  file: string;
-  title: string;
-  artist: string | null;
+interface BgmConfig {
+  /** 配信の URL (同じサイトの中) */
+  stream: string;
+  /** 再生中の曲名を取る Icecast の状態 (status-json.xsl)。空なら曲名は出さない */
+  status: string;
 }
 
-/** 曲の変わり目で重ねる秒数 */
-const CROSSFADE_SEC = 3;
-/** 平時に戻って再開するときに音を上げる秒数 */
-const RESUME_FADE_SEC = 1;
+/** 流し始めるときに音を上げる秒数 */
+const FADE_IN_SEC = 1;
+/** 曲名を取り直す間隔 */
+const TITLE_MS = 15_000;
+/** 配信が途切れたときにつなぎ直すまで */
+const RETRY_MS = 5_000;
 
-/** 交互に使う 2 つのプレイヤー (次の曲を重ねて流すため) */
-const players = [new Audio(), new Audio()];
-const playing: (Track | null)[] = [null, null];
-let cur = 0;
-let tracks: Track[] = [];
+const audio = new Audio();
+let cfg: BgmConfig | null = null;
 /** ブラウザに再生を止められた (利用者が一度操作するまで流せない) */
 let blocked = false;
-/** 再生を始めている途中 (play() の結果待ち) */
+/** 流し始めている途中 (play() の結果待ち) */
 let starting = false;
 /** 平時か (流してよいか) */
 let allowed = false;
-/** 音量を変えている最中のタイマー */
+let retryAt = 0;
+let title = "";
+let titleAt = 0;
 let fadeTimer = 0;
 
 const level = () => app.settings.bgmVolume / 100;
+const wanted = () => cfg != null && app.settings.bgm && allowed;
 
-/** 曲の一覧を取り直す (サーバは毎回ディレクトリを読み直すので、差し替えた曲もここで入る) */
-export async function loadTracks(): Promise<void> {
+export async function loadBgmConfig(): Promise<void> {
   const res = await fetch("api/bgm");
-  tracks = res.ok ? await res.json() : [];
+  cfg = res.ok ? await res.json() : null;
   renderBgm();
 }
 
-/** 音量を sec 秒かけて変える。steps は [プレイヤー, 始め, 終わり]。終わったら done */
-function fade(steps: [HTMLAudioElement, number, number][], sec: number, done?: () => void): void {
-  clearInterval(fadeTimer);
-  const start = performance.now();
-  const tick = () => {
-    const k = Math.min(1, (performance.now() - start) / (sec * 1000));
-    for (const [p, from, to] of steps) p.volume = Math.max(0, Math.min(1, from + (to - from) * k));
-    if (k >= 1) {
-      clearInterval(fadeTimer);
-      done?.();
-    }
-  };
-  tick();
-  fadeTimer = window.setInterval(tick, 50);
-}
-
-/** 次の曲へ。crossfade なら今の曲に重ねて入れ替える */
-async function playNext(crossfade: boolean): Promise<void> {
-  if (starting) return;
+/** 配信を最初からつなぐ (受信を止めていたので、そのときの放送から) */
+async function start(): Promise<void> {
+  if (starting || !cfg || !wanted()) return;
   starting = true;
-  await loadTracks().catch(() => {});
-  const file = nextTrack(
-    tracks.map((t) => t.file),
-    playing[cur]?.file ?? null,
-  );
-  const track = tracks.find((t) => t.file === file) ?? null;
-  const old = players[cur];
-  const next = 1 - cur;
-  const p = players[next];
-  if (!track || !allowed || !app.settings.bgm) {
-    starting = false;
-    return renderBgm();
-  }
-  p.src = `bgm/${encodeURIComponent(track.file)}`;
-  p.volume = crossfade ? 0 : level();
+  clearInterval(fadeTimer);
+  audio.src = `${cfg.stream}?t=${Date.now()}`;
+  audio.volume = 0;
   try {
-    await p.play();
+    await audio.play();
     blocked = false;
-    playing[next] = track;
-    cur = next;
-    if (crossfade && !old.paused) {
-      fade([
-        [p, 0, level()],
-        [old, old.volume, 0],
-      ], CROSSFADE_SEC, () => old.pause());
-    } else {
-      old.pause();
-    }
+    const t0 = performance.now();
+    fadeTimer = window.setInterval(() => {
+      const k = Math.min(1, (performance.now() - t0) / (FADE_IN_SEC * 1000));
+      audio.volume = level() * k;
+      if (k >= 1) clearInterval(fadeTimer);
+    }, 50);
+    titleAt = 0;
   } catch {
     // 自動再生の制限 (NotAllowedError) など。利用者の操作を待つ
     blocked = true;
@@ -96,68 +66,61 @@ async function playNext(crossfade: boolean): Promise<void> {
   renderBgm();
 }
 
-/** 止めていた曲を続きから流す (音を少しずつ上げる) */
-async function resume(): Promise<void> {
-  const p = players[cur];
-  if (starting || !playing[cur]) return;
-  starting = true;
-  p.volume = 0;
-  try {
-    await p.play();
-    blocked = false;
-    fade([[p, 0, level()]], RESUME_FADE_SEC);
-  } catch {
-    blocked = true;
-  }
-  starting = false;
-  renderBgm();
-}
-
-function stopAll(): void {
+/** 止めて、配信の受信もやめる */
+function stop(): void {
   clearInterval(fadeTimer);
-  for (const p of players) if (!p.paused) p.pause();
+  if (!audio.paused || audio.getAttribute("src")) {
+    audio.pause();
+    audio.removeAttribute("src");
+    audio.load();
+  }
 }
 
 /** 画面の更新 (tick) ごと: 平時なら流し、そうでなければ直ちに止める */
 export function updateBgm(quiet: boolean): void {
   allowed = quiet;
-  const want = app.settings.bgm && quiet && tracks.length > 0;
-  if (!want) stopAll();
-  else if (!playing[cur]) void playNext(false);
-  else if (players[cur].paused && !blocked) void resume();
+  if (!wanted()) stop();
+  else if (audio.paused && !blocked && Date.now() >= retryAt) void start();
+  if (!audio.paused && cfg?.status && Date.now() - titleAt > TITLE_MS) void loadTitle();
+  renderBgm();
+}
+
+/** 再生中の曲名 (Icecast の状態。日本語は &#12486; のような文字参照で来るので戻す) */
+async function loadTitle(): Promise<void> {
+  titleAt = Date.now();
+  try {
+    const res = await fetch(cfg!.status, { cache: "no-store" });
+    const s = (await res.json())?.icestats?.source;
+    const raw: unknown = Array.isArray(s) ? s[0]?.title : s?.title;
+    title = typeof raw === "string" ? raw.replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n))) : "";
+  } catch {
+    title = "";
+  }
   renderBgm();
 }
 
 function renderBgm(): void {
   const btn = $("#bgm");
-  btn.hidden = tracks.length === 0;
+  btn.hidden = cfg == null;
   const text = !app.settings.bgm ? "BGM OFF" : blocked ? `BGM ON (${tapWord}で開始)` : "BGM ON";
   if (btn.textContent !== text) btn.textContent = text;
   btn.classList.toggle("active", app.settings.bgm && !blocked);
   btn.classList.toggle("waiting", app.settings.bgm && blocked);
-  const t = playing[cur];
-  const on = t != null && !players[cur].paused;
-  const name = t ? `${t.title}${t.artist ? ` / ${t.artist}` : ""}` : "";
+  const on = !audio.paused;
+  const now = on ? `BGM: ${title || "再生中"}` : "";
   const label = $("#bgm-now");
-  const now = on ? `BGM: ${name}` : "";
   if (label.textContent !== now) label.textContent = now;
   label.hidden = !on;
-  btn.title = on ? `再生中: ${name}` : "平時に BGM を流します (地震の表示の間は止まります)";
+  btn.title = on && title ? `再生中: ${title}` : "平時に BGM を流します (地震の表示の間は止まります)";
 }
 
-for (const [i, p] of players.entries()) {
-  p.preload = "auto";
-  // 終わりが近づいたら次の曲を重ねる (短すぎる曲は重ねずに終わってから次へ)
-  p.addEventListener("timeupdate", () => {
-    if (i !== cur || starting || !Number.isFinite(p.duration) || p.duration < CROSSFADE_SEC * 3) return;
-    if (p.duration - p.currentTime <= CROSSFADE_SEC) void playNext(true);
-  });
-  p.addEventListener("ended", () => {
-    if (i === cur) void playNext(false);
-  });
-  // 読めない曲は少し待って次へ (全部読めないときに詰めて繰り返さないように)
-  p.addEventListener("error", () => {
-    if (i === cur) window.setTimeout(() => void playNext(false), 3000);
+// 配信が途切れたら (送り出しの再起動など) 少し待ってつなぎ直す
+for (const ev of ["error", "ended"]) {
+  audio.addEventListener(ev, () => {
+    // src が無いのは止めたとき (受信をやめた後始末) なので、つなぎ直さない
+    if (!wanted() || !audio.getAttribute("src")) return;
+    retryAt = Date.now() + RETRY_MS;
+    stop();
   });
 }
 
@@ -167,9 +130,9 @@ $("#bgm").addEventListener("click", () => {
   app.settings = { ...app.settings, bgm: on };
   saveSettings(app.settings);
   blocked = false;
-  if (!on) stopAll();
-  else if (playing[cur]) void resume();
-  else void playNext(false);
+  retryAt = 0;
+  if (!on) stop();
+  else void start();
   renderBgm();
 });
 
@@ -179,7 +142,7 @@ volume.addEventListener("input", () => {
   app.settings = { ...app.settings, bgmVolume: Number(volume.value) };
   saveSettings(app.settings);
   clearInterval(fadeTimer);
-  players[cur].volume = level();
+  audio.volume = level();
 });
 
 // 前回 BGM を ON にしていて自動再生を止められたときは、画面のどこかを操作したら流す
@@ -188,7 +151,6 @@ document.addEventListener("pointerdown", (e) => {
   if ((e.target as Element).closest("#bgm")) return;
   if (blocked && app.settings.bgm) {
     blocked = false;
-    if (playing[cur]) void resume();
-    else void playNext(false);
+    void start();
   }
 });

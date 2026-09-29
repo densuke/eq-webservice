@@ -17,7 +17,7 @@ import { activeAreas, latestTsunami, tsunamiAlert } from "./tsunami.ts";
 import type { EewEvent, EqEvent, UserquakeEvent } from "./types.ts";
 import { confidenceGrade, latestUserquake, userquakeShown } from "./userquake.ts";
 import { topLevel } from "./warnings.ts";
-import { loadTracks, updateBgm } from "./bgm.ts";
+import { loadBgmConfig, updateBgm } from "./bgm.ts";
 import { loadBanners, updateBanner } from "./banner.ts";
 import { numTag, renderBanner, renderDetail, renderList, renderMode, renderTsunamiBanner, updatePointsOpen } from "./view.ts";
 import { latestEew, summarizeQuake } from "./groups.ts";
@@ -315,7 +315,7 @@ Promise.all([
   loadStations().catch(() => {}),
   loadUserquakeAreas().catch(() => {}),
   loadWarnings().catch(() => {}),
-  loadTracks().catch(() => {}),
+  loadBgmConfig().catch(() => {}),
   loadBanners().catch(() => {}),
 ])
   .catch((err) => {

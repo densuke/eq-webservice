@@ -77,10 +77,12 @@ enabled = true
 # feed_url = "https://www.data.jma.go.jp/developer/xml/feed/regular.xml"
 # interval_sec = 300
 
-# 平時の BGM。ディレクトリの音声ファイルをファイル名順に流す (いつでも差し替え可)。空なら使わない
+# 平時の BGM。音楽は Icecast が配信し (送り出しは eq-server bgm-send、前処理は tools/bgm_prepare.sh)、画面はその URL を鳴らす。
+# 同じサイトの中の URL にする (リバースプロキシで Icecast へ中継する)。空なら使わない
 [bgm]
-dir = ""
-# dir = "/home/eq/bgm"
+stream = ""
+# stream = "stream/bgm.mp3"
+# status = "stream/status-json.xsl"
 
 # 平時のバナー (案内・お知らせ)。ディレクトリの画像 (png/jpg/webp/gif) とテキスト (.txt) を名前順に切り替える。空なら使わない
 [banner]
