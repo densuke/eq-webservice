@@ -3,19 +3,22 @@
 #   (ストリームキーは環境変数で渡す。このファイルには書かない)
 
 # 開くページ (?broadcast=1 で操作ボタンを隠し、警戒音と BGM を最初から鳴らす)
-url = "https://eq.fuga.jp/?broadcast=1"
+# &sink=<出力先の名前の一部> で、ページの音をその機器へ流す (Mac 全体の出力先は変えない)
+url = "https://eq.fuga.jp/?broadcast=1&sink=BlackHole%202ch"
 width = 1280
 height = 720
 fps = 30
 
 # Chrome (Mac の既定。Linux / Raspberry Pi は "chromium")
 # chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+# Chrome のプロファイルの場所 (普段使いの Chrome とは別)。省くと毎回まっさらな一時ディレクトリ
+# profile = "chrome-profile"
 # Linux で音を PulseAudio の配信用の出力に流す場合
 # chrome_env = { PULSE_SINK = "eq_broadcast" }
 
 # 音の入力 (ffmpeg の引数)。省くと無音
 # Mac: BlackHole 2ch に Chrome の音を流し、それを取り込む
-# audio = ["-f", "avfoundation", "-i", ":BlackHole 2ch"]
+audio = ["-f", "avfoundation", "-i", ":BlackHole 2ch"]
 # Linux: PulseAudio の配信用の出力のモニタ
 # audio = ["-f", "pulse", "-i", "eq_broadcast.monitor"]
 

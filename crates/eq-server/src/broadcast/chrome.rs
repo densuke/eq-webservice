@@ -22,9 +22,14 @@ pub struct Screencast {
 
 /// Chrome を起動して画面の受け取りを始める。Chrome のプロセス (止まったか見張る) も返す
 pub async fn launch(cfg: &BroadcastConfig) -> anyhow::Result<(Screencast, Child)> {
-    // 前回の設定や閲覧データを持ち越さない
-    let profile = std::env::temp_dir().join(format!("eq-broadcast-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&profile);
+    // 普段使いの Chrome のプロファイルとは分ける。指定が無ければ毎回まっさらな一時ディレクトリ
+    let profile = if cfg.profile.is_empty() {
+        let tmp = std::env::temp_dir().join(format!("eq-broadcast-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        tmp
+    } else {
+        std::path::PathBuf::from(&cfg.profile)
+    };
     let mut child = Command::new(&cfg.chrome)
         .args([
             "--headless=new".to_string(),
@@ -35,6 +40,9 @@ pub async fn launch(cfg: &BroadcastConfig) -> anyhow::Result<(Screencast, Child)
             "--hide-scrollbars".to_string(),
             // 利用者の操作なしで音 (警戒音・BGM) を鳴らす
             "--autoplay-policy=no-user-gesture-required".to_string(),
+            // 音の出力先 (&sink=) を名前で探すには、ページがマイクを一度開く必要がある。その確認を自動で許可する
+            // (画面の無い Chrome は、マイクを開くまで機器の名前を見せない。開いたマイクはすぐ閉じ、音は使わない)
+            "--use-fake-ui-for-media-stream".to_string(),
             "--no-first-run".to_string(),
             "--no-default-browser-check".to_string(),
             // 見えていないページとして動きを間引かれないように
@@ -68,6 +76,8 @@ pub async fn launch(cfg: &BroadcastConfig) -> anyhow::Result<(Screencast, Child)
         .await
         .context("connect to the page")?;
     let mut sc = Screencast { ws, next_id: 0 };
+    // ページの警告 (音の出力先が見つからない、など) をログに出す
+    sc.send("Runtime.enable", json!({})).await?;
     sc.send(
         "Emulation.setDeviceMetricsOverride",
         json!({ "width": cfg.width, "height": cfg.height, "deviceScaleFactor": 1, "mobile": false }),
@@ -126,6 +136,21 @@ impl Screencast {
                 .context("chrome closed the DevTools connection")??;
             let Message::Text(text) = msg else { continue };
             let v: Value = serde_json::from_str(text.as_str())?;
+            if v["method"] == "Runtime.consoleAPICalled"
+                && matches!(v["params"]["type"].as_str(), Some("warning" | "error" | "info"))
+            {
+                let text: Vec<String> = v["params"]["args"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|a| {
+                        a["value"]
+                            .as_str()
+                            .map_or_else(|| a["description"].to_string(), str::to_string)
+                    })
+                    .collect();
+                tracing::warn!("page: {}", text.join(" "));
+            }
             if v["method"] == "Page.screencastFrame" {
                 let p = &v["params"];
                 let data = p["data"].as_str().context("frame without data")?.to_string();

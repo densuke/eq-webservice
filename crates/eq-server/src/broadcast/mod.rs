@@ -27,6 +27,8 @@ pub struct BroadcastConfig {
     pub chrome: String,
     /// Chrome に渡す環境変数 (Linux で音の出力先を決める PULSE_SINK など)
     pub chrome_env: BTreeMap<String, String>,
+    /// Chrome のプロファイルの場所 (普段使いと分ける)。空なら毎回まっさらな一時ディレクトリ
+    pub profile: String,
     pub ffmpeg: String,
     /// 音の入力 (ffmpeg の引数)。空なら無音
     pub audio: Vec<String>,
@@ -50,6 +52,7 @@ impl Default for BroadcastConfig {
                 "chromium".into()
             },
             chrome_env: BTreeMap::new(),
+            profile: String::new(),
             ffmpeg: "ffmpeg".into(),
             audio: Vec::new(),
             encode: s(&[
