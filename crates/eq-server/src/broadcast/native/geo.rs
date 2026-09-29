@@ -1,0 +1,152 @@
+//! 地図の投影と、GeoJSON (MultiPolygon) を画面の座標の path にする。投影は web/src/map.ts と同じ。
+
+use anyhow::Context;
+use serde_json::Value;
+use tiny_skia::{Path, PathBuilder};
+
+const LON0: f64 = 137.0;
+const LAT0: f64 = 37.0;
+const KY: f64 = 100.0;
+
+/// 日本全体が収まる表示範囲 (web/src/map.ts の HOME)
+const HOME: (f64, f64, f64, f64) = (128.0, 146.2, 30.0, 45.8);
+
+/// 地図の座標 (経度・緯度 → x, y。137°E 37°N が原点、北が上)
+pub fn project(lon: f64, lat: f64) -> (f64, f64) {
+    let kx = (LAT0.to_radians()).cos() * 100.0;
+    ((lon - LON0) * kx, -(lat - LAT0) * KY)
+}
+
+/// 地図の座標から画面の座標への拡大・移動
+#[derive(Debug, Clone, Copy)]
+pub struct View {
+    scale: f64,
+    ox: f64,
+    oy: f64,
+}
+
+impl View {
+    /// 日本全体が、縦横比を保って rect (x, y, w, h) の中央に収まるようにする
+    pub fn fit_home(rect: (f64, f64, f64, f64)) -> View {
+        let (x0, y0) = project(HOME.0, HOME.3);
+        let (x1, y1) = project(HOME.1, HOME.2);
+        let (rx, ry, rw, rh) = rect;
+        let scale = (rw / (x1 - x0)).min(rh / (y1 - y0));
+        View {
+            scale,
+            ox: rx + (rw - (x1 - x0) * scale) / 2.0 - x0 * scale,
+            oy: ry + (rh - (y1 - y0) * scale) / 2.0 - y0 * scale,
+        }
+    }
+
+    /// 経度・緯度の画面の座標
+    pub fn px(&self, lon: f64, lat: f64) -> (f32, f32) {
+        let (x, y) = project(lon, lat);
+        ((x * self.scale + self.ox) as f32, (y * self.scale + self.oy) as f32)
+    }
+}
+
+/// 1 つの区域 (都道府県・市町村等)
+pub struct Shape {
+    /// properties の name (都道府県) か code (市町村等)
+    pub key: String,
+    pub path: Path,
+    /// 印を置く場所 (いちばん大きい島の外接矩形の中心)
+    pub center: (f32, f32),
+}
+
+/// GeoJSON の文字列から区域を作る。key は properties の項目名
+pub fn parse(json: &str, key: &str, view: &View) -> anyhow::Result<Vec<Shape>> {
+    let doc: Value = serde_json::from_str(json).context("parsing geojson")?;
+    let features = doc["features"].as_array().context("no features")?;
+    let mut out = Vec::with_capacity(features.len());
+    for f in features {
+        let name = f["properties"][key].as_str().unwrap_or_default().to_string();
+        let mut pb = PathBuilder::new();
+        let mut biggest = (0.0f32, (0.0f32, 0.0f32));
+        for poly in f["geometry"]["coordinates"].as_array().into_iter().flatten() {
+            for (ri, ring) in poly.as_array().into_iter().flatten().enumerate() {
+                let pts: Vec<(f32, f32)> = ring
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|p| Some(view.px(p[0].as_f64()?, p[1].as_f64()?)))
+                    .collect();
+                let Some(&(fx, fy)) = pts.first() else { continue };
+                pb.move_to(fx, fy);
+                for &(x, y) in &pts[1..] {
+                    pb.line_to(x, y);
+                }
+                pb.close();
+                if ri == 0 {
+                    let (mut lo, mut hi) = ((f32::MAX, f32::MAX), (f32::MIN, f32::MIN));
+                    for &(x, y) in &pts {
+                        lo = (lo.0.min(x), lo.1.min(y));
+                        hi = (hi.0.max(x), hi.1.max(y));
+                    }
+                    let area = (hi.0 - lo.0) * (hi.1 - lo.1);
+                    if area >= biggest.0 {
+                        biggest = (area, ((lo.0 + hi.0) / 2.0, (lo.1 + hi.1) / 2.0));
+                    }
+                }
+            }
+        }
+        if let Some(path) = pb.finish() {
+            out.push(Shape {
+                key: name,
+                path,
+                center: biggest.1,
+            });
+        }
+    }
+    Ok(out)
+}
+
+pub fn load(file: &std::path::Path, key: &str, view: &View) -> anyhow::Result<Vec<Shape>> {
+    let text = std::fs::read_to_string(file).with_context(|| format!("reading {}", file.display()))?;
+    parse(&text, key, view).with_context(|| file.display().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn projection_matches_the_page() {
+        assert_eq!(project(137.0, 37.0), (0.0, 0.0));
+        let (x, y) = project(139.0, 36.0);
+        assert!((x - 2.0 * 37f64.to_radians().cos() * 100.0).abs() < 1e-9);
+        assert!((y - 100.0).abs() < 1e-9); // 南へ行くほど y が増える
+    }
+
+    #[test]
+    fn japan_fits_in_the_map_rect() {
+        let rect = (0.0, 36.0, 900.0, 684.0);
+        let v = View::fit_home(rect);
+        for (lon, lat) in [(128.0, 45.8), (146.2, 30.0), (137.0, 37.0)] {
+            let (x, y) = v.px(lon, lat);
+            assert!(
+                (0.0..=900.0).contains(&x) && (36.0..=720.0).contains(&y),
+                "{lon},{lat} -> {x},{y}"
+            );
+        }
+        // 縦が足りないので縦いっぱいに拡大し、左右は余る
+        let (_, top) = v.px(137.0, 45.8);
+        let (_, bottom) = v.px(137.0, 30.0);
+        assert!((top - 36.0).abs() < 0.01 && (bottom - 720.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn builds_paths_and_marks_the_biggest_island() {
+        let json = r#"{"features":[{"properties":{"name":"A","code":"1"},"geometry":{"type":"MultiPolygon","coordinates":[
+            [[[137,37],[138,37],[138,36],[137,36],[137,37]]],
+            [[[130,30],[130.1,30],[130.1,30.1],[130,30.1],[130,30]]]]}}]}"#;
+        let v = View::fit_home((0.0, 36.0, 900.0, 684.0));
+        let shapes = parse(json, "name", &v).unwrap();
+        assert_eq!(shapes.len(), 1);
+        assert_eq!(shapes[0].key, "A");
+        let (cx, cy) = v.px(137.5, 36.5);
+        assert!((shapes[0].center.0 - cx).abs() < 0.01 && (shapes[0].center.1 - cy).abs() < 0.01);
+        assert!(parse("{}", "name", &v).is_err());
+    }
+}
