@@ -85,6 +85,14 @@ body {
 .tsunami-banner { color: #111; background: var(--t-watch); padding: 6px 16px; font-size: 14px; }
 .tsunami-banner[data-grade="warning"] { color: #fff; background: var(--t-warning); }
 .tsunami-banner[data-grade="major_warning"] { color: #fff; background: var(--t-major); }
+/* 平時の気象警報 (警報以上)。収まらないときは横に流す */
+.warn-banner { color: #fff; background: #b3261e; padding: 5px 16px; font-size: 14px; overflow: hidden; white-space: nowrap; }
+.warn-banner[data-level="danger"] { background: #7a1fa2; }
+.warn-banner[data-level="emergency"] { background: #0c000c; border-top: 2px solid #fff; border-bottom: 2px solid #fff; }
+.warn-banner .warn-text { display: inline-block; }
+.warn-banner.scroll .warn-text { padding-left: 100%; animation: warn-scroll var(--warn-sec, 30s) linear infinite; }
+@keyframes warn-scroll { from { transform: translateX(0); } to { transform: translateX(-100%); } }
+@media (prefers-reduced-motion: reduce) { .warn-banner { white-space: normal; } .warn-banner.scroll .warn-text { animation: none; padding-left: 0; } }
 .num { display: inline-block; min-width: 1.4em; padding: 0 3px; margin-right: 4px; border-radius: 4px; background: #fff; color: #111; font-size: 0.85em; font-weight: 700; text-align: center; }
 
 /* 音の設定は ON だが、ブラウザの制限でまだ鳴らせないときの案内 */
@@ -250,10 +258,13 @@ a.banner-item:hover p { text-decoration: underline; }
 .credit { font-size: 11px; color: var(--muted); padding: 8px 16px; border-top: 1px solid var(--line); }
 .credit a { color: inherit; }
 
-/* 横向きのスマホなど高さの低い画面: 履歴が潰れないよう、出典は 1 行だけ (全文は上部のテロップで流れる)、詳細を低く、バナーは出さない */
+/* 高さの低い画面: 履歴が潰れないよう、出典は 1 行だけ (全文は上部のテロップで流れる)、詳細を低く */
 @media (max-height: 520px) and (min-width: 801px) {
   .credit { max-height: 1.6em; overflow: hidden; padding-top: 4px; padding-bottom: 4px; }
   .detail { max-height: 40%; }
+}
+/* 横向きのスマホ (高さ 440px 以下): バナーも出さない */
+@media (max-height: 440px) and (min-width: 801px) {
   .banner { display: none !important; }
 }
 @media (max-width: 800px) {

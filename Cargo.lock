@@ -284,7 +284,7 @@ dependencies = [
 
 [[package]]
 name = "eq-core"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -292,7 +292,7 @@ dependencies = [
 
 [[package]]
 name = "eq-server"
-version = "0.11.2"
+version = "0.11.3"
 dependencies = [
  "anyhow",
  "async-trait",

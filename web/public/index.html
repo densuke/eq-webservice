@@ -25,6 +25,7 @@
   </header>
   <div id="eew-banner" class="eew-banner" role="alert" hidden></div>
   <div id="tsunami-banner" class="tsunami-banner" role="status" hidden></div>
+  <div id="warn-banner" class="warn-banner" role="status" hidden><span class="warn-text"></span></div>
   <main class="layout">
     <section id="map" class="map-wrap" aria-label="日本地図">
       <div id="countdown" class="countdown" role="status" hidden></div>
@@ -67,6 +68,15 @@
             <option value="30">最後の発表から30分で畳む</option>
             <option value="60">最後の発表から60分で畳む</option>
             <option value="-1">自動で畳まない</option>
+          </select>
+        </div>
+        <div class="settings-row"><b>履歴に出す地震</b>
+          <select id="list-min">
+            <option value="0">すべて</option>
+            <option value="20">震度2以上</option>
+            <option value="30">震度3以上</option>
+            <option value="40">震度4以上</option>
+            <option value="45">震度5弱以上</option>
           </select>
         </div>
         <div class="settings-row"><b>離れた地震の巡回</b>

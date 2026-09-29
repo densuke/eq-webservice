@@ -17,10 +17,14 @@ export interface Settings {
   bgm: boolean;
   /** BGM の音量 (0〜100) */
   bgmVolume: number;
+  /** 履歴に出す地震情報の最大震度の下限 (0 はすべて) */
+  listMin: number;
 }
 
 const KEY = "eq-settings";
-export const DEFAULTS: Settings = { home: null, notify: "4", tourSec: 10, collapseMin: 10, bgm: false, bgmVolume: 40 };
+export const DEFAULTS: Settings = { home: null, notify: "4", tourSec: 10, collapseMin: 10, bgm: false, bgmVolume: 40, listMin: 0 };
+/** 履歴のしぼり込み: すべて / 震度2以上 / 3以上 / 4以上 / 5弱以上 */
+export const LIST_MIN_CHOICES = [0, 20, 30, 40, 45];
 export const BGM_VOLUMES = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
 export const TOUR_CHOICES = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60];
 export const COLLAPSE_CHOICES = [0, 5, 10, 30, 60, -1];
@@ -39,6 +43,7 @@ export function normalizeSettings(v: unknown): Settings {
     collapseMin: pick(o.collapseMin, COLLAPSE_CHOICES, DEFAULTS.collapseMin),
     bgm: o.bgm === true,
     bgmVolume: pick(o.bgmVolume, BGM_VOLUMES, DEFAULTS.bgmVolume),
+    listMin: pick(o.listMin, LIST_MIN_CHOICES, DEFAULTS.listMin),
   };
 }
 
@@ -148,4 +153,13 @@ export function intensityToScale(i: number): number {
   if (i < 6.0) return 55;
   if (i < 6.5) return 60;
   return 70;
+}
+
+/**
+ * 履歴に出すか。地震情報は最大震度が min 以上のときだけ (最大震度が分からないものは「すべて」のときだけ)。
+ * 緊急地震速報・津波予報などは常に出す
+ */
+export function shownInList(kind: string, maxScale: number, min: number): boolean {
+  if (kind !== "quake" || min <= 0) return true;
+  return maxScale >= min;
 }

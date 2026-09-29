@@ -16,7 +16,7 @@ import { type World, app, hooks, liveWorld, now, now as serverNow } from "./stat
 import { activeAreas, latestTsunami, tsunamiAlert } from "./tsunami.ts";
 import type { EewEvent, EqEvent, UserquakeEvent } from "./types.ts";
 import { confidenceGrade, latestUserquake, userquakeShown } from "./userquake.ts";
-import { topLevel } from "./warnings.ts";
+import { type Warnings, topLevel, warningSummary } from "./warnings.ts";
 import { loadBgmConfig, updateBgm } from "./bgm.ts";
 import { loadBanners, updateBanner } from "./banner.ts";
 import { numTag, renderBanner, renderDetail, renderList, renderMode, renderTsunamiBanner, updatePointsOpen } from "./view.ts";
@@ -201,9 +201,32 @@ function renderWarnings(now: number, feeling: boolean): { calm: boolean; quiet: 
   }
   map.setWarnings(items);
   $("#legend-warn").hidden = items.length === 0;
+  renderWarnBanner(w);
   return { calm, quiet: still };
 }
 let warningAreasLoading = false;
+
+/** 警報以上を文字で知らせる (平時だけ。注意報は地図の色とツールチップだけ) */
+let warnSig = "";
+function renderWarnBanner(w: Warnings | null): void {
+  const box = $("#warn-banner");
+  const summary = w ? warningSummary(w) : null;
+  box.hidden = !summary;
+  if (!summary) return;
+  // 幅が変わったときも流すかを判定し直す
+  const sig = JSON.stringify([summary, box.clientWidth]);
+  if (sig === warnSig) return;
+  warnSig = sig;
+  box.dataset.level = summary.top;
+  const text = box.querySelector<HTMLElement>(".warn-text")!;
+  text.textContent = `【気象警報】 ${summary.lines.join(" ／ ")}`;
+  // 収まらないときは横に流す (長さに合わせて速さをそろえる)
+  box.classList.remove("scroll");
+  if (text.scrollWidth > box.clientWidth) {
+    box.style.setProperty("--warn-sec", `${Math.max(20, Math.round(text.textContent.length / 4))}s`);
+    box.classList.add("scroll");
+  }
+}
 
 /** 発表中の気象警報・注意報を取り直す (サーバは 5 分ごとに気象庁から取得している) */
 async function loadWarnings(): Promise<void> {

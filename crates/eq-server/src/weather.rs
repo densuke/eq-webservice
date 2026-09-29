@@ -38,6 +38,8 @@ pub struct Warnings {
     pub reported_at: String,
     /// 市町村等のコード (7 桁) -> 発表中の種類。発表の無い区域は含めない
     pub areas: BTreeMap<String, Vec<Kind>>,
+    /// 市町村等のコード -> 名前 (発表のある区域だけ。画面で文字で知らせるため)
+    pub names: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -98,6 +100,7 @@ pub fn parse_report(xml: &str) -> anyhow::Result<Warnings> {
         .unwrap_or("")
         .to_string();
     let mut areas: BTreeMap<String, Vec<Kind>> = BTreeMap::new();
+    let mut names: BTreeMap<String, String> = BTreeMap::new();
     let section = doc
         .descendants()
         .filter(|n| n.tag_name().name() == "Warning" && n.attribute("type") == Some(MUNICIPAL));
@@ -116,10 +119,16 @@ pub fn parse_report(xml: &str) -> anyhow::Result<Warnings> {
             .filter(|k| !k.name.is_empty())
             .collect();
         if !kinds.is_empty() {
-            areas.entry(child_text(area, "Code")).or_default().extend(kinds);
+            let code = child_text(area, "Code");
+            names.insert(code.clone(), child_text(area, "Name"));
+            areas.entry(code).or_default().extend(kinds);
         }
     }
-    Ok(Warnings { reported_at, areas })
+    Ok(Warnings {
+        reported_at,
+        areas,
+        names,
+    })
 }
 
 /// 定期的に取得して shared を更新する
@@ -229,6 +238,8 @@ mod tests {
         assert_eq!(w.reported_at, "2026-09-29T10:30:00+09:00");
         // 市町村等の欄だけを見る。解除・発表なしは含めない
         assert_eq!(w.areas.keys().collect::<Vec<_>>(), vec!["0121400"]);
+        assert_eq!(w.names["0121400"], "稚内市");
+        assert_eq!(w.names.len(), 1);
         assert_eq!(
             w.areas["0121400"],
             vec![

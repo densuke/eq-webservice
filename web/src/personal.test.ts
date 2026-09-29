@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { countdown, countdownWorthShowing, DEFAULTS, estimateIntensity, intensityToScale, listOpen, nearestArea, normalizeSettings, notifyScale, shouldNotify } from "./personal.ts";
+import { shownInList, countdown, countdownWorthShowing, DEFAULTS, estimateIntensity, intensityToScale, listOpen, nearestArea, normalizeSettings, notifyScale, shouldNotify } from "./personal.ts";
 import type { Station } from "./detail.ts";
 
 const stations = new Map<string, Station>([
@@ -92,4 +92,16 @@ test("the station list is open until some minutes after the last report, unless 
   assert.equal(listOpen(-1, t, t + 999 * 60_000, undefined), true); // 自動で畳まない
   assert.equal(listOpen(10, t, t + 60 * 60_000, true), true);
   assert.equal(listOpen(10, t, t, false), false);
+});
+
+test("the history can be narrowed to quakes of a given intensity; warnings and tsunami always stay", () => {
+  assert.equal(shownInList("quake", 10, 0), true);
+  assert.equal(shownInList("quake", 20, 30), false);
+  assert.equal(shownInList("quake", 30, 30), true);
+  assert.equal(shownInList("quake", 45, 45), true);
+  // 最大震度が分からない地震情報 (震源の情報だけなど) は「すべて」のときだけ
+  assert.equal(shownInList("quake", -1, 20), false);
+  assert.equal(shownInList("quake", -1, 0), true);
+  assert.equal(shownInList("eew", 10, 45), true);
+  assert.equal(shownInList("tsunami", -1, 45), true);
 });
