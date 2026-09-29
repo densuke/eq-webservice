@@ -60,9 +60,16 @@ async function start(): Promise<void> {
       if (k >= 1) clearInterval(fadeTimer);
     }, 50);
     titleAt = 0;
-  } catch {
-    // 自動再生の制限 (NotAllowedError) など。利用者の操作を待つ
-    blocked = true;
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "NotAllowedError") {
+      // 自動再生の制限。利用者の操作を待つ
+      blocked = true;
+    } else {
+      // 配信が途切れている (送り出しのつなぎ直し中など)。少し待ってつなぎ直す
+      // (操作を待つ扱いにすると、誰も操作しない配信用の画面では BGM が止まったままになる)
+      retryAt = Date.now() + RETRY_MS;
+      stop();
+    }
   }
   starting = false;
   renderBgm();
