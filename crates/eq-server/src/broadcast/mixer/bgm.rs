@@ -3,7 +3,9 @@
 //! symphonia は同期の読み出しなので、HTTP は tokio で読み、戻しは別のスレッドで行う (途中に上限付きの通り道を置く)。
 
 use std::io::Read;
-use std::time::Duration;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use symphonia::core::audio::sample::Sample;
@@ -22,6 +24,8 @@ use super::RATE;
 const RETRY_AFTER: Duration = Duration::from_secs(5);
 /// 受信が止まったとみなす無音の長さ
 const STALL: Duration = Duration::from_secs(15);
+/// 受け取りの状況を報告する間隔
+const REPORT_EVERY: Duration = Duration::from_secs(60);
 /// 戻した音をためておく数 (1 つは約 26ms。約 1.7 秒。あふれる前に受信が待たされる)
 const QUEUE: usize = 64;
 
@@ -31,32 +35,85 @@ pub trait PcmSource: Send {
     fn pull(&mut self, out: &mut [i16]) -> usize;
 }
 
+/// 受け取りの足りなさを数える (調整はせず、見えるようにするだけ)。純粋なので単体でテストできる
+#[derive(Debug, Default, PartialEq)]
+struct Stats {
+    /// 要求より少なかった pull の回数
+    underruns: u64,
+    /// 足りなかったサンプル数の合計
+    short_samples: u64,
+}
+
+impl Stats {
+    fn record(&mut self, wanted: usize, got: usize) {
+        if got < wanted {
+            self.underruns += 1;
+            self.short_samples += (wanted - got) as u64;
+        }
+    }
+
+    /// 1 行の報告。buffered_samples は L R の交互のサンプル数
+    fn line(&self, buffered_samples: usize, reconnects: u64) -> String {
+        let secs = buffered_samples as f64 / (RATE as f64 * 2.0);
+        format!(
+            "bgm: underruns={} short_samples={} buffered={secs:.2}s reconnects={reconnects}",
+            self.underruns, self.short_samples
+        )
+    }
+}
+
+/// 受け取る側 (tokio のタスク) と使う側 (pull) で共有する数
+#[derive(Default)]
+struct Shared {
+    /// 通り道にたまっているサンプル数
+    queued: AtomicUsize,
+    /// つなぎ直した回数
+    reconnects: AtomicU64,
+}
+
 pub struct BgmStream {
     rx: mpsc::Receiver<Vec<i16>>,
     rest: Vec<i16>,
     pos: usize,
     task: JoinHandle<()>,
+    shared: Arc<Shared>,
+    stats: Stats,
+    last_report: Instant,
 }
 
 impl BgmStream {
     /// つなぎ始める (その時点の放送から)。つながるまでの間は pull が 0 を返す
     pub fn start(url: String) -> BgmStream {
         let (tx, rx) = mpsc::channel(QUEUE);
+        let shared = Arc::new(Shared::default());
+        let task_shared = shared.clone();
         let task = tokio::spawn(async move {
             while !tx.is_closed() {
-                match receive(&url, &tx).await {
+                match receive(&url, &tx, task_shared.clone()).await {
                     Ok(()) => tracing::warn!("bgm: stream ended"),
                     Err(e) => tracing::warn!("bgm: {e:#}"),
                 }
+                task_shared.reconnects.fetch_add(1, Ordering::Relaxed);
                 tokio::time::sleep(RETRY_AFTER).await;
             }
         });
+        BgmStream::with(rx, task, shared)
+    }
+
+    fn with(rx: mpsc::Receiver<Vec<i16>>, task: JoinHandle<()>, shared: Arc<Shared>) -> BgmStream {
         BgmStream {
             rx,
             rest: Vec::new(),
             pos: 0,
             task,
+            shared,
+            stats: Stats::default(),
+            last_report: Instant::now(),
         }
+    }
+
+    fn buffered(&self) -> usize {
+        self.shared.queued.load(Ordering::Relaxed) + (self.rest.len() - self.pos)
     }
 }
 
@@ -66,7 +123,10 @@ impl PcmSource for BgmStream {
         while n < out.len() {
             if self.pos == self.rest.len() {
                 match self.rx.try_recv() {
-                    Ok(next) => (self.rest, self.pos) = (next, 0),
+                    Ok(next) => {
+                        self.shared.queued.fetch_sub(next.len(), Ordering::Relaxed);
+                        (self.rest, self.pos) = (next, 0);
+                    }
                     Err(_) => break,
                 }
             }
@@ -74,6 +134,13 @@ impl PcmSource for BgmStream {
             out[n..n + k].copy_from_slice(&self.rest[self.pos..self.pos + k]);
             self.pos += k;
             n += k;
+        }
+        self.stats.record(out.len(), n);
+        // 流している間 (pull が呼ばれている間) だけ、1 分ごとに報告する
+        if self.last_report.elapsed() >= REPORT_EVERY {
+            self.last_report = Instant::now();
+            let reconnects = self.shared.reconnects.load(Ordering::Relaxed);
+            tracing::info!("{}", self.stats.line(self.buffered(), reconnects));
         }
         n
     }
@@ -86,7 +153,7 @@ impl Drop for BgmStream {
 }
 
 /// 1 回つないで、切れるまで受けて戻す
-async fn receive(url: &str, pcm: &mpsc::Sender<Vec<i16>>) -> anyhow::Result<()> {
+async fn receive(url: &str, pcm: &mpsc::Sender<Vec<i16>>, shared: Arc<Shared>) -> anyhow::Result<()> {
     // 全体の時間は区切らない (ずっと流れ続ける)。止まったかは 1 回の待ちで見る
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10))
@@ -96,7 +163,15 @@ async fn receive(url: &str, pcm: &mpsc::Sender<Vec<i16>>) -> anyhow::Result<()> 
     let (bytes_tx, bytes_rx) = mpsc::channel::<Vec<u8>>(8);
     let pcm = pcm.clone();
     let decoder = tokio::task::spawn_blocking(move || {
-        decode(ChannelReader::new(bytes_rx), |chunk| pcm.blocking_send(chunk).is_ok())
+        decode(ChannelReader::new(bytes_rx), |chunk| {
+            let n = chunk.len();
+            shared.queued.fetch_add(n, Ordering::Relaxed);
+            let sent = pcm.blocking_send(chunk).is_ok();
+            if !sent {
+                shared.queued.fetch_sub(n, Ordering::Relaxed);
+            }
+            sent
+        })
     });
     loop {
         let chunk = tokio::time::timeout(STALL, res.chunk())
@@ -271,12 +346,7 @@ mod tests {
     #[tokio::test]
     async fn pull_takes_what_is_there_and_never_waits() {
         let (tx, rx) = mpsc::channel(4);
-        let mut s = BgmStream {
-            rx,
-            rest: Vec::new(),
-            pos: 0,
-            task: tokio::spawn(async {}),
-        };
+        let mut s = BgmStream::with(rx, tokio::spawn(async {}), Arc::default());
         let mut out = [0i16; 6];
         assert_eq!(s.pull(&mut out), 0);
         tx.send(vec![1, 2, 3, 4]).await.unwrap();
@@ -285,5 +355,38 @@ mod tests {
         assert_eq!(out, [1, 2, 3, 4, 5, 6]);
         assert_eq!(s.pull(&mut out), 2);
         assert_eq!(&out[..2], [7, 8]);
+    }
+
+    #[test]
+    fn short_pulls_are_counted_and_reported_in_one_line() {
+        let mut st = Stats::default();
+        st.record(10, 10);
+        st.record(10, 4);
+        st.record(10, 0);
+        assert_eq!(
+            st,
+            Stats {
+                underruns: 2,
+                short_samples: 16
+            }
+        );
+        // 1.5 秒ぶん (44100 * 2 * 1.5 サンプル) ためている
+        assert_eq!(
+            st.line(132_300, 3),
+            "bgm: underruns=2 short_samples=16 buffered=1.50s reconnects=3"
+        );
+    }
+
+    #[tokio::test]
+    async fn buffered_counts_the_queue_and_the_unused_rest() {
+        let (tx, rx) = mpsc::channel(4);
+        let shared = Arc::new(Shared::default());
+        let mut s = BgmStream::with(rx, tokio::spawn(async {}), shared.clone());
+        shared.queued.fetch_add(8, Ordering::Relaxed);
+        tx.send(vec![0; 4]).await.unwrap();
+        tx.send(vec![0; 4]).await.unwrap();
+        assert_eq!(s.buffered(), 8);
+        s.pull(&mut [0i16; 2]); // 1 つ目 (4) を受けて 2 使った
+        assert_eq!(s.buffered(), 6);
     }
 }
