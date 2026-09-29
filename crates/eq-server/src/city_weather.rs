@@ -16,16 +16,20 @@ const BOSAI: &str = "https://www.jma.go.jp/bosai";
 /// アメダスは 10 分ごとに更新される
 const AMEDAS_EVERY: Duration = Duration::from_secs(600);
 /// 天気予報は 1 日に数回なので 1 時間ごとに見る
+/// 雨の地点として出す 1 時間降水量 (これ未満の弱い雨まで出すと点が多すぎる)
+const RAIN_MIN_MM: f64 = 1.0;
 const FORECAST_EVERY: Duration = Duration::from_secs(3600);
 
 /// 主要都市: (名前, 天気予報の府県コード, アメダスの地点番号)。天気は府県の最初の一次細分区域 (その都市を含む地方) を使う
-const CITIES: [(&str, &str, &str); 11] = [
+const CITIES: [(&str, &str, &str); 13] = [
     ("札幌", "016000", "14163"),
     ("仙台", "040000", "34392"),
     ("新潟", "150000", "54232"),
     ("東京", "130000", "44132"),
+    ("千葉", "120000", "45212"),
     ("名古屋", "230000", "51106"),
     ("大阪", "270000", "62078"),
+    ("神戸", "280000", "63518"),
     ("広島", "340000", "67437"),
     ("高知", "390000", "74182"),
     ("福岡", "400000", "82182"),
@@ -38,7 +42,7 @@ pub struct CityWeather {
     /// アメダスの観測時刻
     pub observed_at: String,
     pub cities: Vec<City>,
-    /// 1 時間降水量が 0 より多い地点 [緯度, 経度, mm]
+    /// 1 時間降水量が RAIN_MIN_MM 以上の地点 [緯度, 経度, mm]
     pub rain: Vec<[f64; 3]>,
 }
 
@@ -121,7 +125,7 @@ pub fn summarize(
         .into_iter()
         .flatten()
         .filter_map(|(station, o)| {
-            let mm = value(o, "precipitation1h").filter(|mm| *mm > 0.0)?;
+            let mm = value(o, "precipitation1h").filter(|mm| *mm >= RAIN_MIN_MM)?;
             let (lat, lon) = position(table.get(station)?)?;
             Some([round3(lat), round3(lon), mm])
         })
@@ -246,8 +250,9 @@ mod tests {
             "11016": {"lat": [45, 24.9], "lon": [141, 40.7]}
         });
         let obs = json!({
-            "44132": {"temp": [22.1, 0], "precipitation1h": [0.5, 0]},
-            "11001": {"temp": [15.7, 0], "precipitation1h": [0.0, 0]},
+            "44132": {"temp": [22.1, 0], "precipitation1h": [1.5, 0]},
+            // 1mm 未満の弱い雨は出さない
+            "11001": {"temp": [15.7, 0], "precipitation1h": [0.5, 0]},
             // 品質に問題のある値は使わない
             "11016": {"temp": [15.7, 0], "precipitation1h": [3.0, 5]}
         });
@@ -264,9 +269,9 @@ mod tests {
                 code: "300".into(),
                 text: "雨".into(),
                 temp: Some(22.1),
-                precip1h: Some(0.5),
+                precip1h: Some(1.5),
             }]
         );
-        assert_eq!(w.rain, vec![[35.692, 139.75, 0.5]]);
+        assert_eq!(w.rain, vec![[35.692, 139.75, 1.5]]);
     }
 }

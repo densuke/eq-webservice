@@ -41,6 +41,9 @@ function rainPaths(rain: CityWeather["rain"]): SVGPathElement[] {
   });
 }
 
+/** 札の向き (無ければ上)。大阪と神戸、東京と千葉は近いので左右に分ける */
+const SIDE: Record<string, "up" | "down" | "left" | "right"> = { 神戸: "left", 大阪: "right", 東京: "left", 千葉: "right", 高知: "down" };
+
 function cityMarker(c: CityWeather["cities"][number], night: boolean): SVGGElement {
   const [x, y] = project(c.lon, c.lat);
   const g = el("g", { class: "city" });
@@ -52,10 +55,11 @@ function cityMarker(c: CityWeather["cities"][number], night: boolean): SVGGEleme
   const title = el("title");
   const rain = c.precip1h ? ` / 1時間降水量 ${c.precip1h}mm` : "";
   title.textContent = `${c.name}: ${c.text || "天気不明"}${c.temp != null ? ` / ${c.temp}℃` : ""}${rain}`;
-  // 点の上に「絵文字 気温」の札を出す
+  // 点のそばに「絵文字 気温」の札を出す (隣り合う都市とは向きを変えて重ならないように)
   const w = 22 + temp.length * 8;
-  const box = el("rect", { x: -w / 2, y: -30, width: w, height: 22, rx: 11, class: "city-box" });
-  const text = el("text", { x: 0, y: -19, "text-anchor": "middle", "dominant-baseline": "central", class: "city-text" });
+  const [bx, by] = { up: [-w / 2, -30], down: [-w / 2, 8], left: [-w - 7, -11], right: [7, -11] }[SIDE[c.name] ?? "up"];
+  const box = el("rect", { x: bx, y: by, width: w, height: 22, rx: 11, class: "city-box" });
+  const text = el("text", { x: bx + w / 2, y: by + 11, "text-anchor": "middle", "dominant-baseline": "central", class: "city-text" });
   text.textContent = `${icon}${temp}`;
   g.append(title, el("circle", { r: 3, class: "city-dot" }), box, text);
   return g;

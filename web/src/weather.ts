@@ -15,7 +15,7 @@ export interface City {
 export interface CityWeather {
   observed_at: string;
   cities: City[];
-  /** 1 時間降水量が 0 より多い地点 [緯度, 経度, mm] */
+  /** 1 時間降水量が 1mm 以上の地点 [緯度, 経度, mm] */
   rain: [number, number, number][];
 }
 
