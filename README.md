@@ -223,6 +223,10 @@ Chrome か ffmpeg が止まったら、両方を止めて 5 秒後に立ち上�
   Mac では BlackHole に流した音を sox で取り込みます (ffmpeg の avfoundation は音を 1 割ほど落として途切れるため)。
   Mac ではページの URL に `&sink=BlackHole%202ch` を付けると、ページの音だけを BlackHole へ流します (Mac 全体の出力先は変えません)。
   画面の無い Chrome はマイクを一度開くまで機器の名前を見せないため、ページはマイクを開いてすぐ閉じます (音は使いません)
+- `mixer = true` にすると、音を eq-server の中で作ります (BlackHole・sox は要りません)。
+  ページは音を鳴らさず、BGM の流す・止めると警戒音の種類を eq-server に知らせます。
+  eq-server が BGM (`bgm_url`、既定は https://eq.fuga.jp/stream/bgm.mp3) を受けて戻し、警戒音を合成して混ぜ、44.1kHz のステレオで ffmpeg に渡します。
+  `audio`・`audio_command` より優先します。設計は [docs/broadcast-v2.md](docs/broadcast-v2.md)
 - Chrome のプロファイルは普段使いと分けます (`profile` で場所を決めるか、省けば毎回一時ディレクトリ)
 - 送り先の `$VAR` は環境変数に置き換え、ffmpeg のログでは値を伏せます。ストリームキーは設定ファイルに書かないでください
 - YouTube への送信に API キーは要りません。YouTube Studio のストリームキーだけで配信できます

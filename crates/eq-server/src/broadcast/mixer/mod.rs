@@ -1,9 +1,348 @@
-//! 配信の音を eq-server の中で作る (mixer)。
+//! 配信の音を eq-server の中で作る (mixer)。ページ (?broadcast=1&audio=mixer) は音を鳴らさず、window.eqBroadcast(JSON) で
+//! 「BGM を流す・止める」「警戒音」を知らせてくる (chrome.rs が受ける)。
+//! ここでは BGM (Icecast の MP3 を戻したもの) と警戒音 (合成) を足し、20ms ごとに実時間の速さで PCM
+//! (s16le・44.1kHz・ステレオ) を名前付きパイプへ出す。ffmpeg はそれを音の入力として読む。
 
-#[allow(dead_code)] // W4 で mixer から使う
 mod bgm;
-#[allow(dead_code)] // W4 で mixer から使う
 mod synth;
+
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use serde::Deserialize;
+use tokio::io::AsyncWriteExt;
+use tokio::net::unix::pipe;
+use tokio::sync::mpsc;
+
+use bgm::{BgmStream, PcmSource};
+use synth::AlertLevel;
 
 /// 音の形式: 44.1kHz・ステレオ・i16 (L R の交互)
 pub const RATE: u32 = 44_100;
+/// 1 回に出す長さ (20ms)
+const TICK: Duration = Duration::from_millis(20);
+const TICK_FRAMES: usize = (RATE as usize) / 50;
+/// BGM を流し始めるとき、音を上げていく長さ (フレーム数 = 1 秒)
+const FADE_IN_FRAMES: usize = RATE as usize;
+/// 音量の知らせが無いときの BGM の音量 (画面の既定と同じ 40%)
+const DEFAULT_VOLUME: f32 = 0.4;
+/// 同時に鳴らせる警戒音の数 (ページが暴走しても音を積み上げない)
+const MAX_ALERTS: usize = 16;
+
+/// ページからの知らせ (docs/broadcast-v2.md の W1)
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum Notice {
+    Bgm { play: bool, volume: Option<f32> },
+    Alert { level: AlertLevel },
+}
+
+struct Bgm {
+    source: Box<dyn PcmSource>,
+    volume: f32,
+    /// 流し始めてからのフレーム数 (立ち上がりの計算に使う)
+    played: usize,
+}
+
+struct Playing {
+    pcm: Vec<i16>,
+    pos: usize,
+}
+
+pub struct AudioMixer {
+    open_bgm: Box<dyn Fn() -> Option<Box<dyn PcmSource>> + Send>,
+    bgm: Option<Bgm>,
+    alerts: Vec<Playing>,
+}
+
+impl AudioMixer {
+    /// open_bgm: BGM を流し始めるときに、そのときの放送につなぐ (URL が無ければ None)
+    pub fn new(open_bgm: impl Fn() -> Option<Box<dyn PcmSource>> + Send + 'static) -> Self {
+        AudioMixer {
+            open_bgm: Box::new(open_bgm),
+            bgm: None,
+            alerts: Vec::new(),
+        }
+    }
+
+    pub fn apply(&mut self, n: Notice) {
+        match n {
+            Notice::Bgm { play: true, volume } => {
+                let volume = volume.unwrap_or(DEFAULT_VOLUME).clamp(0.0, 1.0);
+                match &mut self.bgm {
+                    Some(b) => b.volume = volume,
+                    None => {
+                        self.bgm = (self.open_bgm)().map(|source| Bgm {
+                            source,
+                            volume,
+                            played: 0,
+                        })
+                    }
+                }
+            }
+            // 止めるときはすぐ (受信もやめる)
+            Notice::Bgm { play: false, .. } => self.bgm = None,
+            Notice::Alert { level } if self.alerts.len() < MAX_ALERTS => {
+                self.alerts.push(Playing {
+                    pcm: synth::alert(level),
+                    pos: 0,
+                });
+            }
+            Notice::Alert { .. } => {}
+        }
+    }
+
+    /// frames フレーム分 (L R の交互) を混ぜて出す。足し算が i16 を超えたら飽和させる
+    pub fn render(&mut self, frames: usize) -> Vec<i16> {
+        let mut sum = vec![0i32; frames * 2];
+        if let Some(b) = &mut self.bgm {
+            let mut buf = vec![0i16; frames * 2];
+            b.source.pull(&mut buf); // 足りない分は無音のまま
+            for (i, s) in buf.iter().enumerate() {
+                let ramp = ((b.played + i / 2) as f32 / FADE_IN_FRAMES as f32).min(1.0);
+                sum[i] += (*s as f32 * b.volume * ramp) as i32;
+            }
+            b.played += frames;
+        }
+        for a in &mut self.alerts {
+            let n = (a.pcm.len() - a.pos).min(sum.len());
+            for (s, x) in sum.iter_mut().zip(&a.pcm[a.pos..a.pos + n]) {
+                *s += *x as i32;
+            }
+            a.pos += n;
+        }
+        self.alerts.retain(|a| a.pos < a.pcm.len());
+        sum.into_iter()
+            .map(|s| s.clamp(i16::MIN as i32, i16::MAX as i32) as i16)
+            .collect()
+    }
+}
+
+/// 動かしている mixer。捨てると止まる (BGM の受信もやめる)
+pub struct Running(tokio::task::JoinHandle<()>);
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+pub fn spawn(notices: mpsc::UnboundedReceiver<String>, fifo: PathBuf, bgm_url: String) -> Running {
+    Running(tokio::spawn(run(notices, fifo, bgm_url)))
+}
+
+/// fifo の書き込み側を、ffmpeg が読み始めるまで待って開く。
+/// 普通の open は読み手が来るまで止まったまま取り消せず、ffmpeg が立ち上がらなかったときに終了まで巻き込むので、
+/// 読み手がいなければ失敗する開き方 (ENXIO) をやり直す
+async fn open_fifo(path: &Path) -> std::io::Result<pipe::Sender> {
+    const ENXIO: i32 = 6; // macOS・Linux とも 6
+    loop {
+        match pipe::OpenOptions::new().open_sender(path) {
+            Err(e) if e.raw_os_error() == Some(ENXIO) => tokio::time::sleep(Duration::from_millis(20)).await,
+            other => return other,
+        }
+    }
+}
+
+/// 知らせ (JSON の文字列) を受けて混ぜ、実時間の速さで PCM を fifo に書き続ける。ffmpeg が読み始めるまでは待つ。
+/// 書けなくなった (ffmpeg が止まった) ら終わる
+async fn run(mut notices: mpsc::UnboundedReceiver<String>, fifo: PathBuf, bgm_url: String) {
+    let open = move || (!bgm_url.is_empty()).then(|| Box::new(BgmStream::start(bgm_url.clone())) as Box<dyn PcmSource>);
+    let mut mixer = AudioMixer::new(open);
+    let Ok(mut out) = open_fifo(&fifo).await else {
+        return;
+    };
+    let mut tick = tokio::time::interval(TICK);
+    // 遅れたら、あとで詰めて出す (音を抜かない。平均が実時間になる)
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Burst);
+    loop {
+        tokio::select! {
+            _ = tick.tick() => {
+                let bytes: Vec<u8> = mixer.render(TICK_FRAMES).into_iter().flat_map(i16::to_le_bytes).collect();
+                if out.write_all(&bytes).await.is_err() {
+                    return;
+                }
+            }
+            Some(json) = notices.recv() => match serde_json::from_str::<Notice>(&json) {
+                Ok(n) => mixer.apply(n),
+                Err(e) => {
+                    let head: String = json.chars().take(100).collect();
+                    tracing::warn!("broadcast: unknown notice from the page ({e}): {head}");
+                }
+            },
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 決まった値を出し続ける音 (BGM の代わり)
+    struct Constant(i16);
+    impl PcmSource for Constant {
+        fn pull(&mut self, out: &mut [i16]) -> usize {
+            out.fill(self.0);
+            out.len()
+        }
+    }
+
+    fn mixer_with_bgm(level: i16) -> AudioMixer {
+        AudioMixer::new(move || Some(Box::new(Constant(level))))
+    }
+
+    fn play(volume: f32) -> Notice {
+        Notice::Bgm {
+            play: true,
+            volume: Some(volume),
+        }
+    }
+
+    /// 1 秒ぶん流して、そのあとの 1 フレームを返す (立ち上がりが終わった状態)
+    fn settled(m: &mut AudioMixer) -> Vec<i16> {
+        m.render(RATE as usize);
+        m.render(1)
+    }
+
+    #[test]
+    fn silence_without_anything_playing() {
+        let mut m = mixer_with_bgm(1000);
+        assert_eq!(m.render(100), vec![0; 200]);
+    }
+
+    #[test]
+    fn bgm_is_scaled_by_the_volume() {
+        let mut m = mixer_with_bgm(10_000);
+        m.apply(play(0.4));
+        assert_eq!(settled(&mut m), [4000, 4000]);
+        m.apply(play(0.5)); // 流している間の音量の知らせは、そのまま効く
+        assert_eq!(m.render(1), [5000, 5000]);
+    }
+
+    #[test]
+    fn bgm_rises_over_one_second() {
+        let mut m = mixer_with_bgm(10_000);
+        m.apply(play(1.0));
+        let first = m.render(RATE as usize);
+        let at = |sec: f32| first[(sec * RATE as f32) as usize * 2] as f32;
+        assert_eq!(first[0], 0);
+        assert!((at(0.25) - 2500.0).abs() < 5.0, "{}", at(0.25));
+        assert!((at(0.5) - 5000.0).abs() < 5.0, "{}", at(0.5));
+        assert!((at(0.99) - 9900.0).abs() < 20.0, "{}", at(0.99));
+        assert_eq!(m.render(1), [10_000, 10_000]);
+    }
+
+    #[test]
+    fn stopping_is_immediate_and_starting_again_rises_again() {
+        let mut m = mixer_with_bgm(10_000);
+        m.apply(play(1.0));
+        settled(&mut m);
+        m.apply(Notice::Bgm {
+            play: false,
+            volume: None,
+        });
+        assert_eq!(m.render(10), vec![0; 20]);
+        m.apply(play(1.0));
+        assert_eq!(m.render(1), [0, 0]);
+    }
+
+    #[test]
+    fn alerts_add_to_the_bgm_and_saturate_instead_of_wrapping() {
+        let mut m = mixer_with_bgm(30_000);
+        m.apply(play(1.0));
+        settled(&mut m);
+        let mut alone = mixer_with_bgm(0);
+        for mixer in [&mut m, &mut alone] {
+            for _ in 0..4 {
+                mixer.apply(Notice::Alert { level: AlertLevel::Low });
+            }
+        }
+        let n = RATE as usize / 2;
+        let (with_bgm, only_alert) = (m.render(n), alone.render(n));
+        assert!(
+            only_alert.iter().any(|&x| (x as i32 + 30_000) > i16::MAX as i32),
+            "the test must overflow"
+        );
+        for (a, b) in with_bgm.iter().zip(&only_alert) {
+            let want = (30_000 + *b as i32).clamp(i16::MIN as i32, i16::MAX as i32);
+            assert_eq!(*a as i32, want);
+        }
+    }
+
+    #[test]
+    fn an_alert_plays_once_and_then_ends() {
+        let mut m = mixer_with_bgm(0);
+        m.apply(Notice::Alert { level: AlertLevel::Pip });
+        let out = m.render(RATE as usize / 4); // pip は 0.12 秒
+        assert!(out.iter().any(|&x| x != 0));
+        assert_eq!(&out[out.len() - 200..], &[0; 200]);
+        assert!(m.alerts.is_empty());
+    }
+
+    #[test]
+    fn a_short_bgm_source_is_padded_with_silence() {
+        struct Short;
+        impl PcmSource for Short {
+            fn pull(&mut self, out: &mut [i16]) -> usize {
+                out[..4].fill(1000);
+                4
+            }
+        }
+        let mut m = AudioMixer::new(|| Some(Box::new(Short)));
+        m.apply(play(1.0));
+        m.render(RATE as usize);
+        let out = m.render(4);
+        assert_eq!(&out[..4], &[1000; 4]);
+        assert_eq!(&out[4..], &[0; 4]);
+    }
+
+    #[test]
+    fn notices_from_the_page_are_parsed() {
+        let p = |s: &str| serde_json::from_str::<Notice>(s);
+        assert_eq!(p(r#"{"type":"bgm","play":true,"volume":0.4}"#).unwrap(), play(0.4));
+        assert_eq!(
+            p(r#"{"type":"bgm","play":false}"#).unwrap(),
+            Notice::Bgm {
+                play: false,
+                volume: None
+            }
+        );
+        assert_eq!(
+            p(r#"{"type":"alert","level":"strong"}"#).unwrap(),
+            Notice::Alert {
+                level: AlertLevel::Strong
+            }
+        );
+        assert!(p(r#"{"type":"alert","level":"loud"}"#).is_err());
+        assert!(p(r#"{"type":"reboot"}"#).is_err());
+    }
+
+    #[tokio::test]
+    async fn the_fifo_opens_when_a_reader_appears_and_can_be_given_up_before() {
+        use tokio::io::AsyncReadExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pcm");
+        assert!(std::process::Command::new("mkfifo")
+            .arg(&path)
+            .status()
+            .unwrap()
+            .success());
+        // 読み手がいない間は待つだけで、取り消せる (終了を巻き込まない)
+        let waiting = tokio::time::timeout(Duration::from_millis(100), open_fifo(&path)).await;
+        assert!(waiting.is_err());
+        // 読み手が来たら開けて、書いたものが届く
+        let mut reader = pipe::OpenOptions::new().open_receiver(&path).unwrap();
+        let mut writer = open_fifo(&path).await.unwrap();
+        writer.write_all(&[1, 2, 3]).await.unwrap();
+        let mut got = [0u8; 3];
+        reader.read_exact(&mut got).await.unwrap();
+        assert_eq!(got, [1, 2, 3]);
+    }
+
+    #[test]
+    fn no_bgm_url_means_no_bgm() {
+        let mut m = AudioMixer::new(|| None);
+        m.apply(play(1.0));
+        assert!(m.bgm.is_none());
+    }
+}
