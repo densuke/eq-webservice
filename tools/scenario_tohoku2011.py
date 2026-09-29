@@ -16,15 +16,11 @@ P2P地震情報の履歴 API は 2015 年以降しか無いので、気象庁の
 
 import io
 import json
-import math
-import re
 import sys
-import urllib.request
 
-from area_pref import area_pref
+from eqdb import fetch, points
 from jma_eew import to_wolfx
 
-EQDB = "https://www.data.jma.go.jp/eqdb/data/shindo/api/"
 SAIGAIJI = "https://www.jma.go.jp/jma/kishou/books/saigaiji/saigaiji_201101/saigaiji_201101_01.pdf"
 # 震度データベースの地震の ID と、緊急地震速報の発表状況のページの ID
 EVENT = "20110311144618"
@@ -50,40 +46,7 @@ TSUNAMI_TIMES = [
     "2011/03/12 03:20:00",
 ]
 TSUNAMI_CLEAR = "2011/03/13 17:58:00"
-# 震度データベースの震度の記号 -> P2P地震情報の震度
-SCALE = {"1": 10, "2": 20, "3": 30, "4": 40, "A": 45, "B": 50, "C": 55, "D": 60, "7": 70}
-UA = {"User-Agent": "eq-webservice scenario builder"}
 Z2H = str.maketrans("0123456789.m", "０１２３４５６７８９．ｍ")
-
-
-def fetch(url: str, data: bytes | None = None, headers: dict | None = None) -> bytes:
-    req = urllib.request.Request(url, data=data, headers={**UA, **(headers or {})})
-    with urllib.request.urlopen(req, timeout=120) as res:
-        return res.read()
-
-
-def stations_db() -> list[dict]:
-    """震度データベースの観測点ごとの震度 [{name, lat, lon, char}]"""
-    boundary = "eqwebservice"
-    body = "".join(f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n' for k, v in {"mode": "event", "id": EVENT}.items())
-    raw = fetch(EQDB, (body + f"--{boundary}--\r\n").encode(), {"Content-Type": f"multipart/form-data; boundary={boundary}"})
-    return json.loads(raw)["res"]["int"]
-
-
-def points(current: dict[str, list]) -> list[dict]:
-    """今の観測点一覧にある名前はそのまま、無いもの (廃止・移設前など) は位置と最寄りの観測点の細分区域を付ける"""
-    out = []
-    for s in stations_db():
-        name = s["name"].replace("＊", "")
-        lat, lon = float(s["lat"]), float(s["lon"])
-        known = current.get(name)
-        # ponytail: 最寄りの観測点の細分区域を借りる (区域の境界付近では隣の区域になることがある)
-        area = known[3] if known else min(current.values(), key=lambda c: math.hypot(c[1] - lat, (c[2] - lon) * math.cos(math.radians(lat))))[3]
-        p = {"pref": area_pref(area), "addr": name, "isArea": False, "scale": SCALE[s["char"]]}
-        if not known:
-            p["station"] = {"lat": lat, "lon": lon, "area": area}
-        out.append(p)
-    return sorted(out, key=lambda p: -p["scale"])
 
 
 def quake(issued: str, mag: float, pts: list[dict]) -> dict:
@@ -145,7 +108,7 @@ def issued(o: dict) -> str:
 
 def main(stations_path: str, dst: str) -> None:
     current = {s[0]: s for s in json.load(open(stations_path, encoding="utf-8"))}
-    pts = points(current)
+    pts = points(EVENT, current)
     eews = to_wolfx(EEW_ID, "2011/03/11", ORIGIN, NAME)
     quakes = [quake(t, m, pts if detail else []) for t, m, detail in REPORTS]
     # 同じ時刻の発表は 地震 -> 津波 の順

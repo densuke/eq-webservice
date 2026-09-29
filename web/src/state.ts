@@ -8,8 +8,7 @@ import { GroupStore } from "./groups.ts";
 import { loadSettings } from "./personal.ts";
 import type { EqEvent, TsunamiEvent } from "./types.ts";
 
-/** 発生からこの秒数を過ぎたら P波・S波の表示を止める */
-export const WAVE_MAX_SEC = 180;
+export { WAVE_MAX_SEC } from "./waves.ts";
 /** EEW 警報バナーを出し続ける時間 */
 export const EEW_BANNER_MS = 3 * 60_000;
 /** 最後の情報からこの時間がたち、揺れも描き終えたら、カメラは日本全体に戻す (選んだ地震と津波予報は除く) */
