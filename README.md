@@ -219,7 +219,10 @@ Chrome か ffmpeg が止まったら、両方を止めて 5 秒後に立ち上�
 
 - 開くページは `?broadcast=1` を付けた配信用の表示です。操作ボタンを隠し、警戒音と BGM を最初から鳴らします
 - 画面は DevTools の screencast で受け取り、設定した fps で ffmpeg に渡します (既定は 1280x720・30fps・x264)
-- 音は ffmpeg の入力で取り込みます (Mac は BlackHole、Linux は PulseAudio のモニタ)。省くと無音です
+- 音は ffmpeg の入力で取り込みます (Mac は BlackHole、Linux は PulseAudio のモニタ)。省くと無音です。
+  Mac ではページの URL に `&sink=BlackHole%202ch` を付けると、ページの音だけを BlackHole へ流します (Mac 全体の出力先は変えません)。
+  画面の無い Chrome はマイクを一度開くまで機器の名前を見せないため、ページはマイクを開いてすぐ閉じます (音は使いません)
+- Chrome のプロファイルは普段使いと分けます (`profile` で場所を決めるか、省けば毎回一時ディレクトリ)
 - 送り先の `$VAR` は環境変数に置き換え、ffmpeg のログでは値を伏せます。ストリームキーは設定ファイルに書かないでください
 - YouTube への送信に API キーは要りません。YouTube Studio のストリームキーだけで配信できます
 

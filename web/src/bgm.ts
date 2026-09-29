@@ -1,6 +1,7 @@
 // 平時の BGM。音楽は Icecast が配信し、この画面はその配信を鳴らすだけ。
 // 地震の表示の間とデモ中は直ちに止め (警戒音を優先。配信の受信もやめる)、平時に戻ればそのときの放送から少しずつ音を上げて流す。
 
+import { routeAudio } from "./broadcast.ts";
 import { $, tapWord } from "./dom.ts";
 import { saveSettings } from "./personal.ts";
 import { app } from "./state.ts";
@@ -20,6 +21,7 @@ const TITLE_MS = 15_000;
 const RETRY_MS = 5_000;
 
 const audio = new Audio();
+void routeAudio(audio);
 let cfg: BgmConfig | null = null;
 /** ブラウザに再生を止められた (利用者が一度操作するまで流せない) */
 let blocked = false;

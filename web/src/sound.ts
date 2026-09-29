@@ -3,6 +3,7 @@
 // (サイトの設定で音声を許可していれば操作なしで鳴らせる)、だめならボタンやタップで unlock() する。
 
 import type { AlertLevel } from "./alert.ts";
+import { routeAudio } from "./broadcast.ts";
 
 const KEY = "eq-sound";
 let ctx: AudioContext | null = null;
@@ -34,6 +35,8 @@ export function onSoundStateChange(f: () => void): void {
 export function unlock(): void {
   if (!ctx) {
     ctx = new AudioContext();
+    // 配信のときは出力先を切り替える (AudioContext.setSinkId は型定義にまだ無い)
+    void routeAudio(ctx as unknown as { setSinkId(id: string): Promise<void> });
     ctx.onstatechange = () => onChange();
   }
   ctx.resume().then(
