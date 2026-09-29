@@ -1,16 +1,16 @@
 // 画面の文字情報: 一覧・詳細・緊急地震速報と津波予報のバナー・表示モード、地図の塗り分け。
 
-import { eewAreaScales, overlayForecast, quakeDetail } from "./detail.ts";
-import { type Group, latestEew, summarizeQuake } from "./groups.ts";
+import { type AreaScale, droppedForecast, eewAreaScales, overlayForecast, quakeDetail } from "./detail.ts";
+import { type EewGroup, type Group, latestEew, summarizeQuake } from "./groups.ts";
 import { esc } from "./html.ts";
 import { byPriority, sameQuake } from "./priority.ts";
-import { activeEews, currentGroup, groupPlace, placeOf, relatedQuake } from "./quakes.ts";
+import { activeEews, currentGroup, groupPlace, relatedQuake } from "./quakes.ts";
 import { isKnownScale, scaleColor, scaleLabel, scaleTextColor } from "./scale.ts";
 import { $, map } from "./dom.ts";
 import { listOpen } from "./personal.ts";
 import { app, now } from "./state.ts";
 import { activeAreas } from "./tsunami.ts";
-import type { Hypocenter, PrefScale, Scale, TsunamiEvent } from "./types.ts";
+import type { EewEvent, Hypocenter, PrefScale, Scale, TsunamiEvent } from "./types.ts";
 
 /** EEW バナーに並べる件数 (残りは「ほか N 件」) */
 export const EEW_BANNER_MAX = 3;
@@ -105,21 +105,38 @@ export function renderMode(): void {
   $("#demo-open").hidden = app.demo != null;
 }
 
+const byName = (xs: PrefScale[]): AreaScale[] => xs.map(({ pref, scale }) => ({ name: pref, scale }));
+
+/** 緊急地震速報の予測 (最新の報) と、続報で外されて薄れながら消える地域 (dropped) */
+function forecastLayers(g: EewGroup): { prefs: (AreaScale & { dropped?: boolean })[]; areas: (AreaScale & { dropped?: boolean })[] } {
+  const e = latestEew(g);
+  if (e.cancelled) return { prefs: [], areas: [] };
+  const reports = [...g.events].sort((a, b) => Number(a.serial) - Number(b.serial));
+  const layer = (items: (x: EewEvent) => AreaScale[]) => [
+    ...items(e),
+    ...droppedForecast(reports.map((r) => ({ at: r.received_at_ms, items: items(r) })), now()).map((x) => ({ ...x, dropped: true })),
+  ];
+  return { prefs: layer((x) => byName(x.pref_max)), areas: layer((x) => eewAreaScales(x.areas)) };
+}
+
 /** 地図の塗り分けと震央 */
 export function paintMap(g: Group | undefined): void {
   if (g?.kind === "quake") {
     const q = summarizeQuake(g);
     const d = quakeDetail(q.points, app.stations);
     // 同じ地震の緊急地震速報がまだ出ていれば、観測の無い地域は予測のまま残す (観測を予測の上に重ねる)
-    const e = activeEews(now()).find((x) => sameQuake(placeOf(x.origin_time_ms, x.hypocenter), groupPlace(g)));
-    const byPref = (xs: PrefScale[]) => xs.map(({ pref, scale }) => ({ name: pref, scale }));
-    const prefs = overlayForecast(byPref(q.prefMax), e ? byPref(e.pref_max) : []);
+    const active = new Set(activeEews(now()));
+    const eg = app.world.store
+      .list()
+      .find((x): x is EewGroup => x.kind === "eew" && active.has(latestEew(x)) && sameQuake(groupPlace(x), groupPlace(g)));
+    const f = eg ? forecastLayers(eg) : { prefs: [], areas: [] };
+    const prefs = overlayForecast(byName(q.prefMax), f.prefs);
     map.setPrefScales(prefs.map(({ name, ...rest }) => ({ pref: name, ...rest })));
-    map.setDetail(overlayForecast(d.areas, e ? eewAreaScales(e.areas) : []), false, d.dots);
+    map.setDetail(overlayForecast(d.areas, f.areas), false, d.dots);
   } else if (g?.kind === "eew") {
-    const e = latestEew(g);
-    map.setPrefScales(e.cancelled ? [] : e.pref_max, true);
-    map.setDetail(e.cancelled ? [] : eewAreaScales(e.areas), true, []);
+    const f = forecastLayers(g);
+    map.setPrefScales(f.prefs.map(({ name, ...rest }) => ({ pref: name, ...rest })), true);
+    map.setDetail(f.areas, true, []);
   } else {
     map.setPrefScales([]);
     map.setDetail([], false, []);
