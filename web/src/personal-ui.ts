@@ -6,7 +6,7 @@ import { type NotifyLevel, TOUR_CHOICES, countdown, countdownWorthShowing, estim
 import { activeEews } from "./quakes.ts";
 import { scaleLabel } from "./scale.ts";
 import { $, map, tapWord } from "./dom.ts";
-import { app } from "./state.ts";
+import { app, hooks } from "./state.ts";
 import type { EqEvent } from "./types.ts";
 import { GRADE_LABEL } from "./view.ts";
 
@@ -29,6 +29,7 @@ export function renderSettings(): void {
   $<HTMLSelectElement>("#notify-level").value = app.settings.notify;
   $<HTMLSelectElement>("#collapse-min").value = String(app.settings.collapseMin);
   $<HTMLSelectElement>("#tour-sec").value = String(app.settings.tourSec);
+  $<HTMLSelectElement>("#list-min").value = String(app.settings.listMin);
 }
 
 export function setSettings(next: typeof app.settings): void {
@@ -144,4 +145,8 @@ $("#tour-sec").innerHTML = TOUR_CHOICES.map((s) => `<option value="${s}">${s ===
 $("#collapse-min").addEventListener("change", (e) =>
   setSettings({ ...app.settings, collapseMin: Number((e.target as HTMLSelectElement).value) }),
 );
+$("#list-min").addEventListener("change", (e) => {
+  setSettings({ ...app.settings, listMin: Number((e.target as HTMLSelectElement).value) });
+  hooks.renderAll();
+});
 $("#tour-sec").addEventListener("change", (e) => setSettings({ ...app.settings, tourSec: Number((e.target as HTMLSelectElement).value) }));

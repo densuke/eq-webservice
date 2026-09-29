@@ -4,10 +4,10 @@ import { type AreaScale, droppedForecast, eewAreaScales, keepForecast, overlayFo
 import { type EewGroup, type Group, latestEew, summarizeQuake } from "./groups.ts";
 import { esc } from "./html.ts";
 import { byPriority, sameQuake } from "./priority.ts";
-import { activeEews, currentGroup, groupPlace, relatedQuake } from "./quakes.ts";
+import { activeEews, currentGroup, groupPlace, groupScale, relatedQuake } from "./quakes.ts";
 import { isKnownScale, scaleColor, scaleLabel, scaleTextColor } from "./scale.ts";
 import { $, map } from "./dom.ts";
-import { listOpen } from "./personal.ts";
+import { listOpen, shownInList } from "./personal.ts";
 import { app, now } from "./state.ts";
 import { activeAreas } from "./tsunami.ts";
 import type { EewEvent, Hypocenter, PrefScale, Scale, TsunamiEvent } from "./types.ts";
@@ -80,7 +80,10 @@ export function groupRow(g: Group): string {
 
 export function renderList(): void {
   const list = $("#list");
-  const groups = app.world.store.list().filter((g) => g.kind !== "eew_detection");
+  // 設定の「履歴に出す地震」でしぼり込む (緊急地震速報・津波予報は常に出す)
+  const groups = app.world.store
+    .list()
+    .filter((g) => g.kind !== "eew_detection" && shownInList(g.kind, groupScale(g), app.settings.listMin));
   const current = currentGroup();
   list.innerHTML = groups
     .slice(0, 100)
