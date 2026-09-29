@@ -50,6 +50,22 @@ test("events play from now, long gaps are shortened, origin stays the same acros
   assert.equal(c.kind === "quake" && c.issued_at, "2026/09/29 09:00:11");
 });
 
+test("a later quake keeps its origin just before its own reports even when the gap before it is shortened", () => {
+  const now = Date.UTC(2026, 8, 29, 0, 0, 0); // 09:00:00 JST
+  const later = { ...quake("2026/01/01 12:10:05"), id: "q2", origin_time: "2026/01/01 12:10:00", origin_time_ms: Date.UTC(2026, 0, 1, 3, 10, 0) };
+  const s = schedule([eew("1", "2026/01/01 12:00:05"), eew("2", "2026/01/01 12:00:08"), later], now, 1);
+  assert.deepEqual(
+    s.map((x) => x.at),
+    [0, 3000, 11000],
+  );
+  const q = s[2].event;
+  // 10 分の間は 8 秒に詰まるが、発生は自分の最初の報の 5 秒前 (再生中の「今」より未来にならない)
+  assert.equal(q.kind === "quake" && q.origin_time_ms, now + 11000 - 5000);
+  assert.equal(q.kind === "quake" && q.origin_time, "2026/09/29 09:00:06");
+  // 前の地震の発生時刻はそのまま
+  assert.equal(s[0].event.kind === "eew" && s[0].event.origin_time_ms, now - 5000);
+});
+
 test("ids and event ids get a per-run suffix and the source becomes demo", () => {
   const [x] = schedule([eew("1", "2026/01/01 12:00:05")], Date.now(), 7);
   assert.equal(x.event.id, "e1#demo7");

@@ -4,6 +4,7 @@
 //! 場面のファイルは P2P地震情報 / Wolfx 形式の JSON Lines。先頭のコメントで名前と説明を書く:
 //!   # name: 標準: 宮城県沖の緊急地震速報 (警報)
 //!   # description: 緊急地震速報 (警報) → 震度速報 → ...
+//!   # source: 出典 (過去の地震の記録を再生する場面だけ)
 
 use std::path::Path;
 
@@ -21,6 +22,8 @@ struct Summary {
     id: String,
     name: String,
     description: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    source: String,
 }
 
 #[derive(Serialize)]
@@ -44,6 +47,7 @@ fn scenario(id: &str, text: &str) -> anyhow::Result<Scenario> {
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| id.to_string()),
             description: header("description:"),
+            source: header("source:"),
         },
         events: replay::load(text)?,
     })
@@ -66,7 +70,8 @@ pub fn convert_dir(src: &Path, out: &Path) -> anyhow::Result<()> {
         let id = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
         let text = std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
         let s = scenario(&id, &text).with_context(|| format!("converting {}", path.display()))?;
-        std::fs::write(out.join(format!("{id}.json")), serde_json::to_string_pretty(&s)? + "\n")?;
+        // 場面の本体は大きくなる (観測点が数千ある) ので詰めて書く
+        std::fs::write(out.join(format!("{id}.json")), serde_json::to_string(&s)? + "\n")?;
         index.push(s.summary);
     }
     std::fs::write(out.join("index.json"), serde_json::to_string_pretty(&index)? + "\n")?;
@@ -97,10 +102,14 @@ mod tests {
 
     #[test]
     fn reads_name_and_description_from_header() {
-        let s = scenario("x", "# name: 名前\n# description: 説明\n").unwrap();
+        let s = scenario("x", "# name: 名前\n# description: 説明\n# source: 出典\n").unwrap();
         assert_eq!(
-            (s.summary.name.as_str(), s.summary.description.as_str()),
-            ("名前", "説明")
+            (
+                s.summary.name.as_str(),
+                s.summary.description.as_str(),
+                s.summary.source.as_str()
+            ),
+            ("名前", "説明", "出典")
         );
         assert_eq!(scenario("x", "").unwrap().summary.name, "x");
     }
