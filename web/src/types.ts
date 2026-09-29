@@ -90,7 +90,17 @@ export interface TsunamiEvent extends EventBase {
   areas: TsunamiArea[];
 }
 
-export type EqEvent = QuakeEvent | EewEvent | EewDetectionEvent | TsunamiEvent;
+/** 地震感知情報の評価 (P2P地震情報の利用者の「揺れた」報告の集計) */
+export interface UserquakeEvent extends EventBase {
+  kind: "userquake";
+  started_at: string;
+  updated_at: string;
+  count: number;
+  confidence: number;
+  areas: { code: number; count: number; confidence: number }[];
+}
+
+export type EqEvent = QuakeEvent | EewEvent | EewDetectionEvent | TsunamiEvent | UserquakeEvent;
 
 export type ServerMessage =
   | { type: "hello"; server_time_ms: number; events: EqEvent[] }

@@ -59,7 +59,8 @@ fn default_true() -> bool {
 /// どのイベントをプラグインに渡すか
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Filter {
-    /// 対象種別 ("quake" / "eew" / "eew_detection" / "tsunami")。空ならすべて。
+    /// 対象種別 ("quake" / "eew" / "eew_detection" / "tsunami" / "userquake")。空なら userquake 以外すべて。
+    /// userquake (利用者の報告の集計で気象庁の発表ではない) は明示したときだけ渡す
     #[serde(default)]
     pub kinds: Vec<String>,
     /// 地震情報・EEW の最大震度がこれ未満なら渡さない ("3", "5弱", "5-", 45 など)
@@ -69,7 +70,8 @@ pub struct Filter {
 
 impl Filter {
     pub fn accepts(&self, ev: &Event) -> bool {
-        if !self.kinds.is_empty() && !self.kinds.iter().any(|k| k == ev.kind()) {
+        let listed = self.kinds.iter().any(|k| k == ev.kind());
+        if (!self.kinds.is_empty() || ev.kind() == "userquake") && !listed {
             return false;
         }
         match (self.min_scale, ev.max_scale()) {
@@ -183,6 +185,23 @@ kinds = ["quake"]"#,
         let t: toml::Table = toml::from_str("type = \"x\"\nmin_scale = 3").unwrap();
         let c: Common = t.try_into().unwrap();
         assert_eq!(c.filter.min_scale, Some(Scale::S3));
+    }
+
+    #[test]
+    fn userquake_goes_to_sinks_only_when_listed() {
+        let uq = p2pquake::parse(
+            r#"{"code":9611,"id":"u","count":3,"confidence":0.97,"started_at":"s","updated_at":"u","area_confidences":{}}"#,
+        )
+        .unwrap()
+        .unwrap();
+        // 種別を指定しない (すべて) でも、利用者の報告の集計は渡さない
+        assert!(!Filter::default().accepts(&uq));
+        assert!(Filter::default().accepts(&quake(30)));
+        let listed = Filter {
+            kinds: vec!["userquake".into()],
+            min_scale: None,
+        };
+        assert!(listed.accepts(&uq));
     }
 
     #[test]

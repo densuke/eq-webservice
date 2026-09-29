@@ -60,7 +60,7 @@ function tone(c: AudioContext, freq: number, at: number, dur: number, type: Osci
   osc.stop(t + dur + 0.05);
 }
 
-export function play(level: AlertLevel | "pip"): void {
+export function play(level: AlertLevel | "pip" | "feel"): void {
   if (!soundEnabled() || !ctx || ctx.state !== "running") return;
   const c = ctx;
   switch (level) {
@@ -79,6 +79,10 @@ export function play(level: AlertLevel | "pip"): void {
       break;
     case "pip": // 波の広がり中の刻み
       tone(c, 1200, 0, 0.12, "sine", 0.15);
+      break;
+    case "feel": // 地震感知情報 (利用者の「揺れた」報告): 低めの控えめな 2 音
+      tone(c, 523, 0, 0.35, "triangle", 0.14);
+      tone(c, 523, 0.3, 0.35, "triangle", 0.14);
       break;
     case "strong": // 2 音を交互に繰り返す
       for (let i = 0; i < 12; i++) tone(c, i % 2 ? 770 : 960, i * 0.2, 0.18, "square", 0.12);

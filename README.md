@@ -34,6 +34,7 @@ Wolfx EEW (wss, 任意)─┘
 | 551 | 地震情報（震度速報・震源・各地の震度） | 震央、観測震度で都道府県を塗る、観測点の一覧 |
 | 552 | 津波予報 | 対象の沿岸を等級の色（大津波警報=紫、津波警報=赤、津波注意報=黄）で描き、解除まで表示。バナー、一覧・詳細 |
 | 554 | 緊急地震速報の発表検出 | 受信のみ |
+| 9611 | 地震感知情報（P2P地震情報の利用者による「揺れた」報告の集計。気象庁の発表ではない） | 報告のあった地域に広がる輪（信頼度が低いほど薄く）、控えめな音と「揺れの報告」の知らせ。最後の更新から 2 分、またはその揺れの緊急地震速報・地震情報が届くまで。一覧には入れない |
 
 ※ P2P地震情報は緊急地震速報の警報（予測震度5弱以上）しか配信しないため、予報は
 [Wolfx Open API](https://wolfx.jp/docs/open-api) の JMA 緊急地震速報から受け取ります。
@@ -164,7 +165,8 @@ cargo run -p eq-server -- convert samples/scenarios web/public/demo
 `config.toml` の `[[sinks]]` に並べます。共通のキー:
 
 - `type` … `rss` / `discord` / `jsonl` / `webhook`
-- `kinds` … 流す種類（`quake` / `eew` / `eew_detection` / `tsunami`）。省略するとすべて
+- `kinds` … 流す種類（`quake` / `eew` / `eew_detection` / `tsunami` / `userquake`）。省略すると `userquake` 以外すべて
+  （地震感知情報は利用者の報告の集計なので、`userquake` と書いたときだけ流します）
 - `min_scale` … 最大震度がこれ未満の地震情報・EEW は流さない（`"3"`, `"5弱"` など）
 - `enabled`, `name`
 
@@ -250,4 +252,6 @@ cargo llvm-cov --summary-only  # カバレッジ (計器として見るだけ。
 - 津波予報区・地震情報細分区域: [気象庁「予報区等GISデータ」](https://www.data.jma.go.jp/developer/gis.html)を加工して作成
 - 周辺国の陸地: [Natural Earth](https://www.naturalearthdata.com/)（パブリックドメイン）を加工
 - 震度観測点の位置: [気象庁の震度観測点の一覧](https://www.data.jma.go.jp/eqev/data/intens-st/)を加工して作成
+- 地震感知情報の地域の位置 (`web/public/userquake-areas.json`): [p2pquake/epsp-specifications](https://github.com/p2pquake/epsp-specifications) の `epsp-area.csv` を加工
+  （MIT License, Copyright (c) 2018 takuya (P2PQuake)）
 - ソースコード: GPL-3.0-or-later（[LICENSE](LICENSE)）

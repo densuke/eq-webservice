@@ -116,6 +116,8 @@ export class JapanMap {
   private fade = 1;
   private view: View;
   private epicenters: SVGGElement[] = [];
+  private feels: SVGGElement[] = [];
+  private feelSig = "[]";
   private epicenterSig = "";
   private insets: ((typeof INSETS)[number] & { box: HTMLDivElement; svg: SVGSVGElement; markers: SVGGElement; bounds: Box })[] = [];
   private markerItems: { key: string; x: number; y: number; label: number | null; primary: boolean; scale: number }[] = [];
@@ -644,9 +646,30 @@ export class JapanMap {
     this.svg.classList.add("picking");
   }
 
+  /** 地震感知情報 (利用者の「揺れた」報告) の地域の印。空で消す */
+  setUserquake(items: { name: string; lat: number; lon: number; count: number; grade: string }[]): void {
+    const sig = JSON.stringify(items);
+    if (sig === this.feelSig) return;
+    this.feelSig = sig;
+    this.feels.forEach((g) => g.remove());
+    this.feels = items.map(({ name, lat, lon, count, grade }) => {
+      const [x, y] = project(lon, lat);
+      const g = el("g", { class: `userquake grade-${grade}` });
+      g.dataset.x = String(x);
+      g.dataset.y = String(y);
+      g.dataset.k = "1";
+      const title = el("title");
+      title.textContent = `${name}: 揺れの報告 ${count} 件 (信頼度 ${grade})`;
+      g.append(title, el("circle", { r: 14, class: "uq-ring" }), el("circle", { r: 4, class: "uq-dot" }));
+      return g;
+    });
+    this.markerLayer.prepend(...this.feels);
+    this.updateMarkerScale();
+  }
+
   private updateMarkerScale(): void {
     const k = this.unitsPerPixel();
-    for (const g of this.home ? [...this.epicenters, this.home] : this.epicenters) {
+    for (const g of [...this.epicenters, ...this.feels, ...(this.home ? [this.home] : [])]) {
       const { x, y, k: size } = g.dataset;
       g.setAttribute("transform", `translate(${x} ${y}) scale(${k * Number(size)})`);
     }

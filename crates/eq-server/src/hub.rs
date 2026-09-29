@@ -104,6 +104,11 @@ impl Hub {
             }
             st.recent.retain(|r| same(r).is_none());
         }
+        // 地震感知情報は同じ揺れ (開始時刻) の最新の評価だけを直近履歴に残す
+        if let EventBody::Userquake(u) = &ev.body {
+            st.recent
+                .retain(|r| !matches!(&r.body, EventBody::Userquake(x) if x.started_at == u.started_at));
+        }
         st.recent.push_back(ev.clone());
         while st.recent.len() > self.recent_capacity {
             st.recent.pop_front();

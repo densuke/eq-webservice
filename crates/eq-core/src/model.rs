@@ -32,6 +32,8 @@ pub enum EventBody {
     EewDetection(EewDetection),
     /// 津波予報
     Tsunami(Tsunami),
+    /// 地震感知情報の評価 (P2P地震情報の利用者による「揺れた」報告の集計。気象庁の発表ではない)
+    Userquake(Userquake),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -152,6 +154,27 @@ pub struct Eew {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Userquake {
+    /// 報告が始まった時刻。同じ揺れの評価を束ねるキー
+    pub started_at: String,
+    pub updated_at: String,
+    /// 報告の件数
+    pub count: u32,
+    /// 信頼度 (0〜1。0 は表示しない)
+    pub confidence: f64,
+    /// 地域ごとの件数と信頼度
+    pub areas: Vec<UserquakeArea>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UserquakeArea {
+    /// P2P地震情報の地域コード (epsp-area.csv)
+    pub code: u32,
+    pub count: u32,
+    pub confidence: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EewDetection {
     /// "Full" (チャイム + 音声) / "Chime" (チャイムのみ)
     pub detection_type: String,
@@ -228,6 +251,7 @@ impl Event {
                 }
             }
             EventBody::EewDetection(_) => "緊急地震速報の発表を検出".to_string(),
+            EventBody::Userquake(u) => format!("【地震感知情報】{}件の報告", u.count),
             EventBody::Tsunami(t) => {
                 if t.cancelled {
                     "【津波予報】解除".to_string()
@@ -290,6 +314,10 @@ impl Event {
             EventBody::EewDetection(d) => {
                 lines.push(format!("検出種別: {}", d.detection_type));
             }
+            EventBody::Userquake(u) => {
+                lines.push(format!("報告の開始: {}", u.started_at));
+                lines.push(format!("信頼度: {:.2}", u.confidence));
+            }
             EventBody::Tsunami(t) => {
                 lines.push(format!("発表時刻: {}", t.issued_at));
                 for a in &t.areas {
@@ -328,6 +356,10 @@ impl Event {
                 }
             }
             EventBody::Tsunami(t) => t.issued_at = jst::shift_str(&t.issued_at, issued_delta_ms),
+            EventBody::Userquake(u) => {
+                u.started_at = jst::shift_str(&u.started_at, issued_delta_ms);
+                u.updated_at = jst::shift_str(&u.updated_at, issued_delta_ms);
+            }
             EventBody::EewDetection(_) => {}
         }
     }
@@ -338,6 +370,7 @@ impl Event {
             EventBody::Quake(q) => jst::parse_ms(&q.issued_at),
             EventBody::Eew(e) => jst::parse_ms(&e.issued_at),
             EventBody::Tsunami(t) => jst::parse_ms(&t.issued_at),
+            EventBody::Userquake(u) => jst::parse_ms(&u.updated_at),
             EventBody::EewDetection(_) => None,
         }
     }
@@ -357,6 +390,7 @@ impl Event {
             EventBody::Eew(_) => "eew",
             EventBody::EewDetection(_) => "eew_detection",
             EventBody::Tsunami(_) => "tsunami",
+            EventBody::Userquake(_) => "userquake",
         }
     }
 }

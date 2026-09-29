@@ -40,6 +40,7 @@ export function shiftJst(s: string, delta: number): string {
 }
 
 function issuedMs(e: EqEvent): number | null {
+  if (e.kind === "userquake") return parseJst(e.updated_at);
   return "issued_at" in e ? parseJst(e.issued_at) : null;
 }
 
@@ -64,6 +65,8 @@ function shift(e: EqEvent, delta: number, run: number): EqEvent {
       };
     case "tsunami":
       return { ...e, id, source: "demo", issued_at: t(e.issued_at) };
+    case "userquake":
+      return { ...e, id, source: "demo", started_at: t(e.started_at), updated_at: t(e.updated_at) };
     default:
       return { ...e, id, source: "demo" };
   }
