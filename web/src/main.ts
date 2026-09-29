@@ -8,7 +8,7 @@ import { fadeOpacity } from "./fade.ts";
 import { esc } from "./html.ts";
 import { notify, renderCountdown, updateHome } from "./personal-ui.ts";
 import { sameQuake } from "./priority.ts";
-import { activeEews, currentGroup, displayedInfoMs, placeOf, priorityGroups, updateNumbers, updateTour } from "./quakes.ts";
+import { activeEews, currentGroup, displayedInfoMs, placeOf, priorityGroups, unsettledGroups, updateNumbers, updateTour, waveSources } from "./quakes.ts";
 import { renderMarkers, renderScene, scene } from "./scene.ts";
 import { play } from "./sound.ts";
 import { $, map } from "./dom.ts";
@@ -69,13 +69,14 @@ export function tick(): void {
     $("#wave-info").textContent = "";
   }
   map.setTarget(box);
-  map.setFade(app.selectedKey ? 1 : fadeOpacity(now - displayedInfoMs()));
+  // 平時は地震の塗り分けを消して気象警報・注意報を塗る
+  const calm = renderWarnings(now, renderUserquake(now));
+  map.setFade(app.selectedKey ? 1 : calm ? 0 : fadeOpacity(now - displayedInfoMs()));
   renderMode();
   renderSound();
   renderCountdown(now);
   updatePointsOpen();
   renderDemoControls();
-  renderWarnings(now, renderUserquake(now));
   // 波の表示中は滑らかに、そうでなければ時計の更新だけ
   if (waving) raf = requestAnimationFrame(tick);
   // デモの再生中は倍速でも情報が遅れないよう細かく
@@ -179,9 +180,12 @@ function renderUserquake(now: number): boolean {
  * 平時 (地震・津波・揺れの報告の表示が無く、実際の情報を見ているとき) だけ気象警報・注意報を塗る。
  * 地震の情報が届けば地震の表示に切り替わり、落ち着けば平時に戻る
  */
-function renderWarnings(now: number, feeling: boolean): void {
-  const calm =
-    !app.demo && !app.selectedKey && !feeling && priorityGroups(now).length === 0 && activeEews(now).length === 0 && activeAreas(app.world.tsunami).length === 0;
+function renderWarnings(now: number, feeling: boolean): boolean {
+  const tsunami = activeAreas(app.world.tsunami).length > 0;
+  const quiet = unsettledGroups(now).length === 0 && activeEews(now).length === 0 && waveSources(now).length === 0;
+  const calm = !app.demo && !app.selectedKey && !feeling && !tsunami && quiet;
+  // 地震の表示の間は、すぐ平時に戻すボタン (津波予報が出ている間とデモ中は出さない)
+  $("#calm-now").hidden = calm || tsunami || app.demo != null;
   const w = calm ? app.warnings : null;
   const items = w
     ? Object.entries(w.areas).map(([code, kinds]) => ({ code, level: topLevel(kinds), text: kinds.map((k) => k.name).join("、") }))
@@ -192,6 +196,7 @@ function renderWarnings(now: number, feeling: boolean): void {
   }
   map.setWarnings(items);
   $("#legend-warn").hidden = items.length === 0;
+  return calm;
 }
 let warningAreasLoading = false;
 
@@ -261,6 +266,13 @@ $("#list").addEventListener("click", (e) => {
 map.onSelect = select;
 
 // 全体図: 日本全体を表示する。震央を押すとその地震へ寄る (「リアルタイムに戻る」で自動に戻る)
+// 警報・注意報: 今の地震の表示を終えて平時に戻す (次に新しい地震の情報が届けば、また地震の表示になる)
+$("#calm-now").addEventListener("click", () => {
+  app.calmSince = now();
+  app.selectedKey = null;
+  map.release();
+  renderAll();
+});
 $("#overview").addEventListener("click", () => {
   map.showOverview();
   renderMode();

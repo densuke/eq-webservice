@@ -2,10 +2,10 @@
 
 import { type Box, followRadiusKm, pad, pointBox, stopRadiusKm, union } from "./camera.ts";
 import { project } from "./map.ts";
-import { type Center, type WaveSource, currentGroup, geoOf, groupPlace, groupScale, priorityGroups, recentQuakes, relatedQuake, waveSources } from "./quakes.ts";
+import { type Center, type WaveSource, currentGroup, geoOf, groupPlace, groupScale, recentQuakes, relatedQuake, unsettledGroups, waveSources } from "./quakes.ts";
 import { sameQuake } from "./priority.ts";
 import { $, map } from "./dom.ts";
-import { CAMERA_MS, REPLAY_SPEED, WAVE_MAX_SEC, app, now } from "./state.ts";
+import { REPLAY_SPEED, WAVE_MAX_SEC, app, now } from "./state.ts";
 import { activeAreas } from "./tsunami.ts";
 import { VP_KM_S, VS_KM_S, surfaceRadiusKm } from "./waves.ts";
 
@@ -74,7 +74,7 @@ export function scene(now: number): Scene | null {
   // 波が終わったら、津波予報が出ていれば予報区全体を見せる
   const tsunamiBox = map.tsunamiBox(activeAreas(app.world.tsunami).map((a) => a.name));
   if (!src && tsunamiBox) return { center: null, others: [], t: null, shaken: tsunamiBox, replay: false };
-  const g = src?.group ?? priorityGroups(now).find((x) => now - x.updatedAt <= CAMERA_MS);
+  const g = src?.group ?? unsettledGroups(now)[0];
   if (!g) return null;
   const geo = geoOf(g);
   return {

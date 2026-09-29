@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { byPriority, sameQuake } from "./priority.ts";
+import { MINOR_SETTLE_MS, SETTLE_MS, byPriority, sameQuake, settleMs } from "./priority.ts";
 
 const t0 = Date.UTC(2026, 8, 28, 3, 0, 0);
 
@@ -26,4 +26,13 @@ test("close in time but far apart are different earthquakes", () => {
   const miyagi = { originMs: t0 + 12_000, lat: 38.3, lon: 142.0 };
   const chiba = { originMs: t0, lat: 35.7, lon: 140.9 };
   assert.ok(!sameQuake(miyagi, chiba));
+});
+
+test("minor quakes (intensity 2 or less) go back to the calm view sooner", () => {
+  assert.equal(settleMs(10), MINOR_SETTLE_MS);
+  assert.equal(settleMs(20), MINOR_SETTLE_MS);
+  assert.equal(settleMs(30), SETTLE_MS);
+  assert.equal(settleMs(70), SETTLE_MS);
+  // 最大震度が分からない (震源の情報だけ・EEW の予測なし) ものは通常どおり
+  assert.equal(settleMs(-1), SETTLE_MS);
 });

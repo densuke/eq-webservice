@@ -12,8 +12,6 @@ import type { Warnings } from "./warnings.ts";
 export { WAVE_MAX_SEC } from "./waves.ts";
 /** EEW 警報バナーを出し続ける時間 */
 export const EEW_BANNER_MS = 3 * 60_000;
-/** 最後の情報からこの時間がたち、揺れも描き終えたら、カメラは日本全体に戻す (選んだ地震と津波予報は除く) */
-export const CAMERA_MS = 3 * 60_000;
 /** 履歴を選んだときの P波・S波の再生速度 */
 export const REPLAY_SPEED = 3;
 
@@ -74,6 +72,8 @@ export const app = {
   tourKey: null as string | null,
   /** 新しく届いた地震をしばらく優先して見せる (巡回より先) */
   tourHold: null as { key: string; until: number } | null,
+  /** 「警報・注意報」ボタンで平時に戻した時刻。これ以前に届いた地震の情報は表示を終えたものとする */
+  calmSince: 0,
 };
 
 /** main.ts にある処理。ほかのモジュールからはこれを通して呼ぶ (循環参照を避けるため) */
