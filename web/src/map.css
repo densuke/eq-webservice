@@ -63,5 +63,6 @@
 /* 平時の天気: アメダスの雨の地点と、主要都市の天気・気温 */
 .rain-dot { pointer-events: none; fill: none; stroke-linecap: round; vector-effect: non-scaling-stroke; stroke-width: 5px; opacity: 0.9; }
 .city .city-dot { fill: #fff; stroke: #000; stroke-width: 1; }
-.city .city-box { fill: rgba(13, 17, 23, 0.8); stroke: rgba(255, 255, 255, 0.35); stroke-width: 1; }
-.city .city-text { font-size: 13px; font-weight: 700; fill: #fff; }
+/* 札は明るい地にして、絵文字 (傘など) が暗い地に沈まないように */
+.city .city-box { fill: rgba(240, 244, 248, 0.92); stroke: rgba(0, 0, 0, 0.55); stroke-width: 1; }
+.city .city-text { font-size: 13px; font-weight: 700; fill: #0d1117; }
