@@ -27,6 +27,11 @@
 .pref.hit.forecast { animation: forecast-pulse-pref 1.2s ease-in-out infinite; }
 .area.hit.forecast { animation: forecast-pulse-area 1.2s ease-in-out infinite; }
 .label.forecast { animation: forecast-pulse-label 1.2s ease-in-out infinite; }
+/* 続報で外された予測は、いきなり消さずに薄れながら消す (DROPPED_MS と同じ 8 秒) */
+@keyframes dropped-fade { from { fill-opacity: 0.6; stroke-opacity: 0.8; } to { fill-opacity: 0; stroke-opacity: 0; } }
+@keyframes dropped-fade-label { from { opacity: 0.6; } to { opacity: 0; } }
+.pref.hit.dropped, .area.hit.dropped { stroke: #fff; stroke-dasharray: 4 3; animation: dropped-fade 8s linear forwards; }
+.label.dropped { animation: dropped-fade-label 8s linear forwards; }
 @media (prefers-reduced-motion: reduce) { .pref.forecast, .area.forecast, .label.forecast { animation: none; } }
 .home-marker { pointer-events: none; }
 .home-ring { fill: none; stroke: #fff; stroke-width: 2.5; }
