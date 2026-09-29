@@ -133,15 +133,17 @@ body {
   border: 6px solid transparent; border-left-color: var(--c); transform-origin: 6px 6px;
 }
 
-/* 凡例 (地図の左下)。震度は細いゲージ、津波と P波・S波は必要なときだけ行を足す */
+/* 凡例 (地図の左下、日本の西の海の上に縦長に)。震度は縦のゲージ (上ほど強い)、津波・P波 S波・警報は必要なときだけ足す */
 .legend {
-  position: absolute; left: 10px; bottom: 10px; z-index: 1; pointer-events: none; width: 180px;
-  background: rgba(13, 17, 23, 0.8); padding: 5px 6px; border-radius: 6px; font-size: 10px; color: var(--muted);
+  position: absolute; left: 10px; bottom: 10px; z-index: 1; pointer-events: none;
+  background: rgba(13, 17, 23, 0.8); padding: 6px 7px; border-radius: 6px; font-size: 10px; color: var(--muted);
 }
-.gauge, .gauge-labels { display: grid; grid-template-columns: repeat(9, 1fr); }
-.gauge { height: 6px; border-radius: 3px; overflow: hidden; }
-.gauge-labels { text-align: center; line-height: 1.4; }
-.legend-row { display: flex; gap: 8px; margin-top: 3px; }
+.scale { display: flex; gap: 5px; }
+.gauge, .gauge-labels { display: flex; flex-direction: column-reverse; }
+.gauge { width: 7px; border-radius: 3px; overflow: hidden; }
+.gauge i { height: 15px; }
+.gauge-labels span { height: 15px; line-height: 15px; }
+.legend-row { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; margin-top: 6px; }
 .lt, .lw { padding-bottom: 1px; }
 .lt.watch { border-bottom: 3px solid var(--t-watch); }
 .lt.warning { border-bottom: 3px solid var(--t-warning); }
@@ -267,6 +269,9 @@ a.banner-item:hover p { text-decoration: underline; }
 @media (max-height: 520px) and (min-width: 801px) {
   .credit { max-height: 1.6em; overflow: hidden; padding-top: 4px; padding-bottom: 4px; }
   .detail { max-height: 40%; }
+  /* 縦長の凡例が南西諸島の別枠に届かないよう縮める */
+  .gauge i, .gauge-labels span { height: 10px; line-height: 10px; }
+  .legend-row { gap: 1px; margin-top: 3px; }
 }
 /* 横向きのスマホ (高さ 440px 以下): バナーも出さない */
 @media (max-height: 440px) and (min-width: 801px) {
@@ -284,6 +289,9 @@ a.banner-item:hover p { text-decoration: underline; }
   .clock-panel { bottom: 6px; right: 6px; padding: 3px 8px 4px; }
   .inset-ogasawara { bottom: 70px; }
   .inset-okinawa, .inset-ogasawara { height: 100px; }
+  /* 地図が細いと左下の凡例が九州に重なるので、南西諸島の別枠の下 (日本海の上) へ移して小さくする */
+  .legend { bottom: auto; top: 118px; padding: 4px 5px; }
+  .gauge i, .gauge-labels span { height: 11px; line-height: 11px; }
   .c-hm { font-size: 26px; }
   .c-day { font-size: 20px; }
   .eew-banner { font-size: 14px; }
