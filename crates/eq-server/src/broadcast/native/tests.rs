@@ -13,13 +13,15 @@ use super::*;
 use crate::quake::{Hypocenter, Scale};
 
 const NOW: u64 = 1_790_000_000_000;
+static NO_ICONS: std::sync::LazyLock<Icons> = std::sync::LazyLock::new(Icons::new);
 
 fn renderer(text: Text) -> Renderer {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/public");
     let view = View::fit_home(MAP_RECT);
     let prefs = geo::load(&dir.join("japan.geojson"), "name", &view).unwrap();
     let areas = geo::load(&dir.join("warning-areas.geojson"), "code", &view).unwrap();
-    Renderer::new(view, prefs, areas, text)
+    let neighbors = geo::load(&dir.join("neighbors.geojson"), "name", &view).unwrap();
+    Renderer::new(view, neighbors, prefs, areas, text)
 }
 
 fn center_of(pref: &str) -> (u32, u32) {
@@ -28,6 +30,12 @@ fn center_of(pref: &str) -> (u32, u32) {
     let shapes = geo::load(&dir.join("japan.geojson"), "name", &view).unwrap();
     let c = shapes.iter().find(|s| s.key == pref).unwrap().center;
     (c.0 as u32, c.1 as u32)
+}
+
+/// 日本海の画素 (陸から離れた海)
+fn sea_px() -> (u32, u32) {
+    let (x, y) = View::fit_home(MAP_RECT).px(134.0, 40.5);
+    (x as u32, y as u32)
 }
 
 fn rgb(pm: &Pixmap, (x, y): (u32, u32)) -> [u8; 3] {
@@ -59,6 +67,7 @@ fn scene<'a>(
     weather: Option<&'a CityWeather>,
 ) -> Scene<'a> {
     Scene {
+        icons: &NO_ICONS,
         quake,
         history,
         warnings,
@@ -83,9 +92,9 @@ fn calm_frame_shows_the_sea_and_a_warned_prefecture() {
     };
     let pm = r.render(&scene(None, &[], Some(&warnings), None));
     assert_eq!((pm.width(), pm.height()), (1280, 720));
-    assert_eq!(rgb(&pm, (100, 100)), SEA); // 日本海
-                                           // 警報の赤 (陸に半透明で重なる) が地図に出る。県の全体を塗るのではなく、市町村等の区域だけを塗る
-                                           // (左下の凡例にも赤があるので、数えるのは凡例より右)
+    assert_eq!(rgb(&pm, sea_px()), SEA); // 日本海
+                                         // 警報の赤 (陸に半透明で重なる) が地図に出る。県の全体を塗るのではなく、市町村等の区域だけを塗る
+                                         // (左下の凡例にも赤があるので、数えるのは凡例より右)
     let red = |pm: &Pixmap| {
         let w = pm.width() as usize;
         let hit = |(i, p): (usize, &tiny_skia::PremultipliedColorU8)| {
@@ -125,7 +134,113 @@ fn quake_frame_paints_the_prefecture_with_its_scale_color() {
     assert_eq!(rgb(&pm, center_of("東京都")), [0xfa, 0xf5, 0x00]); // 震度 4
     assert_eq!(rgb(&pm, center_of("長野県")), [0x00, 0xaa, 0xff]); // 震度 2
     assert_eq!(rgb(&pm, center_of("愛知県")), [0x3a, 0x42, 0x50]); // 揺れていない県
-    assert_eq!(rgb(&pm, (100, 100)), SEA);
+    assert_eq!(rgb(&pm, sea_px()), SEA);
+}
+
+#[test]
+fn neighbor_countries_are_drawn_under_japan_and_a_missing_file_is_fine() {
+    let mut r = renderer(Text::none());
+    let pm = r.render(&scene(None, &[], None, None));
+    let (x, y) = View::fit_home(MAP_RECT).px(126.98, 37.57); // ソウル
+    assert_eq!(rgb(&pm, (x as u32, y as u32)), paint::NEIGHBOR);
+    assert_eq!(rgb(&pm, center_of("長野県")), [0x3a, 0x42, 0x50]); // 日本の県はその上
+                                                                   // load_renderer は neighbors.geojson が無くても動く
+    let dir = tempfile::tempdir().unwrap();
+    let web = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/public");
+    for f in ["japan.geojson", "warning-areas.geojson"] {
+        std::fs::copy(web.join(f), dir.path().join(f)).unwrap();
+    }
+    let cfg = BroadcastConfig {
+        map_dir: dir.path().display().to_string(),
+        font: "/nonexistent".into(),
+        ..BroadcastConfig::default()
+    };
+    let mut bare = load_renderer(&cfg).unwrap();
+    let pm = bare.render(&scene(None, &[], None, None));
+    assert_eq!(rgb(&pm, (x as u32, y as u32)), SEA);
+}
+
+/// 中心から 3 画素以内に、その色 (各成分の差が 3 以内) の画素があるか
+fn near(pm: &Pixmap, (cx, cy): (u32, u32), want: [u8; 3]) -> bool {
+    (cy - 3..=cy + 3)
+        .any(|y| (cx - 3..=cx + 3).any(|x| rgb(pm, (x, y)).iter().zip(want).all(|(a, b)| a.abs_diff(b) <= 3)))
+}
+
+/// 別枠の中の画素 (那覇のあたり)
+fn okinawa_px() -> (u32, u32) {
+    let main = View::fit_home(MAP_RECT);
+    let inset = frame::Frame::inset(&main, &frame::OKINAWA).unwrap();
+    let (x, y) = inset.view.px(127.95, 26.5); // 沖縄本島
+    (x as u32, y as u32)
+}
+
+#[test]
+fn the_okinawa_inset_is_drawn_with_land_and_the_scale_color() {
+    let mut r = renderer(Text::none());
+    let calm = r.render(&scene(None, &[], None, None));
+    assert!(near(&calm, okinawa_px(), [0x3a, 0x42, 0x50])); // 別枠の中の沖縄本島は陸 (細い島なので、まわりも見る)
+    assert_eq!(rgb(&calm, (50, 60)), SEA); // 枠の中の海 (枠は 10,46 から)
+    let line = rgb(&calm, (9, 100)); // 枠線 (角の丸めで少しにじむ)
+    assert!(line[2] > 60 && line[2] < 0x53, "{line:?}");
+    let q = quake(Scale::S3, &[("沖縄県", Scale::S3)], None);
+    let shaken = r.render(&scene(Some(&q), &[], None, None));
+    assert!(near(&shaken, okinawa_px(), [0x00, 0x41, 0xff])); // 震度 3
+}
+
+#[test]
+fn warnings_in_okinawa_are_drawn_in_the_inset_too() {
+    let mut r = renderer(Text::none());
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/public");
+    let view = View::fit_home(MAP_RECT);
+    let areas = geo::load(&dir.join("warning-areas.geojson"), "code", &view).unwrap();
+    let kind = vec![Kind {
+        name: "特別警報".into(),
+    }];
+    let warnings = Warnings {
+        areas: areas
+            .into_iter()
+            .filter(|s| s.key.starts_with("47"))
+            .map(|s| (s.key, kind.clone()))
+            .collect(),
+    };
+    let pm = r.render(&scene(None, &[], Some(&warnings), None));
+    assert!(near(&pm, okinawa_px(), [0x13, 0x0a, 0x16])); // 特別警報の暗い色 (85%) が陸に重なる
+}
+
+#[test]
+fn the_weather_icon_replaces_the_kanji_and_is_shown_at_night_too() {
+    let mut r = renderer(Text::none());
+    let weather = CityWeather {
+        cities: vec![City {
+            name: "東京".into(),
+            lat: 35.69,
+            lon: 139.69,
+            code: "100".into(),
+            temp: Some(24.0),
+        }],
+        rain: vec![],
+    };
+    let orange = |pm: &Pixmap| {
+        pm.pixels()
+            .iter()
+            .filter(|p| p.red() > 230 && (90..115).contains(&p.green()) && p.blue() < 20)
+            .count()
+    };
+    let none = r.render(&scene(None, &[], None, Some(&weather)));
+    assert_eq!(orange(&none), 0);
+    // アイコンが取れていれば札の中に出る (昼と夜で別のファイル)
+    let day = icon::name_for("100", NOW - NOW % 86_400_000 + 3 * 3_600_000).unwrap(); // 12 時 JST
+    let night = icon::name_for("100", NOW - NOW % 86_400_000 + 12 * 3_600_000).unwrap(); // 21 時 JST
+    assert_ne!(day, night);
+    let sun = icon::rasterize(include_bytes!("testdata/sun.svg")).unwrap();
+    let icons: Icons = [(day.to_string(), sun)].into();
+    let mut with = scene(None, &[], None, Some(&weather));
+    with.icons = &icons;
+    with.now_ms = NOW - NOW % 86_400_000 + 3 * 3_600_000;
+    assert!(orange(&r.render(&with)) > 100);
+    // 夜のアイコンはまだ取れていないので、漢字 (文字なしの設定なので何も出ない) に戻る
+    with.now_ms = NOW - NOW % 86_400_000 + 12 * 3_600_000;
+    assert_eq!(orange(&r.render(&with)), 0);
 }
 
 #[test]

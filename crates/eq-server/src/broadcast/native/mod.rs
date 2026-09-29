@@ -1,15 +1,20 @@
 //! 配信の画面を Chrome を使わずに Rust で描く (docs/broadcast-native.md)。
 //! サーバから地震情報 (WebSocket)・警報・天気を受け取り、変化したときだけ 1280x720 の RGBA を描き直して
-//! watch で渡す (fps に合わせて同じ画面を繰り返し送るのは、呼ぶ側の時計)。
+//! watch で渡す (I420 に変換済み。fps に合わせて同じ画面を繰り返し送るのは、呼ぶ側の時計)。
 //! 平時と地震の画面の切り替えに合わせて、mixer に BGM を流す・止める知らせを出す。
 
+mod calm;
 mod data;
 mod draw;
+mod frame;
 mod geo;
+mod icon;
 mod model;
 mod paint;
 mod panel;
+mod telops;
 mod text;
+mod yuv;
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -25,6 +30,7 @@ use super::BroadcastConfig;
 use crate::quake::Event;
 use data::{CityWeather, ServerMessage, Warnings};
 use draw::{Renderer, Scene};
+use icon::Icons;
 
 /// 描き直すかを調べる間隔
 const CHECK_EVERY: Duration = Duration::from_millis(200);
@@ -32,6 +38,9 @@ const RECONNECT_AFTER: Duration = Duration::from_secs(5);
 /// 警報・天気を取り直す間隔 (取れなかったときは短く)
 const POLL_EVERY: Duration = Duration::from_secs(300);
 const POLL_RETRY: Duration = Duration::from_secs(30);
+/// 足りないアイコンが無いか調べる間隔 (天気が新しくなって、知らないコードが来たときのため)
+const ICON_CHECK: Duration = Duration::from_secs(5);
+const ICON_RETRY: Duration = Duration::from_secs(60);
 const BGM_TITLE_EVERY: Duration = Duration::from_secs(15);
 /// 覚えておく地震情報の数
 const MAX_EVENTS: usize = 300;
@@ -46,6 +55,7 @@ struct State {
     offset: i64,
     warnings: Option<Warnings>,
     weather: Option<CityWeather>,
+    icons: Icons,
     bgm_title: String,
     connected: bool,
     rev: u64,
@@ -92,6 +102,7 @@ pub fn start(cfg: &BroadcastConfig, notices: Option<UnboundedSender<String>>) ->
             st.clone(),
             |s, v: CityWeather| s.weather = Some(v),
         )),
+        tokio::spawn(icon_loop(icon::IMG_BASE.to_string(), st.clone())),
         tokio::spawn(bgm_title_loop(format!("{server}/stream/status-json.xsl"), st.clone())),
         tokio::spawn(render_loop(renderer, st, tx, notices)),
     ];
@@ -101,13 +112,18 @@ pub fn start(cfg: &BroadcastConfig, notices: Option<UnboundedSender<String>>) ->
 fn load_renderer(cfg: &BroadcastConfig) -> anyhow::Result<Renderer> {
     let view = geo::View::fit_home(draw::MAP_RECT);
     let dir = std::path::Path::new(&cfg.map_dir);
+    // 周辺国の陸地は背景なので、無くても続ける
+    let neighbors = geo::load(&dir.join("neighbors.geojson"), "name", &view).unwrap_or_else(|e| {
+        tracing::warn!("broadcast: 周辺国の陸地を読めないので、描きません: {e:#}");
+        Vec::new()
+    });
     let prefs = geo::load(&dir.join("japan.geojson"), "name", &view)?;
     let areas = geo::load(&dir.join("warning-areas.geojson"), "code", &view)?;
     let text = text::Text::load(&cfg.font, cfg.font_index).unwrap_or_else(|e| {
         tracing::warn!("broadcast: font {} を読めないので、文字は描きません: {e:#}", cfg.font);
         text::Text::none()
     });
-    Ok(Renderer::new(view, prefs, areas, text))
+    Ok(Renderer::new(view, neighbors, prefs, areas, text))
 }
 
 /// https://host → wss://host/ws
@@ -143,6 +159,7 @@ async fn render_loop(
             history: &groups[..groups.len().min(HISTORY)],
             warnings: s.warnings.as_ref(),
             weather: s.weather.as_ref(),
+            icons: &s.icons,
             now_ms: now,
             connected: s.connected,
             bgm_title: &s.bgm_title,
@@ -150,7 +167,11 @@ async fn render_loop(
         let pm = renderer.render(&scene);
         let calm = quake.is_none();
         drop(s);
-        let _ = tx.send(Arc::new(pm.take()));
+        let _ = tx.send(Arc::new(yuv::rgba_to_i420(
+            pm.data(),
+            draw::W as usize,
+            draw::H as usize,
+        )));
         if last_calm != Some(calm) {
             last_calm = Some(calm);
             if let Some(n) = &notices {
@@ -223,6 +244,48 @@ async fn poll<T: DeserializeOwned>(url: String, st: Shared, set: fn(&mut State, 
         };
         tokio::time::sleep(wait).await;
     }
+}
+
+/// 天気のアイコン (昼・夜の両方) を、足りないものだけ取って覚える。取れなかったものは 60 秒後にやり直す
+async fn icon_loop(base: String, st: Shared) {
+    let Ok(client) = crate::net::client(Duration::from_secs(10)) else {
+        return;
+    };
+    loop {
+        let missing = {
+            let s = st.lock().unwrap_or_else(|e| e.into_inner());
+            let codes = s
+                .weather
+                .iter()
+                .flat_map(|w| &w.cities)
+                .filter_map(|c| icon::names(&c.code));
+            let mut names: Vec<&str> = codes
+                .flat_map(|(d, n)| [d, n])
+                .filter(|n| !s.icons.contains_key(*n))
+                .collect();
+            names.sort_unstable();
+            names.dedup();
+            names.into_iter().map(str::to_string).collect::<Vec<_>>()
+        };
+        let mut failed = false;
+        for name in missing {
+            match fetch_icon(&client, &base, &name).await {
+                Ok(pm) => change(&st, |s| {
+                    s.icons.insert(name, pm);
+                }),
+                Err(e) => {
+                    tracing::warn!("broadcast: icon {name}: {e:#}");
+                    failed = true;
+                }
+            }
+        }
+        tokio::time::sleep(if failed { ICON_RETRY } else { ICON_CHECK }).await;
+    }
+}
+
+async fn fetch_icon(client: &reqwest::Client, base: &str, name: &str) -> anyhow::Result<tiny_skia::Pixmap> {
+    let svg = crate::net::body(client.get(format!("{base}{name}"))).await?;
+    icon::rasterize(&svg).context("drawing svg")
 }
 
 async fn bgm_title_loop(url: String, st: Shared) {

@@ -339,6 +339,7 @@ git config core.hooksPath .githooks
 - 周辺国の陸地: [Natural Earth](https://www.naturalearthdata.com/)（パブリックドメイン）を加工
 - 震度観測点の位置: [気象庁の震度観測点の一覧](https://www.data.jma.go.jp/eqev/data/intens-st/)を加工して作成
 - 気象警報・注意報: [気象庁防災情報XML](https://xml.kishou.go.jp/)。区域 (市町村等) の境界は[気象庁「予報区等GISデータ」](https://www.data.jma.go.jp/developer/gis.html)を加工して作成 (`tools/jma_warning_areas.py`)
+- 天気アイコン (配信の native 描画): [気象庁ホームページ](https://www.jma.go.jp/bosai/forecast/)の天気予報のアイコンを加工して表示 (公共データ利用規約 第1.0版。コードとアイコンの対応は `tools/jma_telops.py` で作る)
 - 地震感知情報の地域の位置 (`web/public/userquake-areas.json`): [p2pquake/epsp-specifications](https://github.com/p2pquake/epsp-specifications) の `epsp-area.csv` を加工
   （MIT License, Copyright (c) 2018 takuya (P2PQuake)）
 - ソースコード: GPL-3.0-or-later（[LICENSE](LICENSE)）

@@ -144,7 +144,7 @@ pub async fn run(args: &[String]) -> anyhow::Result<()> {
 async fn session(cfg: &BroadcastConfig, output: &[String], secrets: &[String]) -> anyhow::Result<()> {
     let (notice_tx, notice_rx) = tokio::sync::mpsc::unbounded_channel();
     let notices = cfg.mixer.then_some(notice_tx);
-    // 画面: chrome (JPEG を受け取る) か native (Rust で描いた RGBA を watch で受け取る) のどちらか
+    // 画面: chrome (JPEG を受け取る) か native (Rust で描いて I420 にした画面を watch で受け取る) のどちらか
     let (mut screen, mut chrome, mut native) = match cfg.source {
         Source::Chrome => {
             let page = if cfg.mixer {
@@ -248,7 +248,7 @@ fn ffmpeg_args(cfg: &BroadcastConfig, audio: &[String], output: &[String]) -> Ve
         Source::Chrome => a.extend(s(&["-f", "image2pipe", "-c:v", "mjpeg"])),
         Source::Native => {
             let size = format!("{}x{}", cfg.width, cfg.height);
-            a.extend(s(&["-f", "rawvideo", "-pix_fmt", "rgba", "-s", &size]));
+            a.extend(s(&["-f", "rawvideo", "-pix_fmt", "yuv420p", "-s", &size]));
         }
     }
     a.extend(s(&["-framerate", &fps, "-i", "-"]));
@@ -383,7 +383,7 @@ mod tests {
     }
 
     #[test]
-    fn native_video_is_raw_rgba_and_chrome_stays_mjpeg() {
+    fn native_video_is_raw_yuv420p_and_chrome_stays_mjpeg() {
         let out = ["out.flv".to_string()];
         let chrome = ffmpeg_args(&BroadcastConfig::default(), &[], &out);
         assert!(chrome.windows(2).any(|w| w == ["-f", "image2pipe"]));
@@ -394,7 +394,10 @@ mod tests {
         assert_eq!(cfg.source, Source::Native);
         let native = ffmpeg_args(&cfg, &[], &out);
         assert!(native.windows(2).any(|w| w == ["-f", "rawvideo"]));
-        assert!(native.windows(2).any(|w| w == ["-pix_fmt", "rgba"]));
+        assert!(native
+            .windows(4)
+            .any(|w| w == ["-f", "rawvideo", "-pix_fmt", "yuv420p"]));
+        assert!(!native.contains(&"rgba".to_string()));
         assert!(native.windows(2).any(|w| w == ["-s", "1280x720"]));
         assert!(!native.contains(&"mjpeg".to_string()));
         assert_eq!(BroadcastConfig::default().source, Source::Chrome);

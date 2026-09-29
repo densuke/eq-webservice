@@ -10,11 +10,13 @@ use crate::quake::{jst, Scale};
 
 const SIDE_X: f32 = MAP_W;
 const PAD: f32 = 16.0;
-const CREDIT: [&str; 4] = [
+const CREDIT: [&str; 6] = [
     "情報: P2P地震情報 (気象庁発表)",
     "地図: 地球地図日本 (国土地理院) を加工",
     "津波予報区・細分区域・震度観測点: 気象庁のデータを加工",
     "天気・アメダス: 気象庁",
+    "天気アイコン: 気象庁ホームページを加工",
+    "(https://www.jma.go.jp/bosai/forecast/)",
 ];
 /// 震度の凡例の色 (震度 1 から 7)
 const GAUGE: [(&str, [u8; 3]); 9] = [
@@ -59,7 +61,14 @@ pub fn draw_frame(pm: &mut Pixmap, text: &mut Text) {
         text.draw(pm, label, x + 18.0, y + 12.0, 10.0, MUTED);
     }
     for (i, line) in CREDIT.iter().enumerate() {
-        text.draw(pm, line, SIDE_X + PAD, H as f32 - 50.0 + i as f32 * 15.0, 11.0, MUTED);
+        text.draw(
+            pm,
+            line,
+            SIDE_X + PAD,
+            H as f32 - 5.0 - (CREDIT.len() - 1 - i) as f32 * 15.0,
+            11.0,
+            MUTED,
+        );
     }
 }
 

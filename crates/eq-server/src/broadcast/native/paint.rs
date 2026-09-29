@@ -12,6 +12,9 @@ pub const TEXT: [u8; 3] = [0xe6, 0xed, 0xf3];
 pub const MUTED: [u8; 3] = [0x8b, 0x94, 0x9e];
 pub const LAND: [u8; 3] = [0x3a, 0x42, 0x50];
 pub const LAND_EDGE: [u8; 3] = [0x0d, 0x11, 0x17];
+/// 周辺国の陸地 (web/src/map.css の .neighbor)
+pub const NEIGHBOR: [u8; 3] = [0x20, 0x26, 0x2f];
+pub const NEIGHBOR_EDGE: [u8; 3] = [0x2b, 0x32, 0x3d];
 pub const SEA: [u8; 3] = [0x0a, 0x0f, 0x16];
 
 pub fn paint(c: [u8; 3], a: f32) -> Paint<'static> {
