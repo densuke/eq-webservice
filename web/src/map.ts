@@ -88,8 +88,9 @@ export class JapanMap {
   private mainBoxes = new Map<string, Box>();
   private labelEls = new Map<string, SVGGElement>();
   private labelSig = "";
-  private prefForecast = false;
-  private areaForecast = false;
+  /** 予測 (緊急地震速報) で塗っている都道府県・細分区域 */
+  private prefForecast = new Set<string>();
+  private areaForecast = new Set<string>();
   private tsunamiLayer = el("g", { class: "tsunami" });
   private waveLayer = el("g", { class: "waves" });
   private markerLayer = el("g", { class: "markers" });
@@ -213,9 +214,14 @@ export class JapanMap {
   }
 
   /** 寄ったときの細かい表示: 細分区域の塗り分けと、震度観測点の点。forecast は緊急地震速報の予測 */
-  setDetail(areas: { name: string; scale: number }[], forecast: boolean, dots: { name: string; lat: number; lon: number; scale: number }[]): void {
+  /** forecast は全体を予測として塗るか。地域ごとに forecast を持たせれば、その地域だけ予測として塗る (観測と予測の重ね塗り) */
+  setDetail(
+    areas: { name: string; scale: number; forecast?: boolean }[],
+    forecast: boolean,
+    dots: { name: string; lat: number; lon: number; scale: number }[],
+  ): void {
     this.areaScales = new Map(areas.map(({ name, scale }) => [name, scale]));
-    this.areaForecast = forecast;
+    this.areaForecast = new Set(areas.filter((a) => a.forecast ?? forecast).map((a) => a.name));
     this.dotItems = dots.map(({ name, lat, lon, scale }) => {
       const [x, y] = project(lon, lat);
       return { name, x, y, scale };
@@ -226,7 +232,7 @@ export class JapanMap {
       p.classList.remove("forecast", "hit");
     }
     this.areaColors = new Map(areas.filter(({ name }) => this.areas.has(name)).map(({ name, scale }) => [name, scaleColor(scale)]));
-    for (const name of this.areaColors.keys()) this.areas.get(name)!.classList.toggle("forecast", forecast);
+    for (const name of this.areaColors.keys()) this.areas.get(name)!.classList.toggle("forecast", this.areaForecast.has(name));
     // 点は震度ごとに 1 本の path にまとめる (長さ 0 の線を丸い線端で描くと、ズームしても同じ大きさの点になる)
     const byScale = new Map<number, string>();
     for (const { lat, lon, scale } of [...dots].sort((a, b) => a.scale - b.scale)) {
@@ -334,15 +340,15 @@ export class JapanMap {
   }
 
   /** 都道府県の塗り分け。forecast は緊急地震速報の予測 (破線で区別) */
-  setPrefScales(items: PrefScale[], forecast = false): void {
+  setPrefScales(items: (PrefScale & { forecast?: boolean })[], forecast = false): void {
     for (const p of this.prefs.values()) {
       p.style.fill = "";
       p.classList.remove("forecast", "hit");
     }
     this.hitColors = new Map(items.filter(({ pref }) => this.prefs.has(pref)).map(({ pref, scale }) => [pref, scaleColor(scale)]));
     this.prefScales = new Map(items.map(({ pref, scale }) => [pref, scale]));
-    this.prefForecast = forecast;
-    for (const pref of this.hitColors.keys()) this.prefs.get(pref)!.classList.toggle("forecast", forecast);
+    this.prefForecast = new Set(items.filter((i) => i.forecast ?? forecast).map((i) => i.pref));
+    for (const pref of this.hitColors.keys()) this.prefs.get(pref)!.classList.toggle("forecast", this.prefForecast.has(pref));
     this.paintFade();
   }
 
@@ -389,15 +395,15 @@ export class JapanMap {
         const text = scaleLabel(scale);
         const wPx = px * (text.length * 0.62 + 0.9);
         const hPx = px * 1.35;
-        return { key: name, x, y, w: wPx * k, h: hPx * k, scale, text, px, wPx, hPx };
+        return { key: name, x, y, w: wPx * k, h: hPx * k, scale, text, px, wPx, hPx, forecast: forecast.has(name) };
       });
     const picked = this.fade > 0 ? pickLabels(items) : [];
-    const sig = JSON.stringify([forecast, picked.map((l) => [l.key, l.scale])]);
+    const sig = JSON.stringify(picked.map((l) => [l.key, l.scale, l.forecast]));
     if (sig !== this.labelSig) {
       this.labelSig = sig;
       this.labelEls = new Map(
         picked.map((l) => {
-          const g = el("g", { class: forecast ? "label forecast" : "label" });
+          const g = el("g", { class: l.forecast ? "label forecast" : "label" });
           g.dataset.x = String(l.x);
           g.dataset.y = String(l.y);
           const rect = el("rect", { x: -l.wPx / 2, y: -l.hPx / 2, width: l.wPx, height: l.hPx, rx: l.hPx * 0.28 });
