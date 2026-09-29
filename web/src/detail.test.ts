@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { eewAreaScales, quakeDetail, type Station } from "./detail.ts";
+import { eewAreaScales, overlayForecast, quakeDetail, type Station } from "./detail.ts";
 import type { EewArea, ObservationPoint } from "./types.ts";
 
 const stations = new Map<string, Station>([
@@ -43,4 +43,17 @@ test("eew areas use the upper predicted intensity", () => {
     { name: "宮城県北部", scale: 55 },
     { name: "岩手県沿岸南部", scale: 45 },
   ]);
+});
+
+test("observed intensities overlay the forecast: forecast stays only where nothing is observed yet", () => {
+  const observed = [{ name: "石川県能登", scale: 60 }];
+  const forecast = [
+    { name: "石川県能登", scale: 70 },
+    { name: "富山県西部", scale: 50 },
+  ];
+  assert.deepEqual(overlayForecast(observed, forecast), [
+    { name: "石川県能登", scale: 60, forecast: false },
+    { name: "富山県西部", scale: 50, forecast: true },
+  ]);
+  assert.deepEqual(overlayForecast(observed, []), [{ name: "石川県能登", scale: 60, forecast: false }]);
 });

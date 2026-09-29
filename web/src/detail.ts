@@ -49,6 +49,12 @@ export function quakeDetail(points: ObservationPoint[], stations: Map<string, St
   return { dots, areas: maxByArea(areas), missing };
 }
 
+/** 観測を予測の上に重ねる: 観測のある地域は観測の震度、まだ無い地域は予測のまま (forecast: true) */
+export function overlayForecast(observed: AreaScale[], forecast: AreaScale[]): (AreaScale & { forecast: boolean })[] {
+  const seen = new Set(observed.map((o) => o.name));
+  return [...observed.map((o) => ({ ...o, forecast: false })), ...forecast.filter((f) => !seen.has(f.name)).map((f) => ({ ...f, forecast: true }))];
+}
+
 /** 緊急地震速報の区域。予測の上限 (「〜程度以上」なら下限) で塗る */
 export function eewAreaScales(areas: EewArea[]): AreaScale[] {
   return maxByArea(areas.map((a) => ({ name: a.name, scale: a.scale_to ?? a.scale_from })));

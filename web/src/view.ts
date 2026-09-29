@@ -1,16 +1,16 @@
 // 画面の文字情報: 一覧・詳細・緊急地震速報と津波予報のバナー・表示モード、地図の塗り分け。
 
-import { eewAreaScales, quakeDetail } from "./detail.ts";
+import { eewAreaScales, overlayForecast, quakeDetail } from "./detail.ts";
 import { type Group, latestEew, summarizeQuake } from "./groups.ts";
 import { esc } from "./html.ts";
-import { byPriority } from "./priority.ts";
-import { activeEews, currentGroup, relatedQuake } from "./quakes.ts";
+import { byPriority, sameQuake } from "./priority.ts";
+import { activeEews, currentGroup, groupPlace, placeOf, relatedQuake } from "./quakes.ts";
 import { isKnownScale, scaleColor, scaleLabel, scaleTextColor } from "./scale.ts";
 import { $, map } from "./dom.ts";
 import { listOpen } from "./personal.ts";
 import { app, now } from "./state.ts";
 import { activeAreas } from "./tsunami.ts";
-import type { Hypocenter, Scale, TsunamiEvent } from "./types.ts";
+import type { Hypocenter, PrefScale, Scale, TsunamiEvent } from "./types.ts";
 
 /** EEW バナーに並べる件数 (残りは「ほか N 件」) */
 export const EEW_BANNER_MAX = 3;
@@ -109,9 +109,13 @@ export function renderMode(): void {
 export function paintMap(g: Group | undefined): void {
   if (g?.kind === "quake") {
     const q = summarizeQuake(g);
-    map.setPrefScales(q.prefMax);
     const d = quakeDetail(q.points, app.stations);
-    map.setDetail(d.areas, false, d.dots);
+    // 同じ地震の緊急地震速報がまだ出ていれば、観測の無い地域は予測のまま残す (観測を予測の上に重ねる)
+    const e = activeEews(now()).find((x) => sameQuake(placeOf(x.origin_time_ms, x.hypocenter), groupPlace(g)));
+    const byPref = (xs: PrefScale[]) => xs.map(({ pref, scale }) => ({ name: pref, scale }));
+    const prefs = overlayForecast(byPref(q.prefMax), e ? byPref(e.pref_max) : []);
+    map.setPrefScales(prefs.map(({ name, ...rest }) => ({ pref: name, ...rest })));
+    map.setDetail(overlayForecast(d.areas, e ? eewAreaScales(e.areas) : []), false, d.dots);
   } else if (g?.kind === "eew") {
     const e = latestEew(g);
     map.setPrefScales(e.cancelled ? [] : e.pref_max, true);
