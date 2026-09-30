@@ -3,6 +3,8 @@
 
 use crate::quake::{Event, EventBody, Hypocenter, Scale};
 
+use crate::broadcast::record::Shown;
+
 use super::model::{current_quake, same_quake, Place, QuakeSummary};
 
 /// 緊急地震速報を表示し続ける時間 (web の EEW_BANNER_MS)
@@ -120,6 +122,21 @@ pub fn current<'a>(quakes: &'a [QuakeSummary], eews: &'a [EewSummary], now_ms: u
         .next()
         .map(|e| ((e.max_scale, e.received_ms), Current::Eew(e)));
     [q, e].into_iter().flatten().max_by_key(|(k, _)| *k).map(|(_, c)| c)
+}
+
+/// 地震の画面に出しているもの (切り出しの判断用)。観測の最大震度だけを数え、緊急地震速報は警報かだけを渡す
+pub fn shown(current: Option<Current>) -> Shown {
+    match current {
+        Some(Current::Quake(q)) => Shown {
+            scale: q.max_scale.0,
+            warning: false,
+        },
+        Some(Current::Eew(e)) => Shown {
+            scale: -1,
+            warning: e.warning,
+        },
+        None => Shown::NONE,
+    }
 }
 
 /// 地表での波の半径 (km)。未到達 (発生前・深さより手前) は None。一様な速度の近似 (web の surfaceRadiusKm)

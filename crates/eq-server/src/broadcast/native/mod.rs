@@ -28,6 +28,7 @@ use tokio::sync::{mpsc::UnboundedSender, watch};
 use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::Message;
 
+use super::record::Shown;
 use super::BroadcastConfig;
 use crate::quake::Event;
 use data::{CityWeather, ServerMessage, Warnings};
@@ -80,6 +81,8 @@ pub struct Native {
     pub frames: watch::Receiver<Arc<Vec<u8>>>,
     /// 平時か (true) 地震の画面か (false)。切り替わったときに変わる
     pub calm: watch::Receiver<bool>,
+    /// 出している地震の最大震度・警報か (record の判断用。calm より先に送る)
+    pub shown: watch::Receiver<Shown>,
     tasks: Vec<JoinHandle<()>>,
 }
 
@@ -122,6 +125,7 @@ pub fn start(cfg: &BroadcastConfig, notices: Option<UnboundedSender<String>>) ->
     let st: Shared = Arc::default();
     let (tx, frames) = watch::channel(Arc::new(Vec::new()));
     let (calm_tx, calm) = watch::channel(true);
+    let (shown_tx, shown) = watch::channel(Shown::NONE);
     let (label, test) = (cfg.label.clone(), cfg.test);
     // 描き直すかを調べる間隔。地震波が動く間はこの間隔ごとに描き直すので、地震の画面の fps に合わせる
     let check_ms = 1000 / u64::from(cfg.fps.max(1));
@@ -143,6 +147,7 @@ pub fn start(cfg: &BroadcastConfig, notices: Option<UnboundedSender<String>>) ->
             Out {
                 frames: tx,
                 calm: calm_tx,
+                shown: shown_tx,
                 label,
                 test,
                 check_ms,
@@ -150,7 +155,12 @@ pub fn start(cfg: &BroadcastConfig, notices: Option<UnboundedSender<String>>) ->
             notices,
         )),
     ];
-    Ok(Native { frames, calm, tasks })
+    Ok(Native {
+        frames,
+        calm,
+        shown,
+        tasks,
+    })
 }
 
 fn load_renderer(cfg: &BroadcastConfig) -> anyhow::Result<Renderer> {
@@ -180,6 +190,7 @@ fn ws_url(server: &str) -> String {
 struct Out {
     frames: watch::Sender<Arc<Vec<u8>>>,
     calm: watch::Sender<bool>,
+    shown: watch::Sender<Shown>,
     label: String,
     test: bool,
     check_ms: u64,
@@ -249,7 +260,10 @@ async fn render_loop(mut renderer: Renderer, st: Shared, out: Out, notices: Opti
             &with_waves
         };
         let calm = current.is_none();
+        let shown = eew::shown(current);
         drop(s);
+        // calm より先に送る (record は calm が変わったときに読む)
+        let _ = out.shown.send_if_modified(|c| std::mem::replace(c, shown) != shown);
         let _ = out.calm.send_if_modified(|c| std::mem::replace(c, calm) != calm);
         let _ = out.frames.send(Arc::new(yuv::rgba_to_i420(
             pm.data(),

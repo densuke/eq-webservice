@@ -28,6 +28,8 @@ pub struct RecordConfig {
     pub keep: usize,
     /// ディスクの空き (MB) がこれ未満なら切り出さない
     pub min_free_mb: u64,
+    /// 切り出す地震の最大震度 (10 倍した整数。30 = 震度 3)。0 なら全部切り出す。警報は震度にかかわらず切り出す
+    pub min_scale: i32,
 }
 
 impl Default for RecordConfig {
@@ -39,8 +41,38 @@ impl Default for RecordConfig {
             after_min: 10,
             keep: 20,
             min_free_mb: 500,
+            min_scale: 0,
         }
     }
+}
+
+/// 地震の画面に出している地震の、切り出しの判断に使う分 (native が渡す)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Shown {
+    /// 観測の最大震度 (10 倍した整数)。緊急地震速報の予測や、何も出していないときは -1
+    pub scale: i32,
+    /// 緊急地震速報の警報を出しているか
+    pub warning: bool,
+}
+
+impl Shown {
+    pub const NONE: Shown = Shown {
+        scale: -1,
+        warning: false,
+    };
+
+    /// 予約の間に出したものをまとめる (最大の震度・警報が 1 度でもあったか)
+    fn merge(self, o: Shown) -> Shown {
+        Shown {
+            scale: self.scale.max(o.scale),
+            warning: self.warning || o.warning,
+        }
+    }
+}
+
+/// 予約の間に出した地震で切り出すか (警報なら震度にかかわらず切り出す。min_scale 0 は全部)
+fn should_cut(seen: Shown, min_scale: i32) -> bool {
+    seen.warning || seen.scale.max(0) >= min_scale
 }
 
 /// 切り出す時間の範囲 (予約)
@@ -190,20 +222,34 @@ async fn cut(cfg: &RecordConfig, ffmpeg: &str, w: Window) -> anyhow::Result<()> 
     Ok(())
 }
 
-async fn run_cut(cfg: &RecordConfig, ffmpeg: &str, w: Window) {
+async fn run_cut(cfg: &RecordConfig, ffmpeg: &str, w: Window, seen: Shown) {
+    if !should_cut(seen, cfg.min_scale) {
+        tracing::info!(
+            scale = seen.scale,
+            min_scale = cfg.min_scale,
+            "record: 最大震度が min_scale 未満のため切り出しません"
+        );
+        return;
+    }
     if let Err(e) = cut(cfg, ffmpeg, w).await {
         tracing::warn!("record: {e:#}");
     }
 }
 
 /// 地震の画面への切り替えを見て、切り出しを予約する。calm の送り手が消えても (配信のやり直し)、済ませてから終わる
-pub fn spawn(cfg: RecordConfig, ffmpeg: String, mut calm: watch::Receiver<bool>) -> anyhow::Result<()> {
+pub fn spawn(
+    cfg: RecordConfig,
+    ffmpeg: String,
+    mut calm: watch::Receiver<bool>,
+    mut shown: watch::Receiver<Shown>,
+) -> anyhow::Result<()> {
     // ring は ffmpeg の tee が書くが、ディレクトリは作らない (無いと片側が失敗するので、ここで作る)
     for d in [&cfg.ring_dir, &cfg.archive_dir] {
         std::fs::create_dir_all(d).with_context(|| format!("creating {d}"))?;
     }
     tokio::spawn(async move {
         let mut window: Option<Window> = None;
+        let mut seen = Shown::NONE;
         loop {
             let due = window.map(|w| w.until.duration_since(SystemTime::now()).unwrap_or_default());
             tokio::select! {
@@ -211,18 +257,26 @@ pub fn spawn(cfg: RecordConfig, ffmpeg: String, mut calm: watch::Receiver<bool>)
                     if r.is_err() {
                         if let (Some(w), Some(d)) = (window, due) {
                             tokio::time::sleep(d).await;
-                            run_cut(&cfg, &ffmpeg, w).await;
+                            run_cut(&cfg, &ffmpeg, w, seen).await;
                         }
                         return;
                     }
                     if !*calm.borrow_and_update() {
+                        // shown は calm より先に送られるので、切り替わりの時点の分もここで拾う
+                        seen = seen.merge(*shown.borrow_and_update());
                         window = Some(reserve(window, SystemTime::now(), &cfg));
                         tracing::info!(minutes = cfg.after_min, "record: 切り出しを予約しました");
                     }
                 }
+                Ok(()) = shown.changed() => {
+                    let now = *shown.borrow_and_update();
+                    if window.is_some() {
+                        seen = seen.merge(now);
+                    }
+                }
                 _ = tokio::time::sleep(due.unwrap_or_default()), if due.is_some() => {
                     if let Some(w) = window.take() {
-                        run_cut(&cfg, &ffmpeg, w).await;
+                        run_cut(&cfg, &ffmpeg, w, std::mem::replace(&mut seen, Shown::NONE)).await;
                     }
                 }
             }
@@ -306,6 +360,39 @@ mod tests {
         assert!(check_space(Some(500), 500).is_ok());
         assert!(check_space(Some(499), 500).is_err());
         assert!(check_space(None, 500).is_err());
+    }
+
+    fn shown(scale: i32, warning: bool) -> Shown {
+        Shown { scale, warning }
+    }
+
+    #[test]
+    fn quiet_quakes_are_skipped_and_the_strongest_one_decides() {
+        assert!(!should_cut(shown(10, false), 30));
+        assert!(should_cut(shown(30, false), 30));
+        let seen = Shown::NONE
+            .merge(shown(10, false))
+            .merge(shown(45, false))
+            .merge(shown(20, false));
+        assert_eq!(seen.scale, 45);
+        assert!(should_cut(seen, 30));
+        // 何も出していない (震度不明) ときは、しきい値があれば切り出さない
+        assert!(!should_cut(Shown::NONE, 30));
+    }
+
+    #[test]
+    fn a_warning_is_always_cut() {
+        assert!(should_cut(shown(-1, true), 30));
+        assert!(should_cut(
+            Shown::NONE.merge(shown(-1, true)).merge(shown(10, false)),
+            50
+        ));
+    }
+
+    #[test]
+    fn min_scale_zero_cuts_everything() {
+        assert!(should_cut(Shown::NONE, 0));
+        assert!(should_cut(shown(10, false), 0));
     }
 
     #[test]
