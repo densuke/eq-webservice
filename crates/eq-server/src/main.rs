@@ -1,3 +1,4 @@
+mod archive;
 mod banner;
 mod bgm;
 mod bgm_send;
@@ -88,6 +89,10 @@ async fn main() -> anyhow::Result<()> {
     routes.push(http::source_router(cfg.source.kind()));
     routes.push(bgm::router(&cfg.bgm));
     routes.push(banner::router(&cfg.banner));
+    // jsonl の sink があるときだけ、その記録を返す
+    if let Some(path) = archive::jsonl_path(&cfg.sinks) {
+        routes.push(archive::router(path));
+    }
 
     let listener = tokio::net::TcpListener::bind(&cfg.server.listen)
         .await
