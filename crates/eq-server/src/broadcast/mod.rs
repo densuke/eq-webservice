@@ -6,18 +6,18 @@
 
 mod audio;
 mod chrome;
+mod encoder;
+mod ffmpeg;
 mod mixer;
 mod native;
 
 use std::collections::BTreeMap;
-use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
+use encoder::Encoder;
 use serde::Deserialize;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::Command;
 
 /// 画面の作り方
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -226,16 +226,8 @@ async fn session(cfg: &BroadcastConfig, output: &[String], secrets: &[String]) -
         (None, Some(a)) => a.ffmpeg_input(),
         (None, None) => cfg.audio.clone(),
     };
-    let mut ffmpeg = Command::new(&cfg.ffmpeg)
-        .args(ffmpeg_args(cfg, &audio_in, output))
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .with_context(|| format!("starting {}", cfg.ffmpeg))?;
-    let mut stdin = ffmpeg.stdin.take().context("ffmpeg stdin")?;
-    let mut log = BufReader::new(ffmpeg.stderr.take().context("ffmpeg stderr")?).lines();
+    let mut encoder = Encoder::Ffmpeg(ffmpeg::FfmpegEncoder::start(cfg, &audio_in, output, secrets)?);
+    let started = std::time::Instant::now();
     tracing::info!(source = ?cfg.source, url = %cfg.url, width = cfg.width, height = cfg.height, fps = cfg.fps, fps_calm = ?cfg.fps_calm, "broadcast started");
     let mut frame: Arc<Vec<u8>> = Arc::default();
     let mut rate = frame_rate(cfg, true);
@@ -272,18 +264,9 @@ async fn session(cfg: &BroadcastConfig, output: &[String], secrets: &[String]) -
             }
             // 変化が無くても同じ画面を送り続ける (fps_calm を指定していなければ、ffmpeg は枚数から時刻を決める)
             _ = tick.tick(), if !frame.is_empty() => {
-                if stdin.write_all(&frame).await.is_err() {
-                    // ffmpeg が止まった。理由は ffmpeg の出力に出ているので、残りを読んでから終える
-                    while let Ok(Some(l)) = log.next_line().await {
-                        tracing::warn!("ffmpeg: {}", redact(&l, secrets));
-                    }
-                    anyhow::bail!("ffmpeg exited: {}", ffmpeg.wait().await?);
-                }
+                encoder.video(&frame, started.elapsed().as_millis() as u64).await?;
             }
-            line = log.next_line() => match line? {
-                Some(l) => tracing::warn!("ffmpeg: {}", redact(&l, secrets)),
-                None => anyhow::bail!("ffmpeg exited: {}", ffmpeg.wait().await?),
-            },
+            e = encoder.closed() => return Err(e),
             status = async { match chrome.as_mut() { Some(c) => c.wait().await, None => std::future::pending().await } } => {
                 anyhow::bail!("chrome exited: {}", status?)
             }
