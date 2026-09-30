@@ -3,7 +3,8 @@
 //! - `GET /ws`         : 接続時に `hello` (サーバ時刻 + 直近イベント)、以後 `event` を push
 //! - `GET /api/events` : 直近イベントの JSON (WebSocket を使えないクライアント向け)
 //! - `GET /api/source` : 取得元の種類 (`p2pquake` | `replay`)
-//! - `GET /healthz`    : 死活監視
+//! - `GET /api/archive`: 過去の情報 (jsonl の sink があるときだけ。archive.rs)
+//! - `GET /healthz`   : 死活監視
 //! - それ以外          : `static_dir` の静的ファイル
 
 use std::sync::Arc;

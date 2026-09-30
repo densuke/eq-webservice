@@ -95,14 +95,15 @@ function interpolate(points: [number, number][], x: number, from: 0 | 1): number
 
 /**
  * 再生の計画を作る。run は再生ごとの番号 (ID の重複を避ける)。
- * startAt を渡すと再生の始まりがその時刻になるようにずらす (架空の場面)。渡さなければ当時の時刻のまま (記録の場面)
+ * startAt を渡すと再生の始まりがその時刻になるようにずらす (架空の場面)。渡さなければ当時の時刻のまま (記録の場面)。
+ * start は再生の始まりにする当時の時刻 (epoch ミリ秒)。渡さなければ最初の地震 (報) の LEAD_MS 前 (履歴の再生が使う)
  */
-export function makePlan(events: EqEvent[], run: number, startAt?: number): Plan {
+export function makePlan(events: EqEvent[], run: number, startAt?: number, startOverride?: number): Plan {
   const recs = events.map(issuedMs);
   const origins = events.map((e) => ("origin_time_ms" in e ? e.origin_time_ms : null)).filter((o): o is number => o != null);
   const known = recs.filter((r): r is number => r != null);
   const first = Math.min(...origins, ...known);
-  const start = (Number.isFinite(first) ? first : 0) - LEAD_MS;
+  const start = startOverride ?? ((Number.isFinite(first) ? first : 0) - LEAD_MS);
   const delta = startAt == null ? 0 : startAt - start;
   // 波を描いている間 (発生から WAVE_MAX_SEC)。重なりはまとめる
   const windows = [...origins]

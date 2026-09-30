@@ -5,12 +5,13 @@ import "./broadcast.ts";
 import { type AlertLevel, alertLevel } from "./alert.ts";
 import { loadTelop, renderClock, renderSound, renderTelop, setStatus } from "./chrome.ts";
 import { Connection } from "./connection.ts";
-import { advanceDemo, enterDemo, exitDemo, renderDemoControls, renderDemoPanel, runScenario } from "./demo-ui.ts";
+import { advanceDemo, enterDemo, exitDemo, renderDemoControls, renderDemoPanel, runScenario, startHistory } from "./demo-ui.ts";
 import { fadeOpacity } from "./fade.ts";
+import { fetchArchive, gatherEvents } from "./history.ts";
 import { esc } from "./html.ts";
 import { notify, renderCountdown, updateHome } from "./personal-ui.ts";
 import { sameQuake } from "./priority.ts";
-import { activeEews, calmState, currentGroup, displayedInfoMs, placeOf, priorityGroups, updateNumbers, updateTour } from "./quakes.ts";
+import { activeEews, calmState, currentGroup, displayedInfoMs, placeOf, priorityGroups, relatedQuake, updateNumbers, updateTour } from "./quakes.ts";
 import { renderMarkers, renderScene, scene } from "./scene.ts";
 import { play } from "./sound.ts";
 import { $, map } from "./dom.ts";
@@ -278,7 +279,16 @@ async function loadStations(): Promise<void> {
   app.stations = new Map(rows.map(([name, lat, lon, area]) => [name, { lat, lon, area }]));
 }
 
-function select(key: string): void {
+/**
+ * 履歴の行を選ぶ。地震 (発生時刻が分かるもの) は、その報を集めて当時の時刻で再生する。
+ * 再生中は行を選べない (「リアルタイムに戻る」で戻ってから)。デモ中 (と発生時刻が分からないとき) は、選んだ時点を発生とみなして波だけ描く
+ */
+async function select(key: string): Promise<void> {
+  if (app.demo?.history) return;
+  // 津波予報の行は、その地震 (直前の地震情報・緊急地震速報) を再生する
+  const g = app.world.store.get(key);
+  const quake = g && relatedQuake(g);
+  if (!app.demo && quake && startHistory(await gatherEvents(quake, fetchArchive))) return;
   app.selectedKey = key;
   app.selectedAt = now();
   map.release();
@@ -288,11 +298,11 @@ function select(key: string): void {
 
 $("#list").addEventListener("click", (e) => {
   const key = (e.target as HTMLElement).closest("li")?.dataset.key;
-  if (key) select(key);
+  if (key) void select(key);
 });
 
 // 画面外の地震の矢印からも選べる
-map.onSelect = select;
+map.onSelect = (key) => void select(key);
 
 // 全体図: 日本全体を表示する。震央を押すとその地震へ寄る (「リアルタイムに戻る」で自動に戻る)
 // 警報・注意報: 今の地震の表示を終えて平時に戻す (次に新しい地震の情報が届けば、また地震の表示になる)
