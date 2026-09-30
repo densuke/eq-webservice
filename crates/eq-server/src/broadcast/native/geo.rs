@@ -206,15 +206,15 @@ mod tests {
     #[test]
     fn an_inset_view_maps_points_like_the_main_view_through_the_transform() {
         let main = View::fit_home((0.0, 36.0, 900.0, 684.0));
-        let (w, h) = ((131.4f64 - 122.9) * 37f64.to_radians().cos() * 100.0, 600.0);
-        let rect = (10.0, 46.0, 150.0 * w / h, 150.0);
-        let inset = View::fit((122.9, 131.4, 24.0, 30.0), rect);
+        let (w, h) = ((131.5f64 - 122.5) * 37f64.to_radians().cos() * 100.0, 700.0);
+        let rect = (10.0, 46.0, 220.0 * w / h, 220.0);
+        let inset = View::fit((122.5, 131.5, 24.0, 31.0), rect);
         // 枠の四隅が枠に収まる (縦横比が合っているので、ちょうど埋まる)
-        let (l, t) = inset.px(122.9, 30.0);
-        let (r, b) = inset.px(131.4, 24.0);
+        let (l, t) = inset.px(122.5, 31.0);
+        let (r, b) = inset.px(131.5, 24.0);
         assert!((l - 10.0).abs() < 0.01 && (t - 46.0).abs() < 0.01, "{l},{t}");
         assert!(
-            (r as f64 - rect.0 - rect.2).abs() < 0.01 && (b - 196.0).abs() < 0.01,
+            (r as f64 - rect.0 - rect.2).abs() < 0.01 && (b - 266.0).abs() < 0.01,
             "{r},{b}"
         );
         // 那覇: 本図の座標を変換で映した位置 = 別枠の投影

@@ -282,16 +282,16 @@ fn okinawa_px() -> (u32, u32) {
 #[test]
 fn an_epicenter_just_west_of_the_inset_is_pinned_to_its_corner() {
     let mut r = renderer(Text::none());
-    // 与那国島の西の海 (23.6N 122.8E) は、本図にも南西諸島の枠にも入らない
-    let e = eew(false, &[], Some((23.6, 122.8)));
+    // 台湾の東の海 (23.6N 121.5E) は、本図にも南西諸島の枠にも入らない
+    let e = eew(false, &[], Some((23.6, 121.5)));
     let mut sc = scene(None, &[], None, None);
     sc.eew = Some(&e);
     let pm = r.render(&sc);
-    assert!(near(&pm, (18, 188), [0xe0, 0x1e, 0x1e])); // 枠 (10,46 から高さ 150) の左下の隅
+    assert!(near(&pm, (18, 258), [0xe0, 0x1e, 0x1e])); // 枠 (10,46 から高さ 220) の左下の隅
                                                        // 遠い震央 (台湾の西) は、どこにも印を置かない
     let far = eew(false, &[], Some((23.6, 118.0)));
     sc.eew = Some(&far);
-    assert!(!near(&r.render(&sc), (18, 188), [0xe0, 0x1e, 0x1e]));
+    assert!(!near(&r.render(&sc), (18, 258), [0xe0, 0x1e, 0x1e]));
 }
 
 #[test]
