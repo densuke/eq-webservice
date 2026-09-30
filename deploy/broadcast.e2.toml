@@ -1,0 +1,28 @@
+# e2 (e2-micro) から YouTube へ直接配信する設定 (native・無音)。~/work/eq-e2cast/cast.toml に置く。
+# deploy/eq-broadcast.service の WorkingDirectory (~/work/eq-e2cast) から相対で読む。
+# ストリームキーは書かない (環境変数 YOUTUBE_LIVE_API_KEY を、権限 600 のファイルから systemd が渡す)。
+
+source = "native"
+# データ (地震情報・警報・天気・BGM の曲名) の取得先
+server = "https://eq.fuga.jp"
+# 地図のデータ (web/public の japan.geojson・warning-areas.geojson・neighbors.geojson をコピーしておく)
+map_dir = "map"
+# apt install fonts-noto-cjk
+font = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+label = "配信元: e2"
+
+# 地震の画面 10fps・平時 2fps
+fps = 10
+fps_calm = 2
+# 無音 (audio を省く)
+audio_bitrate = "32k"
+# CRF + 上限で送信量を抑え、x264 の先読みと threads を減らしてメモリを抑える
+encode = ["-threads", "1", "-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency", "-crf", "28", "-maxrate", "500k", "-bufsize", "1000k"]
+
+# テスト配信 (記録の地震を流すなど) のときだけ true にする。赤い帯と TEST の透かしが必ず出る。
+# server が replay のサーバのときは、true でないと配信を始めない。
+# テストの送り先は、本番とは別の配信 (限定公開) のストリームキーにすること。
+# test = true
+
+# 送り先 (ffmpeg の引数)。$VAR は環境変数に置き換え、ログでは伏せる
+output = ["-f", "flv", "rtmps://a.rtmps.youtube.com/live2/$YOUTUBE_LIVE_API_KEY"]

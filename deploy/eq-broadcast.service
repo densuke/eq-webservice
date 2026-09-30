@@ -1,0 +1,23 @@
+# eq-server broadcast: e2 から YouTube へ直接配信する (native・無音)。本番の eq-server を守るため CPU とメモリを縛る
+# ~/.config/systemd/user/eq-broadcast.service に置く (docs は README の「e2 から直接配信する」)
+[Unit]
+Description=eq-webservice ライブ配信 (eq-server broadcast -> YouTube)
+After=eq-server.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/work/eq-e2cast
+ExecStart=%h/work/eq-e2cast/eq-server broadcast cast.toml
+# ストリームキー (YOUTUBE_LIVE_API_KEY=...、権限 600)
+EnvironmentFile=%h/.config/youtube-live-eq-webservice
+Environment=RUST_LOG=info
+Restart=always
+RestartSec=10
+Nice=19
+CPUQuota=25%
+MemoryMax=200M
+MemorySwapMax=0
+
+[Install]
+WantedBy=default.target

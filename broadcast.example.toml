@@ -44,6 +44,8 @@ audio_command = ["sox", "-q", "-t", "coreaudio", "BlackHole 2ch", "-t", "raw", "
 # e2 (e2-micro) 向け: 平時 2fps・地震 10fps、CRF + 上限で送信量を抑え、x264 の先読みと threads を減らしてメモリを抑える。
 #   (Mac で測った平時の送信量は音込みで約 80kbps、地震の画面は約 180kbps。docs/broadcast-native.md 11 章)
 # encode = ["-threads", "1", "-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency", "-crf", "28", "-maxrate", "500k", "-bufsize", "1000k"]
+# test = true                        # テスト配信 (赤い帯・TEST の透かし・[テスト] が必ず出る)。server が replay のときは必須。
+#                                    # 送り先はテスト用の別の配信 (限定公開) のキーにすること。e2 向けの実物は deploy/broadcast.e2.toml
 # Mac・Raspberry Pi 5 向けなら fps = 15・fps_calm = 2 と、既定の encode でよい
 
 # 送り先 (ffmpeg の引数)。$VAR は環境変数に置き換え、ログでは伏せる
