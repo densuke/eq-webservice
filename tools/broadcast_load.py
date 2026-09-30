@@ -6,7 +6,7 @@ CPU・メモリ・コマの速さ・送信量を 5 秒ごとに測る (docs/broa
   tools/broadcast_load.py samples/scenarios/noto2024.jsonl --duration 120 \
       --toml 'fps = 10' --toml 'fps_calm = 2' --toml 'label = "配信元: test"'
 
-- 出力は一時ディレクトリの mpegts のファイルだけ (外には送らない)。終わったら自分で起動したプロセスを止める。
+- 出力は一時ディレクトリのファイル (既定は mpegts、--toml 'encoder = "builtin"' のときは flv) だけ (外には送らない)。終わったら自分で起動したプロセスを止める。
 - replay のサーバは別のポート (既定 18099) で立てる。本番や手元の他のサーバとは無関係。
 - 測るもの: eq-server (broadcast) と ffmpeg の CPU (1 コアを 100% として)・最大メモリ・コマ数・送信量。
   Mac と Linux (e2) の両方で動く (Linux は /proc、Mac は ps で読む)。数値は環境で違う。
@@ -15,6 +15,7 @@ CPU・メモリ・コマの速さ・送信量を 5 秒ごとに測る (docs/broa
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -78,8 +79,15 @@ def main():
     ap.add_argument("--toml", action="append", default=[], help="broadcast.toml に足す行 (例 'fps = 10')。何度でも")
     a = ap.parse_args()
 
+    # ツールが足す行と重なる key は、設定の読み込みで落ちる (表が 0 だけになる) ので、起動前にエラーにする
+    own = {"source", "server", "map_dir", "font", "ffmpeg", "test", "output"}
+    dup = sorted({m.group(1) for l in a.toml if (m := re.match(r"\s*(\w+)\s*=", l)) and m.group(1) in own})
+    if dup:
+        ap.error(f"--toml に書けない key: {', '.join(dup)} (map_dir・font は --map-dir・--font を使う)")
+    builtin = any(re.match(r'\s*encoder\s*=\s*"builtin"', l) for l in a.toml)
+
     work = tempfile.mkdtemp(prefix="eq-load-")
-    out_ts = os.path.join(work, "out.ts")
+    out_ts = os.path.join(work, "out.flv" if builtin else "out.ts")
     open(os.path.join(work, "server.toml"), "w").write(
         f'[server]\nlisten = "127.0.0.1:{a.port}"\nstatic_dir = ""\n\n'
         f'[source]\ntype = "replay"\npath = {json.dumps(os.path.abspath(a.scenario))}\nspeed = {a.speed}\nrebase_time = true\nloop = true\n')
@@ -90,7 +98,8 @@ def main():
         lines.append("test = true")  # replay を流すので、テスト配信の表示にする (server が replay だと、無いと配信が始まらない)
     if a.font:
         lines.append(f"font = {json.dumps(a.font)}")
-    lines += a.toml + [f'output = ["-f", "mpegts", {json.dumps(out_ts)}]']
+    out = [out_ts] if builtin else ["-f", "mpegts", out_ts]
+    lines += a.toml + [f"output = {json.dumps(out)}"]
     open(os.path.join(work, "broadcast.toml"), "w").write("\n".join(lines) + "\n")
 
     procs = []
@@ -112,6 +121,10 @@ def main():
         next_win = t0 + WINDOW
         while time.time() - t0 < a.duration:
             time.sleep(0.1)
+            if bc.poll() is not None:  # 配信側が落ちた (設定の誤りなど)。0 の表を出し続けない
+                log.flush()
+                tail = open(os.path.join(work, "broadcast.log"), errors="replace").read().splitlines()[-10:]
+                sys.exit("配信が途中で終わりました (broadcast.log の最後):\n" + "\n".join(tail))
             eq = child_pid(bc.pid, "eq-server") if a.time_l else bc.pid  # time の子が本体
             ff = child_pid(eq, "ffmpeg") if eq else None
             cur = {"eq-server": cpu_rss(eq) if eq else None, "ffmpeg": cpu_rss(ff) if ff else None}
