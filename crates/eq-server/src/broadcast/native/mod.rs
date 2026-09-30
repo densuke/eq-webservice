@@ -3,6 +3,7 @@
 //! watch で渡す (I420 に変換済み。fps に合わせて同じ画面を繰り返し送るのは、呼ぶ側の時計)。
 //! 平時と地震の画面の切り替えに合わせて、mixer に BGM を流す・止める知らせを出す。
 
+mod banner;
 mod calm;
 mod data;
 mod draw;

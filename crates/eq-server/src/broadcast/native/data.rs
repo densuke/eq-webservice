@@ -12,6 +12,9 @@ pub struct Warnings {
     /// 市町村等のコード -> 発表中の警報・注意報
     #[serde(default)]
     pub areas: BTreeMap<String, Vec<Kind>>,
+    /// 市町村等のコード -> 名前
+    #[serde(default)]
+    pub names: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -63,6 +66,116 @@ pub fn warning_level(name: &str) -> WarningLevel {
 /// その区域で一番高い段階
 pub fn top_level(kinds: &[Kind]) -> Option<WarningLevel> {
     kinds.iter().map(|k| warning_level(&k.name)).max()
+}
+
+/// 都道府県 (市町村等のコードの頭 2 桁が 01〜47 の番号)
+const PREFS: [&str; 47] = [
+    "北海道",
+    "青森県",
+    "岩手県",
+    "宮城県",
+    "秋田県",
+    "山形県",
+    "福島県",
+    "茨城県",
+    "栃木県",
+    "群馬県",
+    "埼玉県",
+    "千葉県",
+    "東京都",
+    "神奈川県",
+    "新潟県",
+    "富山県",
+    "石川県",
+    "福井県",
+    "山梨県",
+    "長野県",
+    "岐阜県",
+    "静岡県",
+    "愛知県",
+    "三重県",
+    "滋賀県",
+    "京都府",
+    "大阪府",
+    "兵庫県",
+    "奈良県",
+    "和歌山県",
+    "鳥取県",
+    "島根県",
+    "岡山県",
+    "広島県",
+    "山口県",
+    "徳島県",
+    "香川県",
+    "愛媛県",
+    "高知県",
+    "福岡県",
+    "佐賀県",
+    "長崎県",
+    "熊本県",
+    "大分県",
+    "宮崎県",
+    "鹿児島県",
+    "沖縄県",
+];
+
+pub fn pref_of(code: &str) -> &'static str {
+    code.get(..2)
+        .and_then(|n| n.parse::<usize>().ok())
+        .and_then(|n| PREFS.get(n.checked_sub(1)?))
+        .copied()
+        .unwrap_or("")
+}
+
+/// 警報以上の帯の文 (web/src/warnings.ts の warningSummary)
+#[derive(Debug, PartialEq)]
+pub struct WarnSummary {
+    pub top: WarningLevel,
+    /// 種類ごとの文 (「レベル３大雨警報: 岡山県 岡山市・倉敷市」)。段階の高い順、同じなら名前順
+    pub lines: Vec<String>,
+}
+
+/// 警報以上 (警報・危険警報・特別警報) を種類ごとの文にする。注意報は含めない。
+/// 1 県 per_pref 市町村までで、残りは「ほかN」
+pub fn warning_summary(w: &Warnings, per_pref: usize) -> Option<WarnSummary> {
+    type Prefs<'a> = Vec<(&'static str, Vec<&'a str>)>;
+    let mut by_kind: BTreeMap<&str, (WarningLevel, Prefs)> = BTreeMap::new();
+    for (code, kinds) in &w.areas {
+        for k in kinds {
+            let level = warning_level(&k.name);
+            if level == WarningLevel::Advisory {
+                continue;
+            }
+            let (_, prefs) = by_kind.entry(&k.name).or_insert((level, Vec::new()));
+            let pref = pref_of(code);
+            let name = w.names.get(code).map_or(code.as_str(), String::as_str);
+            match prefs.iter_mut().find(|(p, _)| *p == pref) {
+                Some((_, names)) => names.push(name),
+                None => prefs.push((pref, vec![name])),
+            }
+        }
+    }
+    let mut kinds: Vec<_> = by_kind.into_iter().collect();
+    // BTreeMap は名前順なので、安定な並べ替えで段階の高い順だけ足す
+    kinds.sort_by_key(|k| std::cmp::Reverse(k.1 .0));
+    let top = kinds.first()?.1 .0;
+    let lines = kinds
+        .into_iter()
+        .map(|(name, (_, prefs))| {
+            let parts: Vec<String> = prefs
+                .iter()
+                .map(|(pref, ms)| {
+                    let shown = ms[..ms.len().min(per_pref)].join("・");
+                    match ms.len().checked_sub(per_pref).filter(|n| *n > 0) {
+                        Some(n) => format!("{pref} {shown} ほか{n}"),
+                        None => format!("{pref} {shown}"),
+                    }
+                })
+                .collect();
+            format!("{name}: {}", parts.join("、"))
+        })
+        .collect();
+    Some(WarnSummary { top, lines })
 }
 
 /// 段階の塗りの色と不透明度 (web/src/map.css の .warn)
@@ -169,6 +282,41 @@ mod tests {
             Some(WarningLevel::Warning)
         );
         assert_eq!(top_level(&[]), None);
+    }
+
+    #[test]
+    fn warnings_and_above_are_summarized_like_the_page() {
+        let k = |n: &str| vec![Kind { name: n.into() }];
+        let mut w = Warnings::default();
+        for (code, kinds, name) in [
+            ("3310000", vec!["レベル３大雨警報", "雷注意報"], "岡山市"),
+            ("3320200", vec!["レベル３大雨警報"], "倉敷市"),
+            ("3420700", vec!["レベル３大雨警報"], "福山市"),
+            ("3420200", vec!["レベル５大雨特別警報"], "呉市"),
+            ("0110000", vec!["強風注意報"], "札幌市"),
+        ] {
+            w.areas.insert(code.into(), kinds.into_iter().flat_map(k).collect());
+            w.names.insert(code.into(), name.into());
+        }
+        assert_eq!(pref_of("3310000"), "岡山県");
+        assert_eq!(pref_of("9910000"), "");
+        let s = warning_summary(&w, 5).unwrap();
+        assert_eq!(s.top, WarningLevel::Emergency);
+        assert_eq!(
+            s.lines,
+            [
+                "レベル５大雨特別警報: 広島県 呉市",
+                "レベル３大雨警報: 岡山県 岡山市・倉敷市、広島県 福山市"
+            ]
+        );
+        assert_eq!(
+            warning_summary(&w, 1).unwrap().lines[1],
+            "レベル３大雨警報: 岡山県 岡山市 ほか1、広島県 福山市"
+        );
+        // 注意報だけなら出さない
+        let mut adv = Warnings::default();
+        adv.areas.insert("0110000".into(), k("強風注意報"));
+        assert_eq!(warning_summary(&adv, 5), None);
     }
 
     #[test]
