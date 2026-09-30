@@ -45,7 +45,12 @@ pub struct BroadcastConfig {
     pub url: String,
     pub width: u32,
     pub height: u32,
+    /// native: 地震の画面のときのコマ数 (Chrome は常にこの値)
     pub fps: u32,
+    /// native: 平時のコマ数。指定すると、ffmpeg にはコマが届いた時刻で渡し、平時と地震でコマの間隔を変える。省けば fps で一定
+    pub fps_calm: Option<u32>,
+    /// native: 上部バーの右に出す配信元の名前 (例 "配信元: e2")。空なら出さない
+    pub label: String,
     /// Chrome の実行ファイル
     pub chrome: String,
     /// Chrome に渡す環境変数 (Linux で音の出力先を決める PULSE_SINK など)
@@ -62,6 +67,8 @@ pub struct BroadcastConfig {
     pub mixer: bool,
     /// mixer が流す BGM (Icecast の MP3)。空なら BGM は流さない
     pub bgm_url: String,
+    /// 音のビットレート (ffmpeg の -b:a。無音なら 32k などに下げる)
+    pub audio_bitrate: String,
     /// 映像・音の圧縮 (ffmpeg の引数)
     pub encode: Vec<String>,
     /// 送り先 (ffmpeg の引数)。`$VAR` / `${VAR}` は環境変数に置き換える
@@ -85,6 +92,8 @@ impl Default for BroadcastConfig {
             width: 1280,
             height: 720,
             fps: 30,
+            fps_calm: None,
+            label: String::new(),
             chrome: if cfg!(target_os = "macos") {
                 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome".into()
             } else {
@@ -97,6 +106,7 @@ impl Default for BroadcastConfig {
             audio_command: Vec::new(),
             mixer: false,
             bgm_url: "https://eq.fuga.jp/stream/bgm.mp3".into(),
+            audio_bitrate: "128k".into(),
             encode: s(&[
                 "-c:v", "libx264", "-preset", "veryfast", "-b:v", "3000k", "-maxrate", "3000k", "-bufsize", "6000k",
             ]),
@@ -181,10 +191,9 @@ async fn session(cfg: &BroadcastConfig, output: &[String], secrets: &[String]) -
         .with_context(|| format!("starting {}", cfg.ffmpeg))?;
     let mut stdin = ffmpeg.stdin.take().context("ffmpeg stdin")?;
     let mut log = BufReader::new(ffmpeg.stderr.take().context("ffmpeg stderr")?).lines();
-    tracing::info!(source = ?cfg.source, url = %cfg.url, width = cfg.width, height = cfg.height, fps = cfg.fps, "broadcast started");
+    tracing::info!(source = ?cfg.source, url = %cfg.url, width = cfg.width, height = cfg.height, fps = cfg.fps, fps_calm = ?cfg.fps_calm, "broadcast started");
     let mut frame: Arc<Vec<u8>> = Arc::default();
-    let mut tick = tokio::time::interval(Duration::from_secs_f64(1.0 / cfg.fps.max(1) as f64));
-    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut tick = new_tick(frame_rate(cfg, true));
     loop {
         tokio::select! {
             f = async { match screen.as_mut() { Some(s) => s.next_frame().await, None => std::future::pending().await } } => {
@@ -194,14 +203,23 @@ async fn session(cfg: &BroadcastConfig, output: &[String], secrets: &[String]) -
                 }
                 frame = Arc::new(chrome::decode_base64(&data)?);
             }
-            // native: 描き直された画面
-            r = async { match native.as_mut() { Some(n) => n.frames.changed().await, None => std::future::pending().await } } => {
-                r.context("native renderer stopped")?;
+            // native: 描き直された画面、または平時と地震の切り替え (すぐコマの間隔を変える)
+            r = async {
+                match native.as_mut() {
+                    Some(n) => tokio::select! { r = n.frames.changed() => r.map(|_| true), r = n.calm.changed() => r.map(|_| false) },
+                    None => std::future::pending().await,
+                }
+            } => {
+                let is_frame = r.context("native renderer stopped")?;
                 if let Some(n) = native.as_mut() {
-                    frame = n.frames.borrow_and_update().clone();
+                    if is_frame {
+                        frame = n.frames.borrow_and_update().clone();
+                    } else {
+                        tick = new_tick(frame_rate(cfg, *n.calm.borrow_and_update()));
+                    }
                 }
             }
-            // 変化が無くても同じ画面を送り続け、fps を一定にする (ffmpeg は枚数から時刻を決める)
+            // 変化が無くても同じ画面を送り続ける (fps_calm を指定していなければ、ffmpeg は枚数から時刻を決める)
             _ = tick.tick(), if !frame.is_empty() => {
                 if stdin.write_all(&frame).await.is_err() {
                     // ffmpeg が止まった。理由は ffmpeg の出力に出ているので、残りを読んでから終える
@@ -228,6 +246,20 @@ async fn session(cfg: &BroadcastConfig, output: &[String], secrets: &[String]) -
     }
 }
 
+fn new_tick(fps: u32) -> tokio::time::Interval {
+    let mut t = tokio::time::interval(Duration::from_secs_f64(1.0 / fps.max(1) as f64));
+    t.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    t
+}
+
+/// 送るコマ数 (fps_calm があれば、平時はそれ)
+fn frame_rate(cfg: &BroadcastConfig, calm: bool) -> u32 {
+    match cfg.fps_calm {
+        Some(f) if calm && cfg.source == Source::Native => f,
+        _ => cfg.fps,
+    }
+}
+
 /// URL に問い合わせの項目を足す (# の前に入れる)
 fn with_query(url: &str, item: &str) -> String {
     let (base, frag) = url.split_once('#').map_or((url, ""), |(b, f)| (b, f));
@@ -244,14 +276,23 @@ fn ffmpeg_args(cfg: &BroadcastConfig, audio: &[String], output: &[String]) -> Ve
     let fps = cfg.fps.max(1).to_string();
     let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
     let mut a = s(&["-hide_banner", "-loglevel", "warning"]);
+    // 可変 fps: 届いた時刻をコマの時刻にする (native で fps_calm を指定したときだけ)
+    let variable = cfg.source == Source::Native && cfg.fps_calm.is_some();
     match cfg.source {
         Source::Chrome => a.extend(s(&["-f", "image2pipe", "-c:v", "mjpeg"])),
         Source::Native => {
             let size = format!("{}x{}", cfg.width, cfg.height);
+            if variable {
+                a.extend(s(&["-use_wallclock_as_timestamps", "1"]));
+            }
             a.extend(s(&["-f", "rawvideo", "-pix_fmt", "yuv420p", "-s", &size]));
         }
     }
-    a.extend(s(&["-framerate", &fps, "-i", "-"]));
+    if variable {
+        a.extend(s(&["-i", "-"]));
+    } else {
+        a.extend(s(&["-framerate", &fps, "-i", "-"]));
+    }
     if audio.is_empty() {
         // 無音も実時間の速さで作る (そうしないと音だけ先に進み、映像とずれる)
         a.extend(s(&["-re", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo"]));
@@ -268,10 +309,20 @@ fn ffmpeg_args(cfg: &BroadcastConfig, audio: &[String], output: &[String]) -> Ve
     }
     a.extend(cfg.encode.iter().cloned());
     // YouTube などはキーフレームの間隔を 4 秒以下に求める (2 秒ごとにする)
-    let gop = (cfg.fps.max(1) * 2).to_string();
-    a.extend(s(&[
-        "-pix_fmt", "yuv420p", "-g", &gop, "-c:a", "aac", "-b:a", "128k", "-ar", "44100",
-    ]));
+    if variable {
+        // コマの間隔が一定でないので、コマ数ではなく時刻で決める
+        a.extend(s(&[
+            "-fps_mode",
+            "passthrough",
+            "-force_key_frames",
+            "expr:gte(t,n_forced*2)",
+        ]));
+    } else {
+        a.extend(["-g".to_string(), (cfg.fps.max(1) * 2).to_string()]);
+    }
+    a.extend(s(&["-pix_fmt", "yuv420p", "-c:a", "aac"]));
+    a.extend(["-b:a".to_string(), cfg.audio_bitrate.clone()]);
+    a.extend(s(&["-ar", "44100"]));
     a.extend(output.iter().cloned());
     a
 }
@@ -410,5 +461,55 @@ mod tests {
         assert!(a.windows(2).any(|w| w == ["-i", "anullsrc=r=44100:cl=stereo"]));
         assert_eq!(a.last().unwrap(), "out.flv");
         assert!(a.windows(2).any(|w| w == ["-g", "60"]));
+    }
+
+    #[test]
+    fn variable_fps_uses_wallclock_timestamps_and_time_based_keyframes() {
+        let out = ["out.flv".to_string()];
+        let cfg = toml::from_str::<BroadcastConfig>("source = \"native\"\nfps = 10\nfps_calm = 2").unwrap();
+        let a = ffmpeg_args(&cfg, &[], &out);
+        let pos = |k: &str| a.iter().position(|x| x == k).unwrap();
+        assert_eq!(a[pos("-use_wallclock_as_timestamps") + 1], "1");
+        // 入力の指定より前に置く (入力のオプション)
+        assert!(pos("-use_wallclock_as_timestamps") < pos("-i"));
+        assert!(!a.contains(&"-framerate".to_string()));
+        assert!(a.windows(2).any(|w| w == ["-fps_mode", "passthrough"]));
+        assert!(a
+            .windows(2)
+            .any(|w| w == ["-force_key_frames", "expr:gte(t,n_forced*2)"]));
+        assert!(!a.contains(&"-g".to_string()));
+        assert_eq!(frame_rate(&cfg, true), 2);
+        assert_eq!(frame_rate(&cfg, false), 10);
+    }
+
+    #[test]
+    fn without_fps_calm_native_stays_constant_rate() {
+        let out = ["out.flv".to_string()];
+        let cfg = toml::from_str::<BroadcastConfig>("source = \"native\"\nfps = 5").unwrap();
+        let a = ffmpeg_args(&cfg, &[], &out);
+        assert!(a.windows(2).any(|w| w == ["-framerate", "5"]));
+        assert!(a.windows(2).any(|w| w == ["-g", "10"]));
+        assert!(!a.contains(&"-use_wallclock_as_timestamps".to_string()));
+        assert!(!a.contains(&"-fps_mode".to_string()));
+        assert_eq!(frame_rate(&cfg, true), 5);
+    }
+
+    #[test]
+    fn chrome_ignores_fps_calm() {
+        let out = ["out.flv".to_string()];
+        let cfg = toml::from_str::<BroadcastConfig>("fps = 30\nfps_calm = 2").unwrap();
+        let a = ffmpeg_args(&cfg, &[], &out);
+        assert!(a.windows(2).any(|w| w == ["-framerate", "30"]));
+        assert!(!a.contains(&"-use_wallclock_as_timestamps".to_string()));
+        assert_eq!(frame_rate(&cfg, true), 30);
+    }
+
+    #[test]
+    fn audio_bitrate_is_configurable() {
+        let out = ["out.flv".to_string()];
+        let a = ffmpeg_args(&BroadcastConfig::default(), &[], &out);
+        assert!(a.windows(2).any(|w| w == ["-b:a", "128k"]));
+        let cfg = toml::from_str::<BroadcastConfig>("audio_bitrate = \"32k\"").unwrap();
+        assert!(ffmpeg_args(&cfg, &[], &out).windows(2).any(|w| w == ["-b:a", "32k"]));
     }
 }

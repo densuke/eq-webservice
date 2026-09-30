@@ -38,6 +38,8 @@ pub struct Scene<'a> {
     pub now_ms: u64,
     pub connected: bool,
     pub bgm_title: &'a str,
+    /// 上部バーの右に出す配信元の名前 (空なら出さない)
+    pub label: &'a str,
 }
 
 pub struct Renderer {

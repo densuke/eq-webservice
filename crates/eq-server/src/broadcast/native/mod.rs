@@ -78,6 +78,8 @@ fn local_now_ms() -> u64 {
 /// 動かしている画面。捨てると、データを取るタスクも止まる
 pub struct Native {
     pub frames: watch::Receiver<Arc<Vec<u8>>>,
+    /// 平時か (true) 地震の画面か (false)。切り替わったときに変わる
+    pub calm: watch::Receiver<bool>,
     tasks: Vec<JoinHandle<()>>,
 }
 
@@ -92,6 +94,8 @@ pub fn start(cfg: &BroadcastConfig, notices: Option<UnboundedSender<String>>) ->
     let server = cfg.server.trim_end_matches('/').to_string();
     let st: Shared = Arc::default();
     let (tx, frames) = watch::channel(Arc::new(Vec::new()));
+    let (calm_tx, calm) = watch::channel(true);
+    let label = cfg.label.clone();
     let tasks = vec![
         tokio::spawn(ws_loop(ws_url(&server), st.clone())),
         tokio::spawn(poll(format!("{server}/api/warnings"), st.clone(), |s, v: Warnings| {
@@ -104,9 +108,18 @@ pub fn start(cfg: &BroadcastConfig, notices: Option<UnboundedSender<String>>) ->
         )),
         tokio::spawn(icon_loop(icon::IMG_BASE.to_string(), st.clone())),
         tokio::spawn(bgm_title_loop(format!("{server}/stream/status-json.xsl"), st.clone())),
-        tokio::spawn(render_loop(renderer, st, tx, notices)),
+        tokio::spawn(render_loop(
+            renderer,
+            st,
+            Out {
+                frames: tx,
+                calm: calm_tx,
+                label,
+            },
+            notices,
+        )),
     ];
-    Ok(Native { frames, tasks })
+    Ok(Native { frames, calm, tasks })
 }
 
 fn load_renderer(cfg: &BroadcastConfig) -> anyhow::Result<Renderer> {
@@ -132,12 +145,14 @@ fn ws_url(server: &str) -> String {
     format!("{}://{rest}/ws", if scheme == "http" { "ws" } else { "wss" })
 }
 
-async fn render_loop(
-    mut renderer: Renderer,
-    st: Shared,
-    tx: watch::Sender<Arc<Vec<u8>>>,
-    notices: Option<UnboundedSender<String>>,
-) {
+/// render_loop の出力 (画面・平時かどうか) と、上部バーに出す名前
+struct Out {
+    frames: watch::Sender<Arc<Vec<u8>>>,
+    calm: watch::Sender<bool>,
+    label: String,
+}
+
+async fn render_loop(mut renderer: Renderer, st: Shared, out: Out, notices: Option<UnboundedSender<String>>) {
     let mut last_key = None;
     let mut last_calm = None;
     let mut tick = tokio::time::interval(CHECK_EVERY);
@@ -163,11 +178,13 @@ async fn render_loop(
             now_ms: now,
             connected: s.connected,
             bgm_title: &s.bgm_title,
+            label: &out.label,
         };
         let pm = renderer.render(&scene);
         let calm = quake.is_none();
         drop(s);
-        let _ = tx.send(Arc::new(yuv::rgba_to_i420(
+        let _ = out.calm.send_if_modified(|c| std::mem::replace(c, calm) != calm);
+        let _ = out.frames.send(Arc::new(yuv::rgba_to_i420(
             pm.data(),
             draw::W as usize,
             draw::H as usize,
