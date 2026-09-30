@@ -329,3 +329,64 @@ tools/broadcast_load.py x --server https://eq.fuga.jp --duration 90 --toml 'fps 
 - Linux (e2) でも動く (CPU とメモリは /proc から読む)。e2 では `systemd-run --user -p CPUQuota=25% -p MemoryMax=200M -p MemorySwapMax=0 tools/broadcast_load.py ...` のように包むと、本番と同じ枠で測れる。
 - 記録は最初に緊急地震速報 (native はまだ描かない) が続き、地震情報 (震度) が来てから地震の画面になる。noto2024 は `--speed 4` で約 25 秒後、standard は約 20 秒後。
 - 送信量は、エンコーダが先読みで抱えているコマを除いて、出力の長さで割っている。
+
+## 12. N1.4 (テスト配信の表示と安全装置、e2 の常時運用の置き方)
+
+### 12.1 背景
+
+- 2026-09-30 11:10 から、e2 (e2-micro) から YouTube へ直接配信している (native・無音・可変 fps 10/2)。
+  地震の画面の負荷は、公開しない試験 (noto2024) で CPU 約 15%、メモリ最大 127MB、送信 約 200kbps と分かった。
+- YouTube で地震の画面の見た目を確かめたいが、記録の地震 (replay) を本番の配信に流すと、実際の地震と取り違えられるおそれがある。
+
+### 12.2 テスト配信の表示 (`test = true`)
+
+- `broadcast.toml` に `test` (既定 false) を足す。true のとき native は次を必ず描く (消す設定は作らない)。
+  - 上部バーのすぐ下と画面の最下部に、赤い帯 (背景 #b3001b、白い太字): 「テスト配信: 過去の地震の再生です。実際の地震ではありません」
+  - 地図の中央に、うすい (不透明度 15% 程度) 大きな「TEST」の透かし
+  - 上部バーの題の横に「[テスト]」
+- 文字が描けない (フォントが無い) ときも、赤い帯と透かしの形だけは描く。
+
+### 12.3 安全装置
+
+- データの取得先 (`server`) が replay (記録を流すサーバ) のときは、`test = true` が無ければ配信を始めずにエラーで止める。
+  - replay かどうかは、eq-server が返すもので判断する。eq-server に `GET /api/source` (`{"type": "p2pquake" | "replay"}`) を足し、native は起動時にそれを見る。
+    取れない (古いサーバ) ときは、replay ではないとみなす。
+- `test = true` のときは、送り先 (`output`) に本番と同じストリームキーの環境変数を使っていないかは判断できないので、文書と設定例で「テスト用の別の配信 (限定公開) のキーを使う」と強く書く。
+
+### 12.4 e2 の常時運用の置き方をリポジトリに残す
+
+- `deploy/eq-broadcast.service` (e2 に置いたユーザーユニット。CPUQuota 25%・MemoryMax 200M・MemorySwapMax 0・Nice 19・Restart always) と、
+  e2 向けの `broadcast.toml` の例 (`deploy/broadcast.e2.toml`) を足す。README の配信の節に、置き方 (フォントと ffmpeg を apt で入れる、地図のデータを置く、キーの置き場所と権限) を書く。
+- 置いてある実物 (e2 の `~/.config/systemd/user/eq-broadcast.service`) は下のとおり。
+
+```ini
+# eq-server broadcast: e2 から YouTube へ直接配信する (native・無音)。本番の eq-server を守るため CPU とメモリを縛る
+[Unit]
+Description=eq-webservice ライブ配信 (eq-server broadcast -> YouTube)
+After=eq-server.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/work/eq-e2cast
+ExecStart=%h/work/eq-e2cast/eq-server broadcast cast.toml
+# ストリームキー (YOUTUBE_LIVE_API_KEY=...、権限 600)
+EnvironmentFile=%h/.config/youtube-live-eq-webservice
+Environment=RUST_LOG=info
+Restart=always
+RestartSec=10
+Nice=19
+CPUQuota=25%
+MemoryMax=200M
+MemorySwapMax=0
+
+[Install]
+WantedBy=default.target
+```
+
+### 12.5 完了の条件 (N1.4)
+
+- `test = true` の帯と透かしが出ること (PNG で確認)、`test` を省いた画面は今と変わらないこと
+- replay のサーバに向けて `test` 無しで起動するとエラーで止まり、`test = true` なら動くこと (テストか手での確認)
+- `/api/source` の単体テスト
+- 利用者の配信 (e2 の eq-broadcast、`~/work/eq-broadcast`) には触らない。YouTube には送らない。PR まで作り、マージしない
