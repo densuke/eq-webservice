@@ -312,6 +312,64 @@ v0.18.3 を本番で使った利用者の要望。
   - 警報なら切り出す。
   - `min_scale` を省略したら今と同じ。
 
+### 3.6 R2.2: 録画を tee から切り離す (v0.19.x)
+
+2026-09-30 20:08〜20:41、出力を tee (flv → YouTube と segment → ring) にしていた間に、YouTube の視聴ページが 20:29:14 で止まった。
+
+- そのときの e2 の状態
+  - e2 の ffmpeg は送り続けていた (speed 1x、コマは進み、YouTube との TCP も確立、送り残し 0)。
+  - ring の録画には正しい画面 (時計が進んでいる) が入っていた。
+- 20:41 に flv の直送へ戻すと、YouTube はまた映った。
+- 原因は特定できていない。tee と YouTube の相性か、偶然の YouTube 側の詰まりかは、わからない。
+- 16:14〜20:08 も tee だったが、その間に YouTube で見て確かめたのは切り替え直後の 1 回だけ。
+
+方針: **YouTube への送り出しを、実績のある形 (ffmpeg の flv 直送) のまま変えずに、録画を別にする。**
+
+- 案 A (勧める): 圧縮する ffmpeg は 1 つのまま、出力を **mpegts で標準出力 (pipe)** にする。eq-server がそれを読んで、次の 2 か所に流す。
+  1. 送り出し用の ffmpeg (`-f mpegts -i pipe: -c copy -f flv rtmps://…`)。圧縮し直さないので軽い。
+  2. ring のファイル。eq-server が 1 分ごとに `ring/%02d.ts` を書き、20 個で回す。
+  - 録画の書き込みが失敗・遅れても、送り出しは止めない。ring への書き込みは別のタスクにして、詰まったら捨てる。
+  - 送り出し用の ffmpeg が終わったら、今と同じく配信のやり直し (5 秒後に再接続) にする。
+  - YouTube へ届く中身は「x264 → flv」で、今の直送と同じ。時刻は mpegts を経由するが、`-c copy` なのでそのまま。
+- 案 B: 録画用にもう 1 つ ffmpeg を立てて、同じ rawvideo をもう一度圧縮する。CPU が約 2 倍になるので、e2 には向かない。比べるだけでよい。
+- どちらでも、`[record]` の設定 (ring_dir・archive_dir・before_min・after_min・keep・min_free_mb・min_scale) と切り出しの作りは変えない。
+- `output` に tee を書かなくても録画できるようにする (README と例を直す)。tee の例は消す。
+- 確かめ方 (Mac)
+  - 手元の RTMP の受け側 (`ffmpeg -listen 1 -i rtmp://127.0.0.1:19350/live/test -c copy recv.flv`) に **2 時間以上** 送る。
+  - recv.flv が最後まで読めて、時刻が飛ばないこと。
+  - ring が回り、切り出し (`before_min = 1`・`after_min = 1`、replay の noto2024) ができること。
+  - ring のディレクトリを消しても送り出しが止まらないこと。
+  - CPU とメモリを、今の直送 (録画なし) と比べる。増えるのは copy の ffmpeg 1 つ分 (目安 CPU 1% 未満、メモリ 20MB 前後) に収まること。
+- テスト: ring の書き分け (1 分ごと、20 個で回る)、書き込みが詰まったときに送り出しを止めないこと。
+
+### 3.7 YouTube の配信が視聴者に届いているかの見張り
+
+2026-10-01 01:15 (JST)、YouTube のライブの枠が `complete` (終了) になった。
+
+- そのときの e2 の状態
+  - e2 は送り続けていて、受け口 (liveStream) は `active`・健全性 `good` のままだった。
+  - 01:17 に ffmpeg が `Thread message queue blocking` を出していて、e2 の通信か CPU が一瞬詰まったと見られる。
+- 枠の自動終了 (enableAutoStop) がオンなので、YouTube はその途切れで枠を閉じた。閉じた枠は開き直らない。
+- 2026-09-30 20:29 に視聴ページが止まった件も、同じ仕組みの可能性がある。
+
+作ったもの (deploy/):
+
+- `youtube_live_check.py`
+  - YouTube Data API (読み取りだけ、1 回 2 単位) で次の 2 つを見て、視聴者に届いているかを判定する。
+    - 受け口の `streamStatus`・`healthStatus`。
+    - ひもづいた枠の `lifeCycleStatus` が `live` か。
+  - 認証情報は e2 の `~/.config/pd2/youtube-upload-token.json` (pd2 と共有)。読むだけで、値は出さない。
+  - 割り当ても pd2 と共有する。5 分ごとで 1 日 576 単位。
+- `youtube-live-watch.sh`、`youtube-live-watch.service`、`youtube-live-watch.timer`
+  - 5 分ごとに見る。2 回続けて届いていなければ `eq-broadcast` を再起動して、つなぎ直す。つなぎ直しは 15 分に 1 回まで。
+  - つなぎ直すと、待機中 (`ready`) で自動開始がオンの枠は live に戻る。2026-10-01 04:05 に手で試して、16 秒で戻った。
+  - 待機中の枠が無ければ戻らない。そのときは利用者が YouTube Studio で枠を作る。
+    - 枠を作る操作 (`liveBroadcasts.insert`・`transition`) は公開の操作なので、自動ではしない。
+- 置き方 (e2)
+  - `youtube_live_check.py` と `youtube-live-watch.sh` を `~/work/eq-e2cast/tools/` に置く。
+  - `.service`・`.timer` を `~/.config/systemd/user/` に置き、`systemctl --user enable --now youtube-live-watch.timer`。
+- YouTube Studio の枠の設定で「自動終了」を切っておくと、短い途切れで枠が閉じにくくなる (利用者の操作)。
+
 ## 4. R3: 再現動画 (今回は作らない、宿題)
 
 - replay が内部の Event の jsonl (と `/api/archive` の結果) を読めるようにする。
