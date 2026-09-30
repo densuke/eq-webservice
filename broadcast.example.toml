@@ -41,12 +41,14 @@ audio_command = ["sox", "-q", "-t", "coreaudio", "BlackHole 2ch", "-t", "raw", "
 # fps = 10                           # 地震の画面のコマ数
 # fps_calm = 2                       # 平時のコマ数。省けば fps で一定。指定すると平時と地震でコマの間隔が変わる
 # audio_bitrate = "32k"              # 無音で配信するなら 32k (既定 128k)
-# e2 (e2-micro) 向け: 平時 2fps・地震 10fps、CRF + 上限で送信量を抑え、x264 の先読みと threads を減らしてメモリを抑える。
-#   (Mac で測った平時の送信量は音込みで約 80kbps、地震の画面は約 180kbps。docs/broadcast-native.md 11 章)
-# encode = ["-threads", "1", "-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency", "-crf", "28", "-maxrate", "500k", "-bufsize", "1000k"]
+# e2 (e2-micro) 向け: 平時 2fps・地震 10fps、CRF だけにして、x264 の先読みと threads を減らしてメモリを抑える。
+#   (e2 の本番で、平時の送信量は音込みで約 216kbps。docs/broadcast-native.md 11 章)
+# 可変 fps (fps_calm) では -maxrate / -bufsize を付けない: 入力が 25fps とみなされ、x264 の VBV が 1 コマを maxrate/25 に絞って、
+#   平時 2fps の画面が崩れる (CRF を変えても送信量が変わらないのが症状)。encode を省くと、fps_calm のときは CRF 23 になる
+# encode = ["-threads", "1", "-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency", "-crf", "23"]
 # test = true                        # テスト配信 (赤い帯・TEST の透かし・[テスト] が必ず出る)。server が replay のときは必須。
 #                                    # 送り先はテスト用の別の配信 (限定公開) のキーにすること。e2 向けの実物は deploy/broadcast.e2.toml
-# Mac・Raspberry Pi 5 向けなら fps = 15・fps_calm = 2 と、既定の encode でよい
+# Mac・Raspberry Pi 5 向けなら fps = 15・fps_calm = 2 と、encode は省く (fps_calm のときの既定は CRF 23。上限は付かない)
 
 # 送り先 (ffmpeg の引数)。$VAR は環境変数に置き換え、ログでは伏せる
 output = ["-f", "flv", "rtmps://a.rtmps.youtube.com/live2/$YOUTUBE_LIVE_API_KEY"]

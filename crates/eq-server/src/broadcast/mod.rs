@@ -77,9 +77,26 @@ pub struct BroadcastConfig {
     pub output: Vec<String>,
 }
 
+/// 既定の圧縮 (コマの間隔が一定のとき)。3000k で頭打ちにする
+fn default_encode() -> Vec<String> {
+    [
+        "-c:v", "libx264", "-preset", "veryfast", "-b:v", "3000k", "-maxrate", "3000k", "-bufsize", "6000k",
+    ]
+    .map(String::from)
+    .to_vec()
+}
+
+/// 可変 fps (fps_calm) のときの既定の圧縮。CRF だけで上限を付けない。
+/// 入力を届いた時刻で渡すと ffmpeg は入力を 25fps とみなすので、-maxrate を付けると x264 の VBV が
+/// 1 コマあたり maxrate/25 に絞り、2fps の平時の画面が崩れる (CRF を変えても送信量が同じになる)
+fn variable_fps_encode() -> Vec<String> {
+    ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23"]
+        .map(String::from)
+        .to_vec()
+}
+
 impl Default for BroadcastConfig {
     fn default() -> Self {
-        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect();
         BroadcastConfig {
             source: Source::Chrome,
             server: "https://eq.fuga.jp".into(),
@@ -110,9 +127,7 @@ impl Default for BroadcastConfig {
             mixer: false,
             bgm_url: "https://eq.fuga.jp/stream/bgm.mp3".into(),
             audio_bitrate: "128k".into(),
-            encode: s(&[
-                "-c:v", "libx264", "-preset", "veryfast", "-b:v", "3000k", "-maxrate", "3000k", "-bufsize", "6000k",
-            ]),
+            encode: default_encode(),
             output: Vec::new(),
         }
     }
@@ -142,6 +157,11 @@ pub async fn run(args: &[String]) -> anyhow::Result<()> {
     let text = std::fs::read_to_string(path).with_context(|| format!("reading {path}"))?;
     let cfg: BroadcastConfig = toml::from_str(&text).with_context(|| format!("parsing {path}"))?;
     anyhow::ensure!(!cfg.output.is_empty(), "output (送り先) を設定してください");
+    if cfg.source == Source::Native && cfg.fps_calm.is_some() && cfg.encode.iter().any(|x| x == "-maxrate") {
+        tracing::warn!(
+            "broadcast: fps_calm と -maxrate を組み合わせると、平時の画面が崩れます (encode は CRF だけにしてください)"
+        );
+    }
     let get = |k: &str| std::env::var(k).ok();
     let output = expand_all(&cfg.output, get)?;
     // 送り先に埋めた値 (ストリームキーなど) はログで伏せる
@@ -338,7 +358,13 @@ fn ffmpeg_args(cfg: &BroadcastConfig, audio: &[String], output: &[String]) -> Ve
     if cfg.source == Source::Chrome {
         a.extend(["-vf".to_string(), fit]);
     }
-    a.extend(cfg.encode.iter().cloned());
+    // 可変 fps で encode を指定していなければ、上限の無い CRF にする (variable_fps_encode)
+    let encode = if variable && cfg.encode == default_encode() {
+        variable_fps_encode()
+    } else {
+        cfg.encode.clone()
+    };
+    a.extend(encode);
     // YouTube などはキーフレームの間隔を 4 秒以下に求める (2 秒ごとにする)
     if variable {
         // コマの間隔が一定でないので、コマ数ではなく時刻で決める
@@ -511,6 +537,21 @@ mod tests {
         assert!(!a.contains(&"-g".to_string()));
         assert_eq!(frame_rate(&cfg, true), 2);
         assert_eq!(frame_rate(&cfg, false), 10);
+    }
+
+    #[test]
+    fn variable_fps_default_encode_has_no_maxrate_but_an_explicit_one_is_kept() {
+        let out = ["out.flv".to_string()];
+        let cfg = toml::from_str::<BroadcastConfig>("source = \"native\"\nfps_calm = 2").unwrap();
+        let a = ffmpeg_args(&cfg, &[], &out);
+        assert!(!a.contains(&"-maxrate".to_string()) && a.windows(2).any(|w| w == ["-crf", "23"]));
+        let cfg = toml::from_str::<BroadcastConfig>("source = \"native\"\nfps_calm = 2\nencode = [\"-crf\", \"30\"]")
+            .unwrap();
+        let a = ffmpeg_args(&cfg, &[], &out);
+        assert!(a.windows(2).any(|w| w == ["-crf", "30"]) && !a.contains(&"-preset".to_string()));
+        // 一定のコマ数では、今までの上限つきのまま
+        let cfg = toml::from_str::<BroadcastConfig>("source = \"native\"").unwrap();
+        assert!(ffmpeg_args(&cfg, &[], &out).contains(&"-maxrate".to_string()));
     }
 
     #[test]
