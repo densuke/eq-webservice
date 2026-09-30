@@ -139,3 +139,28 @@ Mac の N2 の確認でも、300k で平時 2fps の 78 コマ中 44〜70 コマ
 - 8.3 のテストが通る。CI (Linux・macOS の rust、audit、coverage、web) が全部通る
 - 8.4 の結果を PR に書く
 - e2 の eq-broadcast、`~/work/eq-broadcast`、e2、YouTube には触らない。PR まで作り、マージしない
+
+## 9. e2 での結果と判断 (2026-09-30)
+
+e2 (e2-micro、本番と同じ枠 `CPUQuota=25%`・`MemoryMax=200M`) で、
+`tools/broadcast_load.py samples/scenarios/noto2024.jsonl --speed 4 --duration 100` (fps 10・fps_calm 2) を比べた。
+
+- **builtin (v0.17.1、コマ飛ばしなし、`builtin_bitrate = 1000000`)**
+  - 平時は 2.0fps、地震の画面は **約 3fps** (10fps に届かない)。
+  - キーフレームの間隔は 2.0〜2.5 秒。
+  - CPU は平均 16%、最大メモリ 75MB、送信量は平均 144kbps。
+- **ffmpeg (libx264 veryfast・zerolatency・CRF 23・`-threads 1`)**
+  - 平時は 2fps、地震の画面は **9〜10fps**。
+  - キーフレームの間隔は 1.6〜2.4 秒。
+  - CPU は平均 13.7% (eq-server 3.5% + ffmpeg 10.3%)、最大メモリ 126MB (eq-server 49 + ffmpeg 77)、送信量は平均 251kbps。
+- 原因
+  - openh264 の圧縮が、libx264 (veryfast、1 スレッド) の約 2 倍の CPU を使う。Mac では 1 コマ約 9.3ms。
+  - 描く側 (native) は軽い。e2 の CPU では、10fps の圧縮に追いつかない。
+- 平時の配信 (2fps) は、builtin でも問題なかった。
+  - CPU 7%、RSS 約 70MB。
+  - YouTube の遅延は 5〜6 秒で、ffmpeg (約 7 秒) より短い。
+- **判断**
+  - e2 の常時配信は ffmpeg に戻した (2026-09-30 15:07)。
+  - builtin は、ffmpeg を入れられない、または CPU に余裕のある機械 (Pi 5 など) のために残す。
+  - `cast-builtin.toml` (e2 の `~/work/eq-e2cast`) に設定を残してある。
+- v0.17.0 の builtin は `skip_frames(true)` のため、地震の画面で 0.2〜1.2fps・キーフレーム最大 4.8 秒だった (8 章)。v0.17.1 で直した。
