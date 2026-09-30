@@ -12,7 +12,7 @@ font = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
 label = "配信元: e2"
 
 # 地震の画面 10fps・平時 2fps
-fps = 10
+fps = 5
 fps_calm = 2
 # 無音 (audio を省く)
 audio_bitrate = "32k"
