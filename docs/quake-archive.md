@@ -370,6 +370,31 @@ v0.18.3 を本番で使った利用者の要望。
   - `.service`・`.timer` を `~/.config/systemd/user/` に置き、`systemctl --user enable --now youtube-live-watch.timer`。
 - YouTube Studio の枠の設定で「自動終了」を切っておくと、短い途切れで枠が閉じにくくなる (利用者の操作)。
 
+### 3.8 R2.3: 送り出しの時刻の乱れを直す (R2.2 の手直し)
+
+2026-10-01 06:23 に e2 へ v0.19.5 (R2.2) を入れたところ、次のことが起きた。
+
+- YouTube の健全性が `good` から `ok` に下がった。
+- 06:37 に受け口が inactive になり、枠が自動終了した。
+- 送り出し用の ffmpeg (`-f mpegts -i pipe:0 -c copy -f flv rtmps://…`) が、`timestamp discontinuity (stream id=256): 20000000, new offset= -20000000` などを何度も出して、時刻を付け直していた。
+  - 平時は 2fps で、圧縮する ffmpeg は `-use_wallclock_as_timestamps 1` の時刻を付ける。mpegts を読む側は、既定で 10 秒を超える跳び (`dts_delta_threshold`) を「途切れ」とみなす。
+  - 付け直した時刻が YouTube の受け口を乱したと見られる。
+- Mac の 2 時間の試験 (受け手は手元の `ffmpeg -listen 1`) では出なかった。受け手が時刻に甘いため。
+
+直すこと:
+
+1. まず手元で再現する。v0.19.5 の作りで、平時 (2fps) と地震の画面 (5fps) を含む流れを 30 分ほど流し、送り出し側の `timestamp discontinuity` を数える。
+2. 送り出し用の ffmpeg が時刻を付け直さないようにする。候補は次のとおりで、どれが効くかを試して選ぶ。
+   - `-copyts`、`-dts_delta_threshold` を大きくする、`-fflags +igndts` など。
+   - 圧縮する ffmpeg の mpegts の出力の設定 (`-mpegts_copyts 1`、`-muxdelay 0` など)。
+   - 送り出しに渡す前に eq-server 側で何かする。
+3. **確かめ方は、手元の受け手が甘いことを前提にする。** 次の 3 つで、flv の時刻が壊れていないことを数値で示す。
+   - 受け取った flv の映像と音のパケットの時刻 (ffprobe の pts・dts) が単調に増えること。
+   - 実時間 (壁時計) との差が 1 秒以内にとどまること。
+   - `timestamp discontinuity` が 0 回であること。
+   - 同じ条件で、今の直送 (録画なし) の flv と並べて、時刻の進み方が同じであることを示す。
+4. YouTube での最終確認は、利用者が戻ってから非公開のテスト枠で行う (コーディネーター)。担当は YouTube には送らない。
+
 ## 4. R3: 再現動画 (今回は作らない、宿題)
 
 - replay が内部の Event の jsonl (と `/api/archive` の結果) を読めるようにする。

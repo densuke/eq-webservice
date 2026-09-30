@@ -2,7 +2,7 @@
 
 import { eewAreaScales, quakeDetail } from "./detail.ts";
 import { esc } from "./html.ts";
-import { type NotifyLevel, TOUR_CHOICES, countdown, countdownWorthShowing, estimateIntensity, intensityToScale, nearestArea, notifyScale, saveSettings, shouldNotify } from "./personal.ts";
+import { type NotifyLevel, TOUR_CHOICES, WEATHER_FLIP_CHOICES, countdown, countdownWorthShowing, estimateIntensity, intensityToScale, nearestArea, notifyScale, saveSettings, shouldNotify } from "./personal.ts";
 import { activeEews } from "./quakes.ts";
 import { scaleLabel } from "./scale.ts";
 import { $, map, tapWord } from "./dom.ts";
@@ -30,6 +30,7 @@ function renderSettings(): void {
   $<HTMLSelectElement>("#collapse-min").value = String(app.settings.collapseMin);
   $<HTMLSelectElement>("#tour-sec").value = String(app.settings.tourSec);
   $<HTMLSelectElement>("#list-min").value = String(app.settings.listMin);
+  $<HTMLSelectElement>("#weather-flip").value = String(app.settings.weatherFlipSec);
 }
 
 function setSettings(next: typeof app.settings): void {
@@ -142,6 +143,8 @@ $("#notify-level").addEventListener("change", (e) => {
 
 // 巡回の間隔の選択肢 (5 秒刻み)
 $("#tour-sec").innerHTML = TOUR_CHOICES.map((s) => `<option value="${s}">${s === 0 ? "巡回しない" : `${s}秒ごと`}</option>`).join("");
+$("#weather-flip").innerHTML = WEATHER_FLIP_CHOICES.map((s) => `<option value="${s}">${s === 0 ? "今だけ" : `${s}秒ごとに明日と交互`}</option>`).join("");
+$("#weather-flip").addEventListener("change", (e) => setSettings({ ...app.settings, weatherFlipSec: Number((e.target as HTMLSelectElement).value) }));
 $("#collapse-min").addEventListener("change", (e) =>
   setSettings({ ...app.settings, collapseMin: Number((e.target as HTMLSelectElement).value) }),
 );
