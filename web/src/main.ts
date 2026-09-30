@@ -68,7 +68,7 @@ export function tick(): void {
   const sc = scene(now);
   const { box, waving } = renderScene(sc);
   // 波の広がり中 (履歴の再生の早送りの最中を除く) は 2 秒ごとに短い音で警戒中を知らせる (地震が重なっても 1 本)
-  const pip = pipSlot(now, { waving, replay: sc!.replay, speed: app.demo?.clock.speed ?? 1, fastForward: fastForwarding() });
+  const pip = pipSlot(now, { waving, replay: sc?.replay ?? false, speed: app.demo?.clock.speed ?? 1, fastForward: fastForwarding() });
   if (pip > lastPip && lastPip !== -1) play("pip");
   lastPip = pip;
   // 優先度は時間で入れ替わる (大きい方が古くなるなど) ので、表示中の地震が変わったら描き直す
