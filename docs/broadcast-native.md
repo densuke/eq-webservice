@@ -315,6 +315,13 @@ y=720 └───────────────────────�
 - `-tune stillimage` (veryfast) は先読み (`rc-lookahead` 40) のため、出力が 20 秒ほど遅れる。`zerolatency` は先読みが無く遅れない。
 - 既知 (N1.3 の前から): 起動の直後に ffmpeg が「音の入力が数秒〜15 秒遅れた」という警告を出す (無音の `-re` の入力が、最初の映像を待つため)。少しあとに追いつく。
 
+- **e2 での実測 (2026-09-30、本番と同じ枠 CPUQuota 25%・MemoryMax 200M、noto2024 speed 4 の 100 秒、CRF 23 だけ・`-threads 1`・veryfast・zerolatency)**
+  - 平時 2fps、地震 9〜10fps。キーフレームの間隔 1.6〜2.4 秒。
+  - CPU 平均 13.7% (eq-server 3.5% + ffmpeg 10.3%)。
+  - 最大メモリ 126MB (eq-server 49 + ffmpeg 77)。
+  - 送信量 平均 251kbps (音込み)。
+  - 常時の配信 (平時) は CPU 約 7%、送信量 約 200kbps。
+
 ### 11.3 地震の画面の負荷の測り方
 
 ```sh
