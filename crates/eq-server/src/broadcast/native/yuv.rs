@@ -20,26 +20,20 @@ pub fn rgba_to_i420(rgba: &[u8], w: usize, h: usize) -> Vec<u8> {
         w.is_multiple_of(2) && h.is_multiple_of(2) && rgba.len() == w * h * 4,
         "bad frame size"
     );
-    let (mut y_plane, mut u_plane, mut v_plane) = (
-        Vec::with_capacity(w * h),
-        Vec::with_capacity(w * h / 4),
-        Vec::with_capacity(w * h / 4),
-    );
-    let px = |x: usize, y: usize| {
-        let i = (y * w + x) * 4;
-        (rgba[i] as i32, rgba[i + 1] as i32, rgba[i + 2] as i32)
-    };
-    for y in 0..h {
-        for x in 0..w {
-            let (r, g, b) = px(x, y);
-            y_plane.push(luma(r, g, b));
-        }
-    }
-    for y in (0..h).step_by(2) {
-        for x in (0..w).step_by(2) {
-            let block = [px(x, y), px(x + 1, y), px(x, y + 1), px(x + 1, y + 1)];
-            let sum = |f: fn(&(i32, i32, i32)) -> i32| (block.iter().map(f).sum::<i32>() + 2) / 4;
-            let (u, v) = chroma(sum(|c| c.0), sum(|c| c.1), sum(|c| c.2));
+    // 添字を使わず 4 バイトずつ・2 行ずつたどる (描き直すたびに呼ぶので、e2 でも軽くしたい)
+    let (pixels, _) = rgba.as_chunks::<4>();
+    let mut y_plane: Vec<u8> = pixels
+        .iter()
+        .map(|p| luma(p[0] as i32, p[1] as i32, p[2] as i32))
+        .collect();
+    let (mut u_plane, mut v_plane) = (Vec::with_capacity(w * h / 4), Vec::with_capacity(w * h / 4));
+    for rows in rgba.chunks_exact(w * 8) {
+        let (top, bottom) = rows.split_at(w * 4);
+        // 横に 2 画素 (8 バイト) ずつ、上下の 2 行から 2x2 の平均を求める
+        let ((top, _), (bottom, _)) = (top.as_chunks::<8>(), bottom.as_chunks::<8>());
+        for (t, b) in top.iter().zip(bottom) {
+            let avg = |c: usize| (t[c] as i32 + t[c + 4] as i32 + b[c] as i32 + b[c + 4] as i32 + 2) / 4;
+            let (u, v) = chroma(avg(0), avg(1), avg(2));
             u_plane.push(u);
             v_plane.push(v);
         }
