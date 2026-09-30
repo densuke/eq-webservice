@@ -27,3 +27,15 @@ encode = ["-threads", "1", "-c:v", "libx264", "-preset", "veryfast", "-tune", "z
 
 # 送り先 (ffmpeg の引数)。$VAR は環境変数に置き換え、ログでは伏せる
 output = ["-f", "flv", "rtmps://a.rtmps.youtube.com/live2/$YOUTUBE_LIVE_API_KEY"]
+
+# 直近 15 分の録画 (ring) と、地震のときの切り出し (archive)。使うときは、上の output をこれに置き換え、[record] を足す。
+# ディスクの空きは少ないので (e2 は約 3.8GB)、keep と min_free_mb で抑える。詳しくは README の「配信の録画のリングバッファ」
+# output = ["-f", "tee",
+#   "[f=flv:onfail=abort]rtmps://a.rtmps.youtube.com/live2/$YOUTUBE_LIVE_API_KEY|[f=segment:segment_time=60:segment_wrap=20:reset_timestamps=1:onfail=ignore]ring/%02d.ts"]
+# [record]
+# ring_dir = "ring"
+# archive_dir = "archive"
+# before_min = 5
+# after_min = 10
+# keep = 20
+# min_free_mb = 500

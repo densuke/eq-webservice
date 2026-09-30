@@ -262,6 +262,30 @@ RTMP / RTMPS で送ります (ffmpeg が要らず、メモリも減ります。�
 - `mixer = true`・`audio`・`audio_command` (音のある配信) と `source = "chrome"` では使えません (起動時にエラー)。音があるときは ffmpeg を使ってください
 - 送り先が切れたらエラーで止まり、5 秒後につなぎ直します (ffmpeg のときと同じ)
 
+#### 配信の録画のリングバッファと、地震のときの切り出し
+
+`output` に ffmpeg の `tee` を書くと、YouTube に送りながら、直近 15 分を 1 分ごとのファイルで持ち続けられます (圧縮し直さないので、CPU はほとんど増えません)。
+`[record]` を足すと、地震の画面に切り替わって `after_min` 分後に、`before_min` 分前からの分を 1 本 (`archive/YYYYMMDD-HHMMSS.ts`、UTC) にして残します
+(仕様は [docs/quake-archive.md](docs/quake-archive.md) 3 章)。`source = "native"` かつ `encoder = "ffmpeg"` のときだけ働きます (それ以外では起動時に警告を出すだけ)。
+
+```toml
+output = ["-f", "tee",
+  "[f=flv:onfail=abort]rtmps://a.rtmps.youtube.com/live2/$YOUTUBE_LIVE_API_KEY|[f=segment:segment_time=60:segment_wrap=15:reset_timestamps=1:onfail=ignore]ring/%02d.ts"]
+
+[record]
+ring_dir = "ring"        # tee の segment が書くディレクトリ (無ければ作る)
+archive_dir = "archive"
+before_min = 5
+after_min = 10
+keep = 20                # 残す本数 (古いものから消す。消すのは YYYYMMDD-HHMMSS.ts の形式のファイルだけ)
+min_free_mb = 500        # ディスクの空きがこれ未満なら切り出さない (警告だけ)
+```
+
+- 録画 (segment) の側は `onfail=ignore` なので、ディスクが満杯でもディレクトリが消えても、YouTube への配信は止まりません。切り出しの失敗もログに出すだけです
+- `segment_time` は 60 のままにしてください (切り出しは、ファイルの更新時刻の前の 60 秒をそのファイルの中身とみなします)
+- 切り出しの間隔が長く、`before_min + after_min` が `segment_wrap` 分に近いときは、いちばん古い 1 本が上書きされて欠けることがあります。`segment_wrap` を大きめ (20 など) にしてください
+- 切り出しは `nice -n 19 ffmpeg -f concat -c copy` で、配信の邪魔にならないようにしています
+
 #### e2 から常時配信する
 
 `deploy/eq-broadcast.service` (ユーザーユニット。CPUQuota 25%・MemoryMax 200M・Nice 19・Restart always) と
