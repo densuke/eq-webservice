@@ -11,6 +11,7 @@ mod encoder;
 mod ffmpeg;
 mod mixer;
 mod native;
+mod record;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -90,6 +91,8 @@ pub struct BroadcastConfig {
     pub encode: Vec<String>,
     /// 送り先 (ffmpeg の引数)。`$VAR` / `${VAR}` は環境変数に置き換える
     pub output: Vec<String>,
+    /// 地震の画面になったときの録画の切り出し (native・ffmpeg のときだけ。ring は output の tee で作る)。省けば何もしない
+    pub record: Option<record::RecordConfig>,
 }
 
 /// 既定の圧縮 (コマの間隔が一定のとき)。3000k で頭打ちにする
@@ -146,6 +149,7 @@ impl Default for BroadcastConfig {
             builtin_bitrate: 300_000,
             encode: default_encode(),
             output: Vec::new(),
+            record: None,
         }
     }
 }
@@ -185,6 +189,9 @@ pub async fn run(args: &[String]) -> anyhow::Result<()> {
         tracing::warn!(
             "broadcast: fps_calm と -maxrate を組み合わせると、平時の画面が崩れます (encode は CRF だけにしてください)"
         );
+    }
+    if cfg.record.is_some() && (cfg.encoder != EncoderKind::Ffmpeg || cfg.source != Source::Native) {
+        tracing::warn!("broadcast: [record] は source = \"native\" かつ encoder = \"ffmpeg\" のときだけ働きます (今の設定では何もしません)");
     }
     let get = |k: &str| std::env::var(k).ok();
     let output = expand_all(&cfg.output, get)?;
@@ -250,6 +257,9 @@ async fn session(cfg: &BroadcastConfig, output: &[String], secrets: &[String]) -
         (None, Some(a)) => a.ffmpeg_input(),
         (None, None) => cfg.audio.clone(),
     };
+    if let (Some(rc), Some(n), EncoderKind::Ffmpeg) = (&cfg.record, &native, cfg.encoder) {
+        record::spawn(rc.clone(), cfg.ffmpeg.clone(), n.calm.clone())?;
+    }
     let mut encoder = match cfg.encoder {
         EncoderKind::Ffmpeg => {
             Encoder::Ffmpeg(Box::new(ffmpeg::FfmpegEncoder::start(cfg, &audio_in, output, secrets)?))
