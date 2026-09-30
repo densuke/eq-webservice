@@ -3,6 +3,7 @@
 use tiny_skia::Pixmap;
 
 use super::draw::{Scene, BAR_H, H, MAP_W, W};
+use super::eew::{eew_forecast_text, eew_kind_text, EewSummary};
 use super::model::{hypo_text, scale_color, scale_text_color, tsunami_text, QuakeSummary};
 use super::paint::{rect, rrect, BG, LINE, MUTED, PANEL, TEXT};
 use super::text::Text;
@@ -74,7 +75,8 @@ pub fn draw_frame(pm: &mut Pixmap, text: &mut Text) {
 
 /// 状態で変わる部分
 pub fn draw_dynamic(pm: &mut Pixmap, text: &mut Text, scene: &Scene) {
-    let mode = if scene.quake.is_some() { "[地震]" } else { "[平時]" };
+    let shaking = scene.quake.is_some() || scene.eew.is_some();
+    let mode = if shaking { "[地震]" } else { "[平時]" };
     text.draw(pm, mode, 210.0, 24.0, 12.0, MUTED);
     // 右端に配信元 (label)、その左に BGM の曲名
     let mut right = W as f32 - PAD;
@@ -86,10 +88,13 @@ pub fn draw_dynamic(pm: &mut Pixmap, text: &mut Text, scene: &Scene) {
         let s = format!("BGM: {}", scene.bgm_title);
         text.draw_right(pm, &s, right, 24.0, 12.0, MUTED);
     }
-    if scene.quake.is_none() {
+    if !shaking {
         draw_warn_legend(pm, text);
     }
-    draw_detail(pm, text, scene.quake.or(scene.history.first()), scene.quake.is_some());
+    match (scene.quake, scene.eew) {
+        (None, Some(e)) => draw_eew_detail(pm, text, e),
+        (q, _) => draw_detail(pm, text, q.or(scene.history.first()), q.is_some()),
+    }
     draw_history(pm, text, scene.history);
     draw_clock(pm, text, scene.now_ms, scene.connected);
 }
@@ -158,6 +163,37 @@ fn draw_detail(pm: &mut Pixmap, text: &mut Text, q: Option<&QuakeSummary>, live:
     .enumerate()
     {
         let y = 134.0 + i as f32 * 22.0;
+        text.draw(pm, k, x, y, 13.0, MUTED);
+        text.draw_fit(pm, v, x + 44.0, y, 13.0, TEXT, 300.0);
+    }
+    rect(pm, SIDE_X + 1.0, 180.0, W as f32 - SIDE_X - 1.0, 1.0, LINE, 1.0);
+}
+
+/// 見出しの札の色。警報は赤、予報は橙 (web の緊急地震速報のバナーの色)
+const EEW_WARNING: [u8; 3] = [0xd7, 0x26, 0x3d];
+const EEW_FORECAST: [u8; 3] = [0xb3, 0x59, 0x00];
+
+/// 右パネルの上: 緊急地震速報の詳細 (見出しの札に、緊急地震速報であることと警報か予報か)
+fn draw_eew_detail(pm: &mut Pixmap, text: &mut Text, e: &EewSummary) {
+    let x = SIDE_X + PAD;
+    badge(pm, text, e.max_scale, x, 58.0, 56.0);
+    let kind = eew_kind_text(e);
+    let w = text.width(&kind, 11.0).min(260.0) + 12.0;
+    let color = if e.warning { EEW_WARNING } else { EEW_FORECAST };
+    rrect(pm, x + 70.0, 57.0, w, 16.0, 4.0, color, 1.0);
+    text.draw_fit(pm, &kind, x + 76.0, 69.0, 11.0, [255, 255, 255], 260.0);
+    let place = e.hypocenter.as_ref().map_or("", |h| &h.name);
+    let place = if place.is_empty() { "震源不明" } else { place };
+    text.draw_fit(pm, place, x + 70.0, 94.0, 20.0, TEXT, 270.0);
+    text.draw(pm, &format!("{} 発生", e.origin_time), x + 70.0, 110.0, 12.0, MUTED);
+    for (i, (k, v)) in [
+        ("震源", hypo_text(e.hypocenter.as_ref())),
+        ("予測", eew_forecast_text(e)),
+    ]
+    .iter()
+    .enumerate()
+    {
+        let y = 138.0 + i as f32 * 22.0;
         text.draw(pm, k, x, y, 13.0, MUTED);
         text.draw_fit(pm, v, x + 44.0, y, 13.0, TEXT, 300.0);
     }

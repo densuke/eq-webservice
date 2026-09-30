@@ -57,6 +57,8 @@ pub struct QuakeSummary {
     /// 最後の情報を受けた時刻 (サーバの時計。epoch ミリ秒)
     pub updated_ms: u64,
     pub origin_time: String,
+    /// 発生時刻 (epoch ミリ秒。地震波の起点)
+    pub origin_ms: Option<i64>,
     pub hypocenter: Option<Hypocenter>,
     pub max_scale: Scale,
     pub tsunami: String,
@@ -104,6 +106,7 @@ fn summarize(g: &[(u64, &Quake)]) -> QuakeSummary {
     QuakeSummary {
         updated_ms: g.iter().map(|(t, _)| *t).max().unwrap_or(0),
         origin_time: latest.origin_time.clone(),
+        origin_ms: merged_place(g).origin_ms,
         hypocenter: g.iter().rev().find_map(|(_, q)| q.hypocenter.clone()),
         max_scale: g.iter().map(|(_, q)| q.max_scale).max().unwrap_or(Scale::UNKNOWN),
         tsunami: latest.domestic_tsunami.clone(),

@@ -5,8 +5,9 @@ use tiny_skia::Pixmap;
 
 use super::data::{City, CityWeather, Kind, Warnings};
 use super::draw::{Renderer, Scene, MAP_RECT};
+use super::eew::{EewSummary, Wave};
 use super::geo::{self, View};
-use super::model::QuakeSummary;
+use super::model::{scale_color, QuakeSummary};
 use super::paint::SEA;
 use super::text::Text;
 use super::*;
@@ -47,6 +48,7 @@ fn quake(max: Scale, prefs: &[(&str, Scale)], at: Option<(f64, f64)>) -> QuakeSu
     QuakeSummary {
         updated_ms: NOW,
         origin_time: "2026/09/30 12:00:00".into(),
+        origin_ms: Some(NOW as i64),
         hypocenter: at.map(|(lat, lon)| Hypocenter {
             name: "石川県能登地方".into(),
             latitude: Some(lat),
@@ -60,6 +62,31 @@ fn quake(max: Scale, prefs: &[(&str, Scale)], at: Option<(f64, f64)>) -> QuakeSu
     }
 }
 
+/// 右パネルの見出しの札の左端の x (右パネルの左端 900 + 余白 16 + 70)
+const SIDE: u32 = 900 + 16 + 70;
+
+fn eew(warning: bool, prefs: &[(&str, Scale)], at: Option<(f64, f64)>) -> EewSummary {
+    EewSummary {
+        event_id: "e".into(),
+        serial: "3".into(),
+        received_ms: NOW,
+        warning,
+        test: false,
+        origin_time: "2026/09/30 12:00:00".into(),
+        origin_ms: Some(NOW as i64),
+        hypocenter: at.map(|(lat, lon)| Hypocenter {
+            name: "石川県能登地方".into(),
+            latitude: Some(lat),
+            longitude: Some(lon),
+            depth_km: Some(10),
+            magnitude: Some(6.5),
+        }),
+        max_scale: prefs.iter().map(|p| p.1).max().unwrap_or(Scale::UNKNOWN),
+        pref_scales: prefs.iter().map(|(p, s)| (p.to_string(), *s)).collect(),
+        has_areas: false,
+    }
+}
+
 fn scene<'a>(
     quake: Option<&'a QuakeSummary>,
     history: &'a [QuakeSummary],
@@ -69,6 +96,7 @@ fn scene<'a>(
     Scene {
         icons: &NO_ICONS,
         quake,
+        eew: None,
         history,
         warnings,
         weather,
@@ -140,6 +168,80 @@ fn quake_frame_paints_the_prefecture_with_its_scale_color() {
 }
 
 #[test]
+fn an_eew_frame_paints_the_forecast_translucent_with_an_epicenter_and_a_colored_band() {
+    let mut r = renderer(Text::none());
+    let warning = eew(true, &[("石川県", Scale::S5_LOWER)], Some((37.5, 137.2)));
+    let mut sc = scene(None, &[], None, None);
+    sc.eew = Some(&warning);
+    let pm = r.render(&sc);
+    // 予測の県は、震度の色が陸の色に半透明で重なる (観測のような真っ直ぐの色にはならない)
+    let painted = rgb(&pm, center_of("石川県"));
+    assert_ne!(painted, scale_color(Scale::S5_LOWER));
+    assert_ne!(painted, [0x3a, 0x42, 0x50]);
+    assert!(
+        painted[0] > 0x3a && painted[1] > 0x42 && painted[2] < 0x50,
+        "{painted:?}"
+    );
+    assert_eq!(rgb(&pm, center_of("愛知県")), [0x3a, 0x42, 0x50]);
+    // 震源の ✕ (中心は赤)
+    let (x, y) = View::fit_home(MAP_RECT).px(137.2, 37.5);
+    assert!(near(&pm, (x as u32, y as u32), [0xe0, 0x1e, 0x1e]));
+    // 右パネルの見出しの札: 警報は赤、予報は橙 (文字の左の余白)
+    assert_eq!(rgb(&pm, (SIDE + 3, 62)), [0xd7, 0x26, 0x3d]);
+    let forecast = eew(false, &[("石川県", Scale::S4)], Some((37.5, 137.2)));
+    sc.eew = Some(&forecast);
+    assert_eq!(rgb(&r.render(&sc), (SIDE + 3, 62)), [0xb3, 0x59, 0x00]);
+    // 地震情報があれば、そちらを出す (観測の色、札は無い)
+    let q = quake(Scale::S4, &[("石川県", Scale::S4)], Some((37.5, 137.2)));
+    sc.quake = Some(&q);
+    let pm = r.render(&sc);
+    assert_eq!(rgb(&pm, center_of("石川県")), [0xfa, 0xf5, 0x00]);
+    assert_ne!(rgb(&pm, (SIDE + 3, 62)), [0xb3, 0x59, 0x00]);
+}
+
+#[test]
+fn a_wave_is_drawn_as_a_ring_that_grows_with_the_radius() {
+    let mut r = renderer(Text::none());
+    let (lat, lon) = (37.5, 137.2);
+    let q = quake(Scale::S4, &[], Some((lat, lon)));
+    let wave = |km: f64| Wave {
+        lat,
+        lon,
+        p_km: None,
+        s_km: Some(km),
+    };
+    let view = View::fit_home(MAP_RECT);
+    // 円周の、真東・真北の点 (緯度 1 度 = 111.19km)
+    let east = |km: f64| view.px(lon + km / (111.19 * lat.to_radians().cos()), lat);
+    let north = |km: f64| view.px(lon, lat + km / 111.19);
+    let px = |p: (f32, f32)| (p.0 as u32, p.1 as u32);
+    let s_red = [0xff, 0x52, 0x52];
+    let sc = scene(Some(&q), &[], None, None);
+    let still = r.render(&sc);
+    let with = |r: &Renderer, waves: &[Wave]| {
+        let mut pm = still.clone();
+        r.draw_waves(&mut pm, waves);
+        pm
+    };
+    let ring = with(&r, &[wave(200.0)]);
+    assert!(near(&ring, px(east(200.0)), s_red));
+    assert!(near(&ring, px(north(200.0)), s_red));
+    assert!(!near(&ring, px(east(100.0)), s_red)); // 内側には線が無い
+                                                   // 半径が変われば、線の場所も動く (コマごとに描き直す)
+    let small = with(&r, &[wave(100.0)]);
+    assert!(near(&small, px(east(100.0)), s_red));
+    assert!(!near(&small, px(east(200.0)), s_red));
+    // P 波は青。波が無ければ、どちらも出ない
+    let p_only = Wave {
+        p_km: Some(200.0),
+        s_km: None,
+        ..wave(0.0)
+    };
+    assert!(near(&with(&r, &[p_only]), px(east(200.0)), [0x4f, 0xc3, 0xf7]));
+    assert!(!near(&with(&r, &[]), px(east(200.0)), s_red));
+}
+
+#[test]
 fn neighbor_countries_are_drawn_under_japan_and_a_missing_file_is_fine() {
     let mut r = renderer(Text::none());
     let pm = r.render(&scene(None, &[], None, None));
@@ -174,6 +276,21 @@ fn okinawa_px() -> (u32, u32) {
     let inset = frame::Frame::inset(&main, &frame::OKINAWA).unwrap();
     let (x, y) = inset.view.px(127.95, 26.5); // 沖縄本島
     (x as u32, y as u32)
+}
+
+#[test]
+fn an_epicenter_just_west_of_the_inset_is_pinned_to_its_corner() {
+    let mut r = renderer(Text::none());
+    // 与那国島の西の海 (23.6N 122.8E) は、本図にも南西諸島の枠にも入らない
+    let e = eew(false, &[], Some((23.6, 122.8)));
+    let mut sc = scene(None, &[], None, None);
+    sc.eew = Some(&e);
+    let pm = r.render(&sc);
+    assert!(near(&pm, (18, 188), [0xe0, 0x1e, 0x1e])); // 枠 (10,46 から高さ 150) の左下の隅
+                                                       // 遠い震央 (台湾の西) は、どこにも印を置かない
+    let far = eew(false, &[], Some((23.6, 118.0)));
+    sc.eew = Some(&far);
+    assert!(!near(&r.render(&sc), (18, 188), [0xe0, 0x1e, 0x1e]));
 }
 
 #[test]
