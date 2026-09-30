@@ -12,6 +12,7 @@ mod ffmpeg;
 mod mixer;
 mod native;
 mod record;
+mod ring;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -89,9 +90,10 @@ pub struct BroadcastConfig {
     pub builtin_bitrate: u32,
     /// 映像・音の圧縮 (ffmpeg の引数)
     pub encode: Vec<String>,
-    /// 送り先 (ffmpeg の引数)。`$VAR` / `${VAR}` は環境変数に置き換える
+    /// 送り先 (ffmpeg の引数)。`$VAR` / `${VAR}` は環境変数に置き換える。
+    /// `[record]` があるときは、送り出し用の ffmpeg (`-c copy`) の引数 (例: `-f flv rtmps://...`)
     pub output: Vec<String>,
-    /// 地震の画面になったときの録画の切り出し (native・ffmpeg のときだけ。ring は output の tee で作る)。省けば何もしない
+    /// 地震の画面になったときの録画の切り出し (native・ffmpeg のときだけ。ring は eq-server が mpegts を受けて書く)。省けば何もしない
     pub record: Option<record::RecordConfig>,
 }
 
@@ -193,6 +195,17 @@ pub async fn run(args: &[String]) -> anyhow::Result<()> {
     if cfg.record.is_some() && (cfg.encoder != EncoderKind::Ffmpeg || cfg.source != Source::Native) {
         tracing::warn!("broadcast: [record] は source = \"native\" かつ encoder = \"ffmpeg\" のときだけ働きます (今の設定では何もしません)");
     }
+    if cfg
+        .record
+        .as_ref()
+        .is_some_and(|r| r.before_min + r.after_min > record::MAX_SPAN_MIN)
+    {
+        tracing::warn!(
+            "broadcast: before_min + after_min は {} 分までにしてください (ring は 1 分ごとの {} 個なので、古い分が欠けます)",
+            record::MAX_SPAN_MIN,
+            ring::RING_FILES
+        );
+    }
     let get = |k: &str| std::env::var(k).ok();
     let output = expand_all(&cfg.output, get)?;
     // 送り先に埋めた値 (ストリームキーなど) はログで伏せる
@@ -257,13 +270,18 @@ async fn session(cfg: &BroadcastConfig, output: &[String], secrets: &[String]) -
         (None, Some(a)) => a.ffmpeg_input(),
         (None, None) => cfg.audio.clone(),
     };
-    if let (Some(rc), Some(n), EncoderKind::Ffmpeg) = (&cfg.record, &native, cfg.encoder) {
+    // [record] は native・ffmpeg のときだけ (run で警告する)
+    let record = cfg
+        .record
+        .as_ref()
+        .filter(|_| native.is_some() && cfg.encoder == EncoderKind::Ffmpeg);
+    if let (Some(rc), Some(n)) = (record, &native) {
         record::spawn(rc.clone(), cfg.ffmpeg.clone(), n.calm.clone(), n.shown.clone())?;
     }
     let mut encoder = match cfg.encoder {
-        EncoderKind::Ffmpeg => {
-            Encoder::Ffmpeg(Box::new(ffmpeg::FfmpegEncoder::start(cfg, &audio_in, output, secrets)?))
-        }
+        EncoderKind::Ffmpeg => Encoder::Ffmpeg(Box::new(ffmpeg::FfmpegEncoder::start(
+            cfg, &audio_in, output, secrets, record,
+        )?)),
         EncoderKind::Builtin => Encoder::Builtin(Box::new(builtin::BuiltinEncoder::start(cfg, output).await?)),
     };
     let started = std::time::Instant::now();
