@@ -85,6 +85,7 @@ async fn main() -> anyhow::Result<()> {
         city_weather::spawn(city.clone());
     }
     routes.push(city_weather::router(city));
+    routes.push(http::source_router(cfg.source.kind()));
     routes.push(bgm::router(&cfg.bgm));
     routes.push(banner::router(&cfg.banner));
 

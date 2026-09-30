@@ -240,6 +240,37 @@ eq-server broadcast broadcast.toml
 
 配信は数秒以上遅れて届きます。緊急地震速報は公式の手段で受け取るよう、画面の注意書きはそのまま残しています。
 
+#### Chrome を使わず eq-server が画面を描く (native)
+
+`source = "native"` にすると、Chrome を起動せず eq-server が 1280x720 の画面を描いて ffmpeg に渡します (負荷の測り方は
+[docs/broadcast-native.md](docs/broadcast-native.md) 11 章、設定は [broadcast.example.toml](broadcast.example.toml) の native の節)。
+
+- `test = true`: テスト配信の表示。赤い帯 2 本・「TEST」の透かし・「[テスト]」を必ず描きます (消す設定はありません)。
+  過去の地震を流すなどして確かめるときは、送り先を **本番とは別の配信 (限定公開) のストリームキー** にしてください (同じキーかどうかは判断できません)
+- 安全装置: データの取得先 (`server`) が記録を流すサーバ (replay。`GET /api/source` が `replay` を返す) なのに `test = true` が無いと、
+  配信を始めずにエラーを出して止まり、10 分後に見直します。取得先が答えないとき (古いサーバ) は replay ではないとみなします
+
+#### e2 から常時配信する
+
+`deploy/eq-broadcast.service` (ユーザーユニット。CPUQuota 25%・MemoryMax 200M・Nice 19・Restart always) と
+`deploy/broadcast.e2.toml` (平時 2fps・地震 10fps・無音) を使います。
+
+```sh
+sudo apt install ffmpeg fonts-noto-cjk
+mkdir -p ~/work/eq-e2cast/map && cd ~/work/eq-e2cast
+cp <eq-server のバイナリ> eq-server                      # リリースのバイナリ
+cp <リポジトリ>/web/public/{japan,warning-areas,neighbors}.geojson map/   # 地図のデータ
+cp <リポジトリ>/deploy/broadcast.e2.toml cast.toml
+# ストリームキー (権限 600)。書式は YOUTUBE_LIVE_API_KEY=...
+install -m 600 /dev/null ~/.config/youtube-live-eq-webservice && $EDITOR ~/.config/youtube-live-eq-webservice
+mkdir -p ~/.config/systemd/user && cp <リポジトリ>/deploy/eq-broadcast.service ~/.config/systemd/user/
+loginctl enable-linger $USER                             # ログアウトしても動かし続ける
+systemctl --user daemon-reload && systemctl --user enable --now eq-broadcast
+journalctl --user -u eq-broadcast -f
+```
+
+`eq-server` の入れ替えは、ファイルを置き換えてから `systemctl --user restart eq-broadcast` です。
+
 ## プラグイン（配信先）
 
 `config.toml` の `[[sinks]]` に並べます。共通のキー:

@@ -13,6 +13,7 @@ mod model;
 mod paint;
 mod panel;
 mod telops;
+mod test_mark;
 mod text;
 mod yuv;
 
@@ -89,13 +90,40 @@ impl Drop for Native {
     }
 }
 
+/// 取得先が記録の再生 (replay) なのに test = true でないときは、配信を始めさせない
+/// (過去の地震を本番の配信に流して、実際の地震と取り違えられないように)。
+/// 取れない (古いサーバなど) ときは replay ではないとみなす
+pub async fn check_source(cfg: &BroadcastConfig) -> anyhow::Result<()> {
+    let url = format!("{}/api/source", cfg.server.trim_end_matches('/'));
+    let kind = async {
+        let client = crate::net::client(Duration::from_secs(10))?;
+        crate::net::json::<serde_json::Value>(client.get(&url)).await
+    }
+    .await
+    .ok()
+    .and_then(|v| v.get("type")?.as_str().map(str::to_string));
+    check_replay(kind.as_deref(), cfg.test)
+}
+
+fn check_replay(kind: Option<&str>, test: bool) -> anyhow::Result<()> {
+    if kind == Some("replay") && !test {
+        return Err(super::Refused(
+            "データの取得先が記録の再生 (replay) です。テスト配信として test = true を設定してください \
+             (送り先はテスト用の別の配信のキーにすること)"
+                .into(),
+        )
+        .into());
+    }
+    Ok(())
+}
+
 pub fn start(cfg: &BroadcastConfig, notices: Option<UnboundedSender<String>>) -> anyhow::Result<Native> {
     let renderer = load_renderer(cfg)?;
     let server = cfg.server.trim_end_matches('/').to_string();
     let st: Shared = Arc::default();
     let (tx, frames) = watch::channel(Arc::new(Vec::new()));
     let (calm_tx, calm) = watch::channel(true);
-    let label = cfg.label.clone();
+    let (label, test) = (cfg.label.clone(), cfg.test);
     let tasks = vec![
         tokio::spawn(ws_loop(ws_url(&server), st.clone())),
         tokio::spawn(poll(format!("{server}/api/warnings"), st.clone(), |s, v: Warnings| {
@@ -115,6 +143,7 @@ pub fn start(cfg: &BroadcastConfig, notices: Option<UnboundedSender<String>>) ->
                 frames: tx,
                 calm: calm_tx,
                 label,
+                test,
             },
             notices,
         )),
@@ -150,6 +179,7 @@ struct Out {
     frames: watch::Sender<Arc<Vec<u8>>>,
     calm: watch::Sender<bool>,
     label: String,
+    test: bool,
 }
 
 async fn render_loop(mut renderer: Renderer, st: Shared, out: Out, notices: Option<UnboundedSender<String>>) {
@@ -179,6 +209,7 @@ async fn render_loop(mut renderer: Renderer, st: Shared, out: Out, notices: Opti
             connected: s.connected,
             bgm_title: &s.bgm_title,
             label: &out.label,
+            test: out.test,
         };
         let pm = renderer.render(&scene);
         let calm = quake.is_none();

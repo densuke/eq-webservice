@@ -86,6 +86,8 @@ def main():
     ffmpeg = a.ffmpeg
     lines = ['source = "native"', f'server = "{a.server or f"http://127.0.0.1:{a.port}"}"', f"map_dir = {json.dumps(os.path.abspath(a.map_dir))}",
              f"ffmpeg = {json.dumps(ffmpeg)}"]
+    if not a.server:
+        lines.append("test = true")  # replay を流すので、テスト配信の表示にする (server が replay だと、無いと配信が始まらない)
     if a.font:
         lines.append(f"font = {json.dumps(a.font)}")
     lines += a.toml + [f'output = ["-f", "mpegts", {json.dumps(out_ts)}]']

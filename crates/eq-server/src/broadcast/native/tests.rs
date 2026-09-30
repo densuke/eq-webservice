@@ -76,6 +76,7 @@ fn scene<'a>(
         connected: true,
         bgm_title: "テスト曲",
         label: "",
+        test: false,
     }
 }
 
@@ -334,4 +335,40 @@ fn write_fixture_pngs_when_asked() {
     };
     let calm_png = r.render(&scene(None, &history[1..], Some(&warnings), Some(&weather)));
     calm_png.save_png(std::path::Path::new(&out).join("calm.png")).unwrap();
+    let test_png = r.render(&test_scene(None, &history[1..]));
+    test_png.save_png(std::path::Path::new(&out).join("test.png")).unwrap();
+}
+
+fn test_scene<'a>(quake: Option<&'a QuakeSummary>, history: &'a [QuakeSummary]) -> Scene<'a> {
+    Scene {
+        test: true,
+        ..scene(quake, history, None, None)
+    }
+}
+
+#[test]
+fn test_broadcast_draws_red_bands_and_a_watermark_even_without_a_font() {
+    let mut r = renderer(Text::none());
+    let plain = r.render(&scene(None, &[], None, None));
+    let marked = r.render(&test_scene(None, &[]));
+    let red = super::test_mark::BAND;
+    // 上部バーのすぐ下と最下部の帯 (文字の無い端の画素)
+    assert_eq!(rgb(&marked, (5, 40)), red);
+    assert_eq!(rgb(&marked, (5, 715)), red);
+    assert_ne!(rgb(&plain, (5, 40)), red);
+    // 地図の中央 (E の縦棒の上) に、うすい白が乗る
+    let (mx, my) = (450 - 256 + 134 + 5, 378 - 95 + 90);
+    assert_ne!(rgb(&marked, (mx, my)), rgb(&plain, (mx, my)));
+    // 海の画素は、透かしの外なら変わらない
+    assert_eq!(rgb(&marked, sea_px()), rgb(&plain, sea_px()));
+}
+
+#[test]
+fn replay_without_test_is_refused_but_unknown_or_real_sources_are_not() {
+    assert!(check_replay(Some("replay"), false).is_err());
+    assert!(check_replay(Some("replay"), true).is_ok());
+    assert!(check_replay(Some("p2pquake"), false).is_ok());
+    assert!(check_replay(None, false).is_ok()); // 取れない (古いサーバ) ときは replay ではないとみなす
+    let e = check_replay(Some("replay"), false).unwrap_err();
+    assert!(e.is::<crate::broadcast::Refused>());
 }

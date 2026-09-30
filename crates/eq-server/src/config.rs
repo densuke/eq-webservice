@@ -92,6 +92,16 @@ pub enum SourceConfig {
     },
 }
 
+impl SourceConfig {
+    /// `GET /api/source` で返す種類
+    pub fn kind(&self) -> &'static str {
+        match self {
+            SourceConfig::P2pquake { .. } => "p2pquake",
+            SourceConfig::Replay { .. } => "replay",
+        }
+    }
+}
+
 impl Default for SourceConfig {
     fn default() -> Self {
         SourceConfig::P2pquake {

@@ -255,6 +255,7 @@ y=720 └───────────────────────�
 - 音のビットレートを設定で決める (`audio_bitrate`、既定は今の `128k`)。無音で配信するなら `32k`。
 - 映像は `encode` で CRF と上限を指定できることを確かめ、設定例に書く:
   `["-threads", "1", "-c:v", "libx264", "-preset", "ultrafast", "-tune", "stillimage", "-crf", "28", "-maxrate", "500k", "-bufsize", "1000k"]`
+  (**可変 fps では -maxrate を付けてはいけない**。13 章)
 - 平時の送信量を測って PR に書く (目標: 平時 250kbps 未満、音込み)。
 
 ### 10.4 配信元を画面に出す (label)
@@ -296,6 +297,7 @@ y=720 └───────────────────────�
 
 設定: `fps = 10`・`fps_calm = 2`・`audio_bitrate = "32k"`・
 `encode = ["-threads","1","-c:v","libx264","-preset","veryfast","-tune","zerolatency","-crf","28","-maxrate","500k","-bufsize","1000k"]`。CPU は 1 コアを 100% とする。
+**この数値は -maxrate 付きで測ったもので、平時の画面が崩れていた (13 章)。送信量は CRF だけの設定で測り直す前提で読むこと (e2 の本番は CRF 23 で平時 約 216kbps)。**
 
 | 場面 | CPU (eq-server + ffmpeg) | メモリ (eq-server / ffmpeg) | コマ | 送信量 (音込み) |
 |---|---|---|---|---|
@@ -320,7 +322,7 @@ cargo build --release
 # 記録の地震を流すサーバ (別のポート 18099) を立て、native の server をそこへ向ける。出力は一時ディレクトリのファイルだけ
 tools/broadcast_load.py samples/scenarios/noto2024.jsonl --speed 4 --duration 100 --time-l \
   --toml 'fps = 10' --toml 'fps_calm = 2' --toml 'audio_bitrate = "32k"' \
-  --toml 'encode = ["-threads","1","-c:v","libx264","-preset","veryfast","-tune","zerolatency","-crf","28","-maxrate","500k","-bufsize","1000k"]'
+  --toml 'encode = ["-threads","1","-c:v","libx264","-preset","veryfast","-tune","zerolatency","-crf","23"]'
 # 平時 (実データ。読むだけ): replay を立てずに eq.fuga.jp の画面を測る
 tools/broadcast_load.py x --server https://eq.fuga.jp --duration 90 --toml 'fps = 10' --toml 'fps_calm = 2'
 ```
@@ -390,3 +392,12 @@ WantedBy=default.target
 - replay のサーバに向けて `test` 無しで起動するとエラーで止まり、`test = true` なら動くこと (テストか手での確認)
 - `/api/source` の単体テスト
 - 利用者の配信 (e2 の eq-broadcast、`~/work/eq-broadcast`) には触らない。YouTube には送らない。PR まで作り、マージしない
+
+## 13. 可変 fps では -maxrate を付けない (v0.16.1、e2 の本番で見つかった)
+
+- 症状: `fps_calm` を指定した配信で、`encode` に `-maxrate` / `-bufsize` を付けると、平時 (2fps) の画面がブロック状に崩れる。CRF をいくつにしても送信量が同じ (約 127kbps) になる。
+- 原因: 可変 fps は入力を `-use_wallclock_as_timestamps 1` で渡すので、ffmpeg は入力を 1 秒 25 コマとみなす。x264 の VBV は 1 コマあたり maxrate/25 (500k なら 20kbit) に絞るため、実際は 1 秒 2 コマしか来なくても、1 コマに使える量が足りない。
+- 対処: 可変 fps の `encode` は CRF だけにする。e2 の本番は `["-threads", "1", "-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency", "-crf", "23"]` で、平時の送信量は約 216kbps・文字はくっきり。
+- コード: `encode` を省いた (既定のままの) とき、`fps_calm` があれば既定を `["-c:v", "libx264", "-preset", "veryfast", "-crf", "23"]` にする (Mac・Pi は上限つきの既定と組み合わせると同じ不具合になるため)。
+  一定の fps (fps_calm を省く) の既定は今までどおり (`-b:v 3000k -maxrate 3000k`。25 でなく実際の fps で入るので問題ない)。
+  `encode` を明示して `-maxrate` を含めた場合は、そのまま使い、起動時に警告を出す。

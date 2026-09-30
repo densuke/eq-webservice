@@ -2,6 +2,7 @@
 //!
 //! - `GET /ws`         : 接続時に `hello` (サーバ時刻 + 直近イベント)、以後 `event` を push
 //! - `GET /api/events` : 直近イベントの JSON (WebSocket を使えないクライアント向け)
+//! - `GET /api/source` : 取得元の種類 (`p2pquake` | `replay`)
 //! - `GET /healthz`    : 死活監視
 //! - それ以外          : `static_dir` の静的ファイル
 
@@ -47,6 +48,14 @@ const MAX_CLIENT_MESSAGE: usize = 16 * 1024;
 /// 同時につなげるブラウザの数。つなぎっぱなしで大量に開かれてもメモリを使い切らないように (e2 はメモリ 1GB)
 const MAX_CLIENTS: usize = 500;
 static CLIENTS: Semaphore = Semaphore::const_new(MAX_CLIENTS);
+
+/// `GET /api/source` : 情報の取得元の種類 (`p2pquake` | `replay`)。配信が、記録の再生をテスト表示なしで流さないための確認に使う
+pub fn source_router(kind: &'static str) -> Router {
+    Router::new().route(
+        "/api/source",
+        get(move || async move { Json(serde_json::json!({ "type": kind })) }),
+    )
+}
 
 pub fn router(hub: Arc<Hub>, static_dir: &std::path::Path, extra: Vec<Router>) -> Router {
     let mut app = Router::new()
@@ -171,6 +180,13 @@ mod tests {
         assert_eq!(h(header::CACHE_CONTROL), "no-cache");
         assert_eq!(h(header::X_CONTENT_TYPE_OPTIONS), "nosniff");
         assert!(h(header::CONTENT_SECURITY_POLICY).contains("script-src 'self'"));
+    }
+
+    #[tokio::test]
+    async fn source_reports_its_kind() {
+        let (parts, body) = get(source_router("replay"), "/api/source").await;
+        assert_eq!(parts.status, 200);
+        assert_eq!(body, r#"{"type":"replay"}"#);
     }
 
     #[tokio::test]
