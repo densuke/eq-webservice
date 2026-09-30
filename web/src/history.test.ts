@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { makePlan } from "./demo.ts";
 import { GroupStore } from "./groups.ts";
-import { HISTORY_LEAD_MS, gatherEvents, historyStart, sameQuakeEvents } from "./history.ts";
+import { HISTORY_LEAD_MS, gatherEvents, historyStart, sameQuakeEvents, skipRanges } from "./history.ts";
 import { groupPlace } from "./quakes.ts";
 import { app } from "./state.ts";
 import type { EewEvent, EqEvent, QuakeEvent } from "./types.ts";
@@ -63,8 +63,18 @@ test("only events of the same earthquake are kept, in the order they arrived", (
 
 test("playback starts 10 seconds before the second-resolution origin of the eew, not the minute-resolution one of the quake", () => {
   assert.equal(historyStart(mine), at(14, 0, 37) - HISTORY_LEAD_MS);
-  assert.equal(historyStart([quake("q", 0)]), at(14, 0, 0) - HISTORY_LEAD_MS);
   assert.equal(historyStart([]), null);
+});
+
+test("without an eew, playback starts 10 seconds before the first report arrived", () => {
+  const events = [quake("q2", at(14, 3, 20)), quake("q1", at(14, 1, 43))];
+  assert.equal(historyStart(events), at(14, 1, 43) - HISTORY_LEAD_MS);
+});
+
+test("gaps longer than 20 seconds are skipped from 5 seconds after a report to 5 seconds before the next; exactly 20 is not", () => {
+  assert.deepEqual(skipRanges([0, 20_000, 40_001, 50_000]), [{ from: 25_000, to: 35_001 }]);
+  assert.deepEqual(skipRanges([0, 20_000]), []);
+  assert.deepEqual(skipRanges([]), []);
 });
 
 test("the plan starts at that time, and each report arrives at its issued time", () => {

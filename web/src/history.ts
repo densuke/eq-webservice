@@ -9,6 +9,10 @@ import type { EqEvent } from "./types.ts";
 
 /** 再生を始める位置: 最初の揺れ (発生時刻) のこの時間前 */
 export const HISTORY_LEAD_MS = 10_000;
+/** 次の報まで、これを超えて何も届かないときは、再生の時計を飛ばす (履歴の再生だけ) */
+export const HISTORY_MAX_GAP_MS = 20_000;
+/** 飛ばすとき、前の報のこの時間後から、次の報のこの時間前まで */
+export const HISTORY_GAP_MARGIN_MS = 5_000;
 /** 記録を取る範囲: 発生のこの時間前から */
 const ARCHIVE_BEFORE_MS = 60_000;
 /** 記録を取る範囲: 発生のこの時間後まで (各地の震度が出るまで) */
@@ -44,10 +48,20 @@ export async function fetchArchive(from: number, to: number): Promise<EqEvent[] 
   return res.ok ? await res.json() : null;
 }
 
-/** 再生の始まりの時刻: 発生時刻の HISTORY_LEAD_MS 前。緊急地震速報の秒単位の発生時刻を優先する (地震情報のは分単位)。分からなければ null */
+/**
+ * 再生の始まりの時刻。緊急地震速報があれば、その秒単位の発生時刻の HISTORY_LEAD_MS 前。
+ * 無ければ最初の報が届いた時刻の HISTORY_LEAD_MS 前 (地震情報の発生時刻は分単位で、報はその 1〜2 分後に届くため)。報が無ければ null
+ */
 export function historyStart(events: EqEvent[]): number | null {
-  const origins = (kind: "eew" | "quake") =>
-    events.flatMap((e) => (e.kind === kind && e.origin_time_ms != null ? [e.origin_time_ms] : []));
-  const o = origins("eew").length ? origins("eew") : origins("quake");
-  return o.length ? Math.min(...o) - HISTORY_LEAD_MS : null;
+  const eew = events.flatMap((e) => (e.kind === "eew" && e.origin_time_ms != null ? [e.origin_time_ms] : []));
+  if (eew.length) return Math.min(...eew) - HISTORY_LEAD_MS;
+  return events.length ? Math.min(...events.map((e) => e.received_at_ms)) - HISTORY_LEAD_MS : null;
+}
+
+/** 報の再生位置 (時刻順) から、時計を飛ばす区間 [from, to) の再生位置を出す。報の間が HISTORY_MAX_GAP_MS ちょうどまでは飛ばさない */
+export function skipRanges(ats: number[]): { from: number; to: number }[] {
+  return ats.slice(1).flatMap((b, i) => {
+    const a = ats[i];
+    return b - a > HISTORY_MAX_GAP_MS ? [{ from: a + HISTORY_GAP_MARGIN_MS, to: b - HISTORY_GAP_MARGIN_MS }] : [];
+  });
 }
