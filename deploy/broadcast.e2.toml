@@ -39,3 +39,4 @@ output = ["-f", "flv", "rtmps://a.rtmps.youtube.com/live2/$YOUTUBE_LIVE_API_KEY"
 # after_min = 10
 # keep = 20
 # min_free_mb = 500
+# min_scale = 30         # 震度 3 以上だけ切り出す (小さな地震で keep の枠が埋まらないように)

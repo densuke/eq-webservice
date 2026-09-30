@@ -65,3 +65,4 @@ output = ["-f", "flv", "rtmps://a.rtmps.youtube.com/live2/$YOUTUBE_LIVE_API_KEY"
 # after_min = 10
 # keep = 20
 # min_free_mb = 500
+# min_scale = 0          # 切り出す地震の最大震度 (10 倍した整数。30 = 震度 3)。0 で全部。警報は震度にかかわらず切り出す

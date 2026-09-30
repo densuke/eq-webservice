@@ -258,7 +258,7 @@ async fn session(cfg: &BroadcastConfig, output: &[String], secrets: &[String]) -
         (None, None) => cfg.audio.clone(),
     };
     if let (Some(rc), Some(n), EncoderKind::Ffmpeg) = (&cfg.record, &native, cfg.encoder) {
-        record::spawn(rc.clone(), cfg.ffmpeg.clone(), n.calm.clone())?;
+        record::spawn(rc.clone(), cfg.ffmpeg.clone(), n.calm.clone(), n.shown.clone())?;
     }
     let mut encoder = match cfg.encoder {
         EncoderKind::Ffmpeg => {
