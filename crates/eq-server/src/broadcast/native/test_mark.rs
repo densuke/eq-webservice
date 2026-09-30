@@ -9,7 +9,7 @@ use super::text::Text;
 
 pub const BAND: [u8; 3] = [0xb3, 0x00, 0x1b];
 const BAND_TEXT: [u8; 3] = [0xff, 0xff, 0xff];
-const BAND_H: f32 = 20.0;
+pub const BAND_H: f32 = 20.0;
 const MESSAGE: &str = "テスト配信: 過去の地震の再生です。実際の地震ではありません";
 const WATERMARK_ALPHA: f32 = 0.15;
 
