@@ -86,3 +86,56 @@ impl Encoder {
 - 5 章 1・2・4 の結果 (ffprobe の出力、PNG、CPU とメモリの比較) を PR に書く
 - `cargo audit` で新しい指摘が無いこと。openh264 のライセンス (BSD) を README の依存の説明に書く
 - 利用者の配信 (e2 の eq-broadcast、`~/work/eq-broadcast`) と e2 には触らない。YouTube には送らない。PR まで作り、マージしない
+
+## 8. v0.17.1: 地震の画面でコマが飛ばされる問題
+
+### 8.1 見つかったこと (2026-09-30、e2)
+
+e2 で本番の配信と同じ枠 (`systemd-run --user -p CPUQuota=25% -p MemoryMax=200M -p MemorySwapMax=0`) で、
+`tools/broadcast_load.py samples/scenarios/noto2024.jsonl --speed 4 --duration 100` を builtin (`builtin_bitrate = 1000000`、fps 10・fps_calm 2、test = true) で回した。
+
+- メモリ: 最大 75MB (問題なし)
+- CPU: 平均 18%、最大 27% (eq-server だけ)
+- **出たコマ: 0.2〜1.2fps** (地震の画面は 10fps、平時は 2fps のはず)。平時の部分でも 1.0fps だった
+- **キーフレームの間隔: 最小 2.0 秒、最大 4.8 秒** (YouTube は 4 秒以下を求める)
+- 送信量: 平均 100kbps
+
+見当: `h264.rs` の `.skip_frames(true)` (openh264 の目標ビットレートを守るためのコマ飛ばし)。
+Mac の N2 の確認でも、300k で平時 2fps の 78 コマ中 44〜70 コマしか出ていなかった。地震の画面は 1 コマが大きく、ほとんどが飛ばされる。
+強制したキーフレームも飛ばされると、次のキーフレームが遅れる。
+
+### 8.2 直すこと
+
+1. **コマを飛ばさない**。渡したコマは必ず 1 コマ出す (`skip_frames(false)`)。
+   - 画質の決め方は担当が測って選ぶ: `RateControlMode::Bitrate` のまま飛ばしなし、`Quality`、`Off` + 固定の QP など。
+     選んだ理由と数値を PR に書く。条件は「全コマ出る」「平時の送信量が今 (約 160〜220kbps、e2 全体) から大きく増えない (目安 300kbps 未満)」「文字が読める」。
+   - `builtin_bitrate` の意味が変わるなら、README・broadcast.example.toml・設定の説明を合わせる。設定の名前は変えない (e2 の cast.toml が使っている)。
+2. **キーフレームの間隔は 2 秒ごとを守る** (前のキーフレームから 2000ms 以上たった最初のコマ)。平時 2fps で最大 2.5 秒。
+3. **`tools/broadcast_load.py` を builtin でも使えるようにする**。
+   - `--toml 'encoder = "builtin"'` のとき、出力を `.flv` のファイル (`output = ["…/out.flv"]`) にする (今は mpegts 固定で、builtin では使えない)。
+   - `--toml` で `map_dir`・`font` を渡すと、ツールが足す行と重なって設定の読み込みで落ち、表が 0 だけになる。
+     重なる key は起動前にエラーにする (`--map-dir`・`--font` を使うよう案内する)。
+   - 配信側が途中で落ちたら、broadcast.log の最後の数行を出して止める (0 の表を出し続けない)。
+4. Cargo.toml を 0.17.1 にする。
+
+### 8.3 テスト (cargo test)
+
+- h264: 画面が毎コマ大きく変わる (乱数や縞で、毎コマ違う) 1280x720 の I420 を 10fps で 60 コマ渡し、**60 コマ全部が空でない出力** になること。
+  キーフレームが時刻で 2 秒ごと (0, 2000, 4000 …ms) に出ること。
+- 既存のテストはそのまま通ること。
+
+### 8.4 確かめ方 (Mac。e2・YouTube には触らない)
+
+1. `tools/broadcast_load.py samples/scenarios/noto2024.jsonl --speed 4 --duration 100` を builtin と ffmpeg (e2 の本番と同じ encode:
+   `["-threads","1","-c:v","libx264","-preset","veryfast","-tune","zerolatency","-crf","23"]`) で回し、表と最後のまとめを PR に貼る。
+   - 見るもの: 地震の画面で 10fps 近く出ること、平時で 2fps、キーフレームの間隔の最大、平均・最大の送信量、CPU、最大メモリ。
+2. 平時 (`--server https://eq.fuga.jp --duration 90`、読むだけ) も builtin で回し、送信量とコマ数を書く。
+3. 地震の画面の PNG を 1 枚切り出し、文字がつぶれていないこと。
+4. CPU の内訳の見当: builtin の地震の画面で、描く (native) と圧縮 (openh264) のどちらが重いか。
+   測る仕組みを常設する必要はない (一時的な計測でよい。コミットしない)。PR に数値だけ書く。
+
+### 8.5 完了の条件
+
+- 8.3 のテストが通る。CI (Linux・macOS の rust、audit、coverage、web) が全部通る
+- 8.4 の結果を PR に書く
+- e2 の eq-broadcast、`~/work/eq-broadcast`、e2、YouTube には触らない。PR まで作り、マージしない
