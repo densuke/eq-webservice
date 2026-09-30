@@ -13,6 +13,7 @@ use super::icon::Icons;
 use super::model::{scale_color, scale_text_color, QuakeSummary};
 use super::paint::{epicenter, rect, rrect, LAND, LAND_EDGE, MUTED, NEIGHBOR, NEIGHBOR_EDGE, SEA};
 use super::panel;
+use super::test_mark;
 use super::text::Text;
 use crate::quake::Scale;
 
@@ -40,6 +41,8 @@ pub struct Scene<'a> {
     pub bgm_title: &'a str,
     /// 上部バーの右に出す配信元の名前 (空なら出さない)
     pub label: &'a str,
+    /// テスト配信 (赤い帯・TEST の透かし・[テスト] を必ず描く)
+    pub test: bool,
 }
 
 pub struct Renderer {
@@ -107,6 +110,9 @@ impl Renderer {
             }
         }
         panel::draw_dynamic(&mut pm, &mut self.text, scene);
+        if scene.test {
+            test_mark::draw(&mut pm, &mut self.text);
+        }
         pm
     }
 }

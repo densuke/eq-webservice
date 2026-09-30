@@ -51,6 +51,8 @@ pub struct BroadcastConfig {
     pub fps_calm: Option<u32>,
     /// native: 上部バーの右に出す配信元の名前 (例 "配信元: e2")。空なら出さない
     pub label: String,
+    /// native: テスト配信 (過去の地震の再生など)。赤い帯・TEST の透かし・[テスト] を必ず描く。replay のサーバに向けるときは必須
+    pub test: bool,
     /// Chrome の実行ファイル
     pub chrome: String,
     /// Chrome に渡す環境変数 (Linux で音の出力先を決める PULSE_SINK など)
@@ -94,6 +96,7 @@ impl Default for BroadcastConfig {
             fps: 30,
             fps_calm: None,
             label: String::new(),
+            test: false,
             chrome: if cfg!(target_os = "macos") {
                 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome".into()
             } else {
@@ -117,6 +120,20 @@ impl Default for BroadcastConfig {
 
 /// 止まってから立ち上げ直すまで
 const RESTART_AFTER: Duration = Duration::from_secs(5);
+/// 設定が安全でなくて始めなかったとき (Refused) に、次を試すまで。すぐには繰り返さない
+const REFUSED_WAIT: Duration = Duration::from_secs(600);
+
+/// 安全装置が配信を始めさせなかった (設定を直すまで、何度試しても同じ)
+#[derive(Debug)]
+struct Refused(String);
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Refused {}
 
 pub async fn run(args: &[String]) -> anyhow::Result<()> {
     let [path] = args else {
@@ -134,15 +151,20 @@ pub async fn run(args: &[String]) -> anyhow::Result<()> {
     let stop = crate::shutdown_signal();
     tokio::pin!(stop);
     loop {
+        let mut wait = RESTART_AFTER;
         tokio::select! {
             r = session(&cfg, &output, &secrets) => match r {
                 Ok(()) => tracing::warn!("broadcast: stopped"),
+                Err(e) if e.is::<Refused>() => {
+                    tracing::error!("broadcast: 配信を始めません: {e}");
+                    wait = REFUSED_WAIT;
+                }
                 Err(e) => tracing::warn!("broadcast: {}", redact(&format!("{e:#}"), &secrets)),
             },
             _ = &mut stop => break,
         }
         tokio::select! {
-            _ = tokio::time::sleep(RESTART_AFTER) => {}
+            _ = tokio::time::sleep(wait) => {}
             _ = &mut stop => break,
         }
     }
@@ -165,7 +187,10 @@ async fn session(cfg: &BroadcastConfig, output: &[String], secrets: &[String]) -
             let (s, c) = chrome::launch(cfg, &page, notices).await?;
             (Some(s), Some(c), None)
         }
-        Source::Native => (None, None, Some(native::start(cfg, notices)?)),
+        Source::Native => {
+            native::check_source(cfg).await?;
+            (None, None, Some(native::start(cfg, notices)?))
+        }
     };
     // mixer の音 (fifo は mixer より後に捨てる。宣言の順を変えないこと)
     let mixer_fifo = if cfg.mixer { Some(audio::Fifo::create()?) } else { None };
