@@ -152,6 +152,7 @@ pub fn start(cfg: &BroadcastConfig, notices: Option<UnboundedSender<String>>) ->
                 label,
                 test,
                 check_ms,
+                flip_s: cfg.weather_flip_secs,
             },
             notices,
         )),
@@ -195,6 +196,8 @@ struct Out {
     label: String,
     test: bool,
     check_ms: u64,
+    /// 天気の札を今と明日で切り替える間隔 (秒。0 は今だけ)
+    flip_s: u64,
 }
 
 async fn render_loop(mut renderer: Renderer, st: Shared, out: Out, notices: Option<UnboundedSender<String>>) {
@@ -242,6 +245,7 @@ async fn render_loop(mut renderer: Renderer, st: Shared, out: Out, notices: Opti
                 warnings: s.warnings.as_ref(),
                 weather: s.weather.as_ref(),
                 icons: &s.icons,
+                flip_s: out.flip_s,
                 now_ms: now,
                 connected: s.connected,
                 bgm_title: &s.bgm_title,
@@ -357,7 +361,9 @@ async fn icon_loop(base: String, st: Shared) {
                 .weather
                 .iter()
                 .flat_map(|w| &w.cities)
-                .filter_map(|c| icon::names(&c.code));
+                .flat_map(|c| [Some(c.code.as_str()), c.tomorrow.as_ref().map(|t| t.code.as_str())])
+                .flatten()
+                .filter_map(icon::names);
             let mut names: Vec<&str> = codes
                 .flat_map(|(d, n)| [d, n])
                 .filter(|n| !s.icons.contains_key(*n))

@@ -40,6 +40,19 @@ pub struct City {
     #[serde(default)]
     pub code: String,
     pub temp: Option<f64>,
+    /// 明日の予報 (古いサーバ・取れていないときは無い)
+    #[serde(default)]
+    pub tomorrow: Option<Tomorrow>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Tomorrow {
+    #[serde(default)]
+    pub code: String,
+    pub temp_min: Option<f64>,
+    pub temp_max: Option<f64>,
+    /// 降水確率 (%)
+    pub pop: Option<u8>,
 }
 
 /// 警報・注意報の段階 (色分け)。低い順
@@ -218,6 +231,20 @@ pub fn temp_label(t: Option<f64>) -> String {
     t.map_or_else(String::new, |t| format!("{}°", t.round() as i64))
 }
 
+/// 最高/最低気温の表示 ("24°/17°")。片方しか無ければ "24°/-"、両方無ければ空
+pub fn range_label(max: Option<f64>, min: Option<f64>) -> String {
+    let one = |t: Option<f64>| t.map_or_else(|| "-".to_string(), |t| format!("{}°", t.round() as i64));
+    if max.is_none() && min.is_none() {
+        return String::new();
+    }
+    format!("{}/{}", one(max), one(min))
+}
+
+/// 札に「明日」を出す番か (flip_s 秒ごとに今と明日を交互に。0 なら常に今)。web/src/weather.ts の showTomorrow と同じ
+pub fn showing_tomorrow(now_ms: u64, flip_s: u64) -> bool {
+    flip_s > 0 && now_ms / 1000 / flip_s % 2 == 1
+}
+
 /// 主要都市の札の向き。大阪と神戸、東京と千葉は近いので左右に分ける
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Side {
@@ -233,6 +260,16 @@ pub fn city_side(name: &str) -> Side {
         "大阪" | "千葉" => Side::Right,
         "高知" => Side::Down,
         _ => Side::Up,
+    }
+}
+
+/// 明日の札の向き。札が今より幅も高さもあるので、近い都市どうしが重ならないよう一部を変える
+pub fn city_side_tomorrow(name: &str) -> Side {
+    match name {
+        "新潟" | "福岡" => Side::Left,
+        "東京" => Side::Up,
+        "千葉" | "広島" => Side::Down,
+        _ => city_side(name),
     }
 }
 
@@ -317,6 +354,21 @@ mod tests {
         let mut adv = Warnings::default();
         adv.areas.insert("0110000".into(), k("強風注意報"));
         assert_eq!(warning_summary(&adv, 5), None);
+    }
+
+    #[test]
+    fn the_card_flips_between_now_and_tomorrow() {
+        let at = |s: u64| showing_tomorrow(s * 1000, 20);
+        assert!(!at(0) && !at(19) && at(20) && at(39) && !at(40) && at(60));
+        assert!(!showing_tomorrow(25_000, 0)); // 0 は切り替えない
+    }
+
+    #[test]
+    fn range_labels() {
+        assert_eq!(range_label(Some(23.6), Some(17.0)), "24°/17°");
+        assert_eq!(range_label(Some(23.6), None), "24°/-");
+        assert_eq!(range_label(None, Some(9.0)), "-/9°");
+        assert_eq!(range_label(None, None), "");
     }
 
     #[test]

@@ -64,6 +64,8 @@ pub struct BroadcastConfig {
     pub fps_calm: Option<u32>,
     /// native: 上部バーの右に出す配信元の名前 (例 "配信元: e2")。空なら出さない
     pub label: String,
+    /// native: 平時の天気の札を「今」と「明日」で切り替える間隔 (秒)。0 なら今だけ
+    pub weather_flip_secs: u64,
     /// native: テスト配信 (過去の地震の再生など)。赤い帯・TEST の透かし・[テスト] を必ず描く。replay のサーバに向けるときは必須
     pub test: bool,
     /// Chrome の実行ファイル
@@ -133,6 +135,7 @@ impl Default for BroadcastConfig {
             fps: 30,
             fps_calm: None,
             label: String::new(),
+            weather_flip_secs: 20,
             test: false,
             chrome: if cfg!(target_os = "macos") {
                 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome".into()

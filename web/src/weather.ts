@@ -10,6 +10,17 @@ interface City {
   text: string;
   temp: number | null;
   precip1h: number | null;
+  /** 明日の予報 (古いサーバ・取れていなければ無い) */
+  tomorrow?: Tomorrow | null;
+}
+
+export interface Tomorrow {
+  code: string;
+  text: string;
+  temp_min: number | null;
+  temp_max: number | null;
+  /** 降水確率 (%) */
+  pop: number | null;
 }
 
 export interface CityWeather {
@@ -53,4 +64,16 @@ export function rainColor(mm: number): string {
 /** 気温の表示 ("22°")。無ければ空 */
 export function tempLabel(t: number | null): string {
   return t == null ? "" : `${Math.round(t)}°`;
+}
+
+/** 最高/最低気温の表示 ("24°/17°")。片方しか無ければ "24°/-"、両方無ければ空 */
+export function rangeLabel(max: number | null, min: number | null): string {
+  if (max == null && min == null) return "";
+  const one = (t: number | null) => (t == null ? "-" : tempLabel(t));
+  return `${one(max)}/${one(min)}`;
+}
+
+/** 札に「明日」を出す番か (flipSec 秒ごとに今と明日を交互に。0 なら常に今)。crates/eq-server/src/broadcast/native/data.rs の showing_tomorrow と同じ */
+export function showTomorrow(now: number, flipSec: number): boolean {
+  return flipSec > 0 && Math.floor(now / 1000 / flipSec) % 2 === 1;
 }

@@ -1,6 +1,19 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { rainColor, tempLabel, weatherIcon } from "./weather.ts";
+import { rainColor, rangeLabel, showTomorrow, tempLabel, weatherIcon } from "./weather.ts";
+
+test("札は flipSec ごとに今と明日を交互に出す (0 は今だけ)", () => {
+  const at = (s: number) => showTomorrow(s * 1000, 20);
+  assert.deepEqual([0, 19, 20, 39, 40, 60].map(at), [false, false, true, true, false, true]);
+  assert.equal(showTomorrow(25_000, 0), false);
+});
+
+test("最高/最低気温の表示", () => {
+  assert.equal(rangeLabel(23.6, 17), "24°/17°");
+  assert.equal(rangeLabel(23.6, null), "24°/-");
+  assert.equal(rangeLabel(null, 9), "-/9°");
+  assert.equal(rangeLabel(null, null), "");
+});
 
 test("天気コードと文から絵文字を選ぶ", () => {
   assert.equal(weatherIcon("100", "晴れ", false), "☀️");
