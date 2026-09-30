@@ -16,6 +16,9 @@ import sys
 TOLERANCE = 0.008  # 度 (約 800m)。大きくするほど軽くなる
 MIN_AREA = 0.0004  # 度^2。これより小さい島は捨てる (約 2km 四方)
 DIGITS = 3
+# 南西諸島 (北緯 31.5 度より南かつ東経 132 度より西) の輪だけ、別枠で点として見せたいので基準を緩める
+NANSEI_MIN_AREA = 0.00005  # 度^2 (約 0.6km²)。鳩間島・小宝島が元データで約 0.83km² なので 0.9km² 相当より少し下げた
+NANSEI_LAT, NANSEI_LON = 31.5, 132.0
 
 
 def perp_dist(p, a, b):
@@ -51,20 +54,44 @@ def area(ring):
     return abs(sum(x1 * y2 - x2 * y1 for (x1, y1), (x2, y2) in zip(ring, ring[1:]))) / 2
 
 
-def simplify_ring(ring):
-    if area(ring) < MIN_AREA:
-        return None
-    out = douglas_peucker(ring, TOLERANCE)
-    out = [[round(x, DIGITS), round(y, DIGITS)] for x, y in out]
+def in_nansei(ring):
+    xs = [x for x, _ in ring]
+    ys = [y for _, y in ring]
+    return (min(ys) + max(ys)) / 2 < NANSEI_LAT and (min(xs) + max(xs)) / 2 < NANSEI_LON
+
+
+def diamond(ring):
+    """DP でも 4 点に満たない小さな輪を、外接の菱形 (最低限の形) にする"""
+    xs = [x for x, _ in ring]
+    ys = [y for _, y in ring]
+    x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    pts = [(x0, cy), (cx, y0), (x1, cy), (cx, y1), (x0, cy)]
+    return [[round(x, DIGITS), round(y, DIGITS)] for x, y in pts]
+
+
+def dedup_ring(pts, tol):
+    out = [[round(x, DIGITS), round(y, DIGITS)] for x, y in douglas_peucker(pts, tol)]
     dedup = [out[0]]
     for p in out[1:]:
         if p != dedup[-1]:
             dedup.append(p)
-    if len(dedup) < 4:
-        return None
     if dedup[0] != dedup[-1]:
         dedup.append(dedup[0])
     return dedup
+
+
+def simplify_ring(ring):
+    nansei = in_nansei(ring)
+    if area(ring) < (NANSEI_MIN_AREA if nansei else MIN_AREA):
+        return None
+    out = dedup_ring(ring, TOLERANCE)
+    if len(out) >= 4:
+        return out
+    if not nansei:
+        return None
+    out = dedup_ring(ring, TOLERANCE / 4)
+    return out if len(out) >= 4 else diamond(ring)
 
 
 def simplify_polygon(poly):
