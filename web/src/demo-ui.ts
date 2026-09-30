@@ -1,7 +1,7 @@
 // デモモード: 場面の一覧と再生・操作 (ブラウザの中だけで再生し、実際の情報は裏で受け続ける)。
 
 import { type Scenario, type ScenarioSummary, makePlan } from "./demo.ts";
-import { historyStart } from "./history.ts";
+import { historyStart, skipRanges } from "./history.ts";
 import { GroupStore } from "./groups.ts";
 import { esc } from "./html.ts";
 import type { EqEvent } from "./types.ts";
@@ -12,6 +12,9 @@ import { type DemoState, app, demoPos, hooks, liveWorld, now, type World } from 
 const SPEEDS = [1, 2, 4, 8];
 /** 最後の報の後も、揺れの広がりが終わってカメラが戻るまで再生する */
 const TAIL_MS = 4 * 60_000;
+
+/** 時計を飛ばしたあと、「早送り」を出し続ける時間 */
+const FF_SHOW_MS = 3000;
 
 /** 再生の長さ (最後の報 + TAIL_MS) */
 const lengthOf = (d: DemoState) => (d.plan ? d.plan.end + TAIL_MS : 0);
@@ -29,7 +32,7 @@ export async function enterDemo(): Promise<void> {
   if (app.demo) return;
   const res = await fetch("demo/index.json");
   const scenarios: ScenarioSummary[] = res.ok ? await res.json() : [];
-  app.demo = { scenarios, running: null, plan: null, world: null, applied: 0, run: 0, history: false, clock: { pos: 0, anchor: performance.now(), speed: 1, paused: false } };
+  app.demo = { scenarios, running: null, plan: null, world: null, applied: 0, run: 0, history: false, skips: [], ffUntil: 0, clock: { pos: 0, anchor: performance.now(), speed: 1, paused: false } };
   showWorld({ store: new GroupStore(), tsunami: null, userquake: null });
   hooks.renderAll();
 }
@@ -67,7 +70,7 @@ export function startHistory(events: EqEvent[]): boolean {
   if (start == null) return false;
   const run = (app.demo?.run ?? 0) + 1;
   const plan = makePlan(events, run, undefined, start);
-  app.demo = { scenarios: [], running: null, plan, world: null, applied: 0, run, history: true, clock: { pos: 0, anchor: performance.now(), speed: 1, paused: false } };
+  app.demo = { scenarios: [], running: null, plan, world: null, applied: 0, run, history: true, skips: skipRanges(plan.events.map((x) => x.at)), ffUntil: 0, clock: { pos: 0, anchor: performance.now(), speed: 1, paused: false } };
   rebuild(app.demo);
   hooks.renderAll();
   return true;
@@ -87,7 +90,14 @@ function rebuild(d: DemoState): void {
 export function advanceDemo(quiet = false): void {
   const d = app.demo;
   if (!d?.plan || !d.world || app.world !== d.world) return;
-  const pos = demoPos(d);
+  let pos = demoPos(d);
+  // 何も届かない長い間は、次の報の少し前まで時計を飛ばす
+  const skip = d.skips.find((x) => pos >= x.from && pos < x.to);
+  if (skip) {
+    d.clock = { ...d.clock, pos: skip.to, anchor: performance.now() };
+    d.ffUntil = performance.now() + FF_SHOW_MS;
+    pos = skip.to;
+  }
   const due = [];
   while (d.applied < d.plan.events.length && d.plan.events[d.applied].at <= pos) due.push(d.plan.events[d.applied++].event);
   if (due.length) hooks.onEvents(due, !quiet, d.world);
@@ -155,6 +165,9 @@ export function renderDemoControls(): void {
   const time = `${mmss(pos)} / ${mmss(max)}`;
   const t = $("#demo-time");
   if (t.textContent !== time) t.textContent = time;
+  const ff = performance.now() < d.ffUntil ? "早送り" : "";
+  const f = $("#demo-ff");
+  if (f.textContent !== ff) f.textContent = ff;
 }
 
 $("#demo-open").addEventListener("click", () => void enterDemo());
@@ -166,7 +179,7 @@ $("#demo-list").addEventListener("click", (e) => {
 
 $("#demo-controls").innerHTML = `<button type="button" id="demo-play" class="follow">一時停止</button>${SPEEDS.map(
   (s) => `<button type="button" class="follow speed" data-speed="${s}">×${s}</button>`,
-).join("")}<input type="range" id="demo-seek" min="0" step="1000" aria-label="再生位置"><span id="demo-time" class="muted"></span>`;
+).join("")}<input type="range" id="demo-seek" min="0" step="1000" aria-label="再生位置"><span id="demo-time" class="muted"></span><span id="demo-ff" class="muted"></span>`;
 
 $("#demo-controls").addEventListener("click", (e) => {
   const d = app.demo;

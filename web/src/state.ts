@@ -37,6 +37,9 @@ export interface DemoState {
   run: number;
   /** 履歴の再生 (過去の地震を当時の時刻で流す。場面の一覧は出さず、終わったらライブに戻る) */
   history: boolean;
+  /** 時計を飛ばす再生位置の区間 [from, to) (履歴の再生だけ。デモは空) と、「早送り」を出し続ける時刻 (performance.now) */
+  skips: { from: number; to: number }[];
+  ffUntil: number;
   /** デモ専用の時計: anchor (performance.now) の時点で再生位置 pos。speed 倍で進む */
   clock: { pos: number; anchor: number; speed: number; paused: boolean };
 }
