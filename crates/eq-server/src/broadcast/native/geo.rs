@@ -1,7 +1,8 @@
 //! 地図の投影と、GeoJSON (MultiPolygon) を画面の座標の path にする。投影は web/src/map.ts と同じ。
 
 use anyhow::Context;
-use serde_json::Value;
+use serde::Deserialize;
+use std::collections::HashMap;
 use tiny_skia::{Path, PathBuilder, Transform};
 
 const LON0: f64 = 137.0;
@@ -73,23 +74,40 @@ pub struct Shape {
     pub center: (f32, f32),
 }
 
-/// GeoJSON の文字列から区域を作る。key は properties の項目名
+#[derive(Deserialize)]
+struct Collection {
+    features: Vec<Feature>,
+}
+
+#[derive(Deserialize)]
+struct Feature {
+    #[serde(default)]
+    properties: HashMap<String, serde_json::Value>,
+    geometry: Geometry,
+}
+
+/// MultiPolygon の座標 (多角形 → 輪 → 点)
+#[derive(Deserialize)]
+struct Geometry {
+    coordinates: Vec<Vec<Vec<[f64; 2]>>>,
+}
+
+/// GeoJSON の文字列から区域を作る。key は properties の項目名。path にしたら座標は捨てる
 pub fn parse(json: &str, key: &str, view: &View) -> anyhow::Result<Vec<Shape>> {
-    let doc: Value = serde_json::from_str(json).context("parsing geojson")?;
-    let features = doc["features"].as_array().context("no features")?;
-    let mut out = Vec::with_capacity(features.len());
-    for f in features {
-        let name = f["properties"][key].as_str().unwrap_or_default().to_string();
+    let doc: Collection = serde_json::from_str(json).context("parsing geojson")?;
+    let mut out = Vec::with_capacity(doc.features.len());
+    for f in doc.features {
+        let name = f
+            .properties
+            .get(key)
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
         let mut pb = PathBuilder::new();
         let mut biggest = (0.0f32, (0.0f32, 0.0f32));
-        for poly in f["geometry"]["coordinates"].as_array().into_iter().flatten() {
-            for (ri, ring) in poly.as_array().into_iter().flatten().enumerate() {
-                let pts: Vec<(f32, f32)> = ring
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|p| Some(view.px(p[0].as_f64()?, p[1].as_f64()?)))
-                    .collect();
+        for poly in &f.geometry.coordinates {
+            for (ri, ring) in poly.iter().enumerate() {
+                let pts: Vec<(f32, f32)> = ring.iter().map(|p| view.px(p[0], p[1])).collect();
                 let Some(&(fx, fy)) = pts.first() else { continue };
                 pb.move_to(fx, fy);
                 for &(x, y) in &pts[1..] {
