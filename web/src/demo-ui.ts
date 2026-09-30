@@ -1,7 +1,7 @@
 // デモモード: 場面の一覧と再生・操作 (ブラウザの中だけで再生し、実際の情報は裏で受け続ける)。
 
 import { type Scenario, type ScenarioSummary, makePlan } from "./demo.ts";
-import { historyStart, skipRanges } from "./history.ts";
+import { hindsightOf, historyStart, skipRanges } from "./history.ts";
 import { GroupStore } from "./groups.ts";
 import { esc } from "./html.ts";
 import type { EqEvent } from "./types.ts";
@@ -32,7 +32,7 @@ export async function enterDemo(): Promise<void> {
   if (app.demo) return;
   const res = await fetch("demo/index.json");
   const scenarios: ScenarioSummary[] = res.ok ? await res.json() : [];
-  app.demo = { scenarios, running: null, plan: null, world: null, applied: 0, run: 0, history: false, skips: [], ffUntil: 0, clock: { pos: 0, anchor: performance.now(), speed: 1, paused: false } };
+  app.demo = { scenarios, running: null, plan: null, world: null, applied: 0, run: 0, history: false, skips: [], ffUntil: 0, hindsight: null, clock: { pos: 0, anchor: performance.now(), speed: 1, paused: false } };
   showWorld({ store: new GroupStore(), tsunami: null, userquake: null });
   hooks.renderAll();
 }
@@ -70,7 +70,7 @@ export function startHistory(events: EqEvent[]): boolean {
   if (start == null) return false;
   const run = (app.demo?.run ?? 0) + 1;
   const plan = makePlan(events, run, undefined, start);
-  app.demo = { scenarios: [], running: null, plan, world: null, applied: 0, run, history: true, skips: skipRanges(plan.events.map((x) => x.at)), ffUntil: 0, clock: { pos: 0, anchor: performance.now(), speed: 1, paused: false } };
+  app.demo = { scenarios: [], running: null, plan, world: null, applied: 0, run, history: true, skips: skipRanges(plan.events.map((x) => x.at)), ffUntil: 0, hindsight: hindsightOf(events), clock: { pos: 0, anchor: performance.now(), speed: 1, paused: false } };
   rebuild(app.demo);
   hooks.renderAll();
   return true;

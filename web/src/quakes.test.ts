@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { GroupStore } from "./groups.ts";
-import { currentGroup, priorityGroups, updateNumbers, waveSources } from "./quakes.ts";
+import { currentGroup, pendingHindsight, priorityGroups, updateNumbers, waveSources } from "./quakes.ts";
 import { app } from "./state.ts";
 import type { EewEvent, EqEvent, QuakeEvent } from "./types.ts";
 
@@ -73,7 +73,7 @@ test("waves use the eew (precise origin time) rather than the quake report of th
   world([eew("miyagi", "宮城県沖", 38.3, 142.0, 50), quake("q-miyagi", "宮城県沖", 38.3, 142.0, 45), eew("kumamoto", "熊本県熊本地方", 32.7, 130.8, 55, 12000)]);
   const src = waveSources(Date.now());
   assert.deepEqual(
-    src.map((s) => s.group.key),
+    src.map((s) => s.group?.key),
     ["e:kumamoto", "e:miyagi"],
   );
 });
@@ -94,4 +94,50 @@ test("numbers follow the order of occurrence and an eew shares the number with i
   const qkey = [...app.numbers.keys()].find((k) => k.startsWith("q:"))!;
   assert.equal(app.numbers.get(qkey), 1);
   assert.equal(updateNumbers(Date.now()), false);
+});
+
+test("a hindsight epicenter is shown until an epicenter of the same earthquake arrives", () => {
+  const h = { lat: 36.2, lon: 140.1, depth: 50, originMs: t0 - 10_000 };
+  const store = new GroupStore();
+  assert.equal(pendingHindsight(null, []), null);
+  assert.equal(pendingHindsight(h, store.list()), h);
+  // 震度速報 (震源なし) では、まだ出す
+  const prompt = { ...quake("q1", "", 0, 0, 40), info_type: "scale_prompt" as const, hypocenter: null };
+  store.add(prompt);
+  assert.equal(pendingHindsight(h, store.list()), h);
+  // 別の場所の地震の震源では消さない
+  store.add(eew("other", "宮城県沖", 38.3, 142.0, 50));
+  assert.equal(pendingHindsight(h, store.list()), h);
+  // 同じ地震の震源が届いたら消す
+  store.add(quake("q2", "茨城県南部", 36.1, 140.0, 40));
+  assert.equal(pendingHindsight(h, store.list()), null);
+});
+
+test("waves start when the epicenter arrives after the intensity report, from the origin time", () => {
+  const prompt = { ...quake("q1", "", 0, 0, 40), info_type: "scale_prompt" as const, hypocenter: null };
+  world([prompt]);
+  assert.equal(waveSources(t0).length, 0);
+  // 震源の情報が届く: 発生時刻 (分単位) を起点に、その時点の半径から描く
+  app.world.store.add(quake("q2", "茨城県南部", 36.1, 140.0, 40));
+  const [src] = waveSources(t0 + 60_000);
+  assert.equal(src.origin, t0 - 10_000);
+  assert.equal(src.group?.kind, "quake");
+  // 発生から WAVE_MAX_SEC を過ぎていれば描かない
+  assert.equal(waveSources(t0 + 200_000).length, 0);
+});
+
+test("a hindsight epicenter draws waves from its origin, and not before the origin", () => {
+  world([]);
+  app.demo = { hindsight: { lat: 36.2, lon: 140.1, depth: 50, originMs: t0 } } as typeof app.demo;
+  try {
+    assert.equal(waveSources(t0 - 1000).length, 0);
+    const [src] = waveSources(t0 + 5000);
+    assert.deepEqual([src.lat, src.lon, src.depth, src.origin, src.group], [36.2, 140.1, 50, t0, undefined]);
+    // 本物の震源が届いたら、そちらの波だけ
+    app.world.store.add(quake("q2", "茨城県南部", 36.2, 140.1, 40));
+    assert.equal(waveSources(t0 + 5000).length, 1);
+    assert.equal(waveSources(t0 + 5000)[0].group?.kind, "quake");
+  } finally {
+    app.demo = null;
+  }
 });

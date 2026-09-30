@@ -2,8 +2,10 @@
 
 import { type Box, followRadiusKm, pad, pointBox, stopRadiusKm, union } from "./camera.ts";
 import { project } from "./map.ts";
-import { type Center, type WaveSource, currentGroup, geoOf, groupPlace, groupScale, recentQuakes, relatedQuake, unsettledGroups, waveSources } from "./quakes.ts";
+import { type Center, type WaveSource, currentGroup, geoOf, groupPlace, groupScale, pendingHindsight, recentQuakes, relatedQuake, unsettledGroups, waveSources } from "./quakes.ts";
 import { sameQuake } from "./priority.ts";
+import { forecastTag } from "./detail.ts";
+import { latestEew } from "./groups.ts";
 import { $, map } from "./dom.ts";
 import { REPLAY_SPEED, WAVE_MAX_SEC, app, now } from "./state.ts";
 import { activeAreas } from "./tsunami.ts";
@@ -15,7 +17,7 @@ export function renderMarkers(now: number): void {
   const shown = cur && relatedQuake(cur);
   // 履歴や矢印で別の地震を選んでいる間も、直近のほかの地震の印と矢印は出す (元の地震へ戻れるように)
   const groups = [...recentQuakes(now), ...(shown ? [shown] : [])];
-  const byNum = new Map<string, { key: string; lat: number; lon: number; label: number | null; primary: boolean; scale: number; quake: boolean }>();
+  const byNum = new Map<string, { key: string; lat: number; lon: number; label: number | null; primary: boolean; scale: number; note?: string; ghost?: boolean; quake: boolean }>();
   for (const g of groups) {
     const c = geoOf(g)?.center;
     if (!c) continue;
@@ -27,8 +29,12 @@ export function renderMarkers(now: number): void {
       prev.primary ||= primary;
       continue;
     }
-    byNum.set(id, { key: g.key, lat: c.lat, lon: c.lon, label, primary: primary || (prev?.primary ?? false), scale: groupScale(g), quake: g.kind === "quake" });
+    const note = g.kind === "eew" ? (forecastTag(latestEew(g)) ?? undefined) : undefined;
+    byNum.set(id, { key: g.key, lat: c.lat, lon: c.lon, label, primary: primary || (prev?.primary ?? false), scale: groupScale(g), note, quake: g.kind === "quake" });
   }
+  // 履歴の再生: 震源が届くまでは、後の報で分かった震源を薄く出す
+  const h = pendingHindsight(app.demo?.hindsight ?? null, app.world.store.list());
+  if (h) byNum.set("hindsight", { key: "hindsight", lat: h.lat, lon: h.lon, label: null, primary: true, scale: 0, note: "のちに判明する震源", ghost: true, quake: false });
   map.setEpicenters([...byNum.values()].map(({ quake: _, ...m }) => m));
 }
 
@@ -58,7 +64,7 @@ export function scene(now: number): Scene | null {
     const geo = g && geoOf(g);
     if (geo) {
       const sources = waveSources(now);
-      const mine = sources.find((s) => s.group === g || sameQuake(groupPlace(s.group), groupPlace(g)));
+      const mine = sources.find((s) => s.group === g || (s.group && sameQuake(groupPlace(s.group), groupPlace(g))));
       return {
         center: mine ?? geo.center,
         others: sources.filter((s) => s !== mine),
@@ -75,15 +81,19 @@ export function scene(now: number): Scene | null {
   const tsunamiBox = map.tsunamiBox(activeAreas(app.world.tsunami).map((a) => a.name));
   if (!src && tsunamiBox) return { center: null, others: [], t: null, shaken: tsunamiBox, replay: false };
   const g = src?.group ?? unsettledGroups(now)[0];
-  if (!g) return null;
-  const geo = geoOf(g);
+  if (!g && !src) {
+    // 履歴の再生で、発生前・報が届く前: 後で分かった震源へ寄せる
+    const h = pendingHindsight(app.demo?.hindsight ?? null, app.world.store.list());
+    return h && { center: h, others: [], t: null, shaken: null, replay: false };
+  }
+  const geo = g && geoOf(g);
   return {
     center: src ?? geo?.center ?? null,
     others,
     t: src ? (now - src.origin) / 1000 : null,
     shaken: geo ? map.prefBox(geo.prefs) : null,
     replay: false,
-    forecast: g.kind === "eew",
+    forecast: g?.kind === "eew",
   };
 }
 
