@@ -1,0 +1,9 @@
+[Unit]
+Description=eq-webservice YouTube のライブ配信の見張り (5 分ごと)
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target
