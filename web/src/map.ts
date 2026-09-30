@@ -152,7 +152,7 @@ export class JapanMap {
   private feelSig = "[]";
   private epicenterSig = "";
   private insets: ((typeof INSETS)[number] & { box: HTMLDivElement; svg: SVGSVGElement; markers: SVGGElement; bounds: Box })[] = [];
-  private markerItems: { key: string; x: number; y: number; label: number | null; primary: boolean; scale: number }[] = [];
+  private markerItems: { key: string; x: number; y: number; label: number | null; primary: boolean; scale: number; note?: string; ghost?: boolean }[] = [];
   /** 画面外の地震の方向を示す矢印 (地図の上に重ねる HTML) */
   private offscreen = document.createElement("div");
   /** 画面外の矢印が押されたとき (グループのキー) */
@@ -497,7 +497,7 @@ export class JapanMap {
   }
 
   /** 震央の印。primary (表示中の地震) は大きく、ほかは小さく。label は一時的な番号、scale は最大震度 */
-  setEpicenters(items: { key: string; lat: number; lon: number; label: number | null; primary: boolean; scale: number }[]): void {
+  setEpicenters(items: { key: string; lat: number; lon: number; label: number | null; primary: boolean; scale: number; note?: string; ghost?: boolean }[]): void {
     this.markerItems = items.map(({ lat, lon, ...rest }) => {
       const [x, y] = project(lon, lat);
       return { x, y, ...rest };
@@ -509,10 +509,10 @@ export class JapanMap {
   /** 画面上で重なる印をまとめて描く。まとまり方はズームで変わるので、表示範囲が変わるたびに呼ぶ */
   private renderMarkers(): void {
     this.renderOffscreen();
-    const labeled = this.markerItems.flatMap(({ label, ...m }): Marker[] => (label == null ? [] : [{ ...m, label }]));
+    const labeled = this.markerItems.flatMap(({ label, ghost: _, ...m }): Marker[] => (label == null ? [] : [{ ...m, label }]));
     const clusters: Cluster[] = [
       ...clusterMarkers(labeled, MARKER_MERGE_PX * this.unitsPerPixel()),
-      ...this.markerItems.filter((m) => m.label == null).map(({ x, y, primary }) => ({ x, y, primary, labels: [] })),
+      ...this.markerItems.filter((m) => m.label == null).map(({ x, y, primary, note, ghost }) => ({ x, y, primary, note, ghost, labels: [] })),
     ];
     const sig = JSON.stringify(clusters.map((c) => [c.x, c.y, c.primary, c.labels]));
     if (sig === this.epicenterSig) return;
@@ -521,8 +521,8 @@ export class JapanMap {
     // 表示中の地震を最前面に
     this.epicenters = clusters
       .sort((a, b) => Number(a.primary) - Number(b.primary))
-      .map(({ x, y, primary, labels }) => {
-        const g = el("g", { class: primary ? "epicenter" : "epicenter sub" });
+      .map(({ x, y, primary, labels, note, ghost }) => {
+        const g = el("g", { class: `${primary ? "epicenter" : "epicenter sub"}${ghost ? " ghost" : ""}` });
         // 押したら、まとめた中で揺れの大きい地震を選ぶ
         const key = [...labels].sort((a, b) => b.scale - a.scale)[0]?.key;
         if (key) {
@@ -534,7 +534,7 @@ export class JapanMap {
         g.dataset.k = primary ? "1" : "0.65";
         const r = 9;
         const x9 = `M${-r} ${-r}L${r} ${r}M${r} ${-r}L${-r} ${r}`;
-        if (primary) g.append(el("circle", { r: 16, class: "epicenter-pulse" }));
+        if (primary && !ghost) g.append(el("circle", { r: 16, class: "epicenter-pulse" }));
         g.append(el("path", { d: x9, class: "epicenter-x-bg" }), el("path", { d: x9, class: "epicenter-x" }));
         if (labels.length > 0) {
           // 番号を時系列順に並べ、揺れの大きい地震ほど大きな文字にする
@@ -545,6 +545,11 @@ export class JapanMap {
             s.textContent = String(label);
             t.append(s);
           });
+          g.append(t);
+        }
+        if (note) {
+          const t = el("text", { y: 28, "text-anchor": "middle", class: "epicenter-label" });
+          t.textContent = note;
           g.append(t);
         }
         this.markerLayer.append(g);

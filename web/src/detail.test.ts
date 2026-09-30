@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { droppedForecast, eewAreaScales, keepForecast, overlayForecast, quakeDetail, type Station } from "./detail.ts";
-import type { EewArea, ObservationPoint } from "./types.ts";
+import { droppedForecast, eewAreaScales, forecastTag, keepForecast, overlayForecast, quakeDetail, type Station } from "./detail.ts";
+import type { EewArea, EewEvent, ObservationPoint } from "./types.ts";
 
 const stations = new Map<string, Station>([
   ["常総市新石下", { lat: 36.1, lon: 139.9, area: "茨城県南部" }],
@@ -84,4 +84,14 @@ test("the forecast stays until observed intensities arrive, even after the warni
   assert.equal(keepForecast(false, true, 60_000), false);
   // 観測が無くても上限 (1 時間) を過ぎたら残さない
   assert.equal(keepForecast(false, false, 60 * 60_000 + 1), false);
+});
+
+test("the forecast tag is shown only when there is nothing painted, and follows the latest report", () => {
+  const e = { cancelled: false, max_scale: 30, areas: [], pref_max: [] } as unknown as EewEvent;
+  assert.equal(forecastTag(e), "予測最大震度3");
+  assert.equal(forecastTag({ ...e, max_scale: 20 }), "予測最大震度2");
+  assert.equal(forecastTag({ ...e, cancelled: true }), null);
+  assert.equal(forecastTag({ ...e, max_scale: -1 }), null);
+  assert.equal(forecastTag({ ...e, pref_max: [{ pref: "沖縄県", scale: 30 }] }), null);
+  assert.equal(forecastTag({ ...e, areas: [{}] as EewArea[] }), null);
 });

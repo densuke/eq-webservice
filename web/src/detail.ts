@@ -1,6 +1,7 @@
 // 寄ったときの細かい表示: 震度観測点の点と、細分区域ごとの最大震度。
 
-import type { EewArea, ObservationPoint, Scale } from "./types.ts";
+import { scaleLabel } from "./scale.ts";
+import type { EewArea, EewEvent, ObservationPoint, Scale } from "./types.ts";
 
 export interface Station {
   lat: number;
@@ -85,4 +86,13 @@ export function droppedForecast(reports: { at: number; items: AreaScale[] }[], n
 /** 緊急地震速報の区域。予測の上限 (「〜程度以上」なら下限) で塗る */
 export function eewAreaScales(areas: EewArea[]): AreaScale[] {
   return maxByArea(areas.map((a) => ({ name: a.name, scale: a.scale_to ?? a.scale_from })));
+}
+
+/**
+ * 緊急地震速報の予報の札 (地図の震源の印の近く)。地域ごとの予想も県ごとの予想も空で、塗るものが無いときだけ出す。
+ * 取り消し・最大予想震度が分からないときは null
+ */
+export function forecastTag(e: EewEvent): string | null {
+  if (e.cancelled || e.max_scale <= 0 || e.areas.length > 0 || e.pref_max.length > 0) return null;
+  return `予測最大震度${scaleLabel(e.max_scale)}`;
 }

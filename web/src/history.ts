@@ -3,9 +3,9 @@
 
 import { GroupStore, type Group } from "./groups.ts";
 import { type Place, sameQuake } from "./priority.ts";
-import { groupPlace } from "./quakes.ts";
+import { type Center, groupPlace } from "./quakes.ts";
 import { app } from "./state.ts";
-import type { EqEvent } from "./types.ts";
+import type { EqEvent, Hypocenter } from "./types.ts";
 
 /** 再生を始める位置: 最初の揺れ (発生時刻) のこの時間前 */
 export const HISTORY_LEAD_MS = 10_000;
@@ -48,12 +48,14 @@ export async function fetchArchive(from: number, to: number): Promise<EqEvent[] 
   return res.ok ? await res.json() : null;
 }
 
+const eewOrigins = (events: EqEvent[]): number[] => events.flatMap((e) => (e.kind === "eew" && e.origin_time_ms != null ? [e.origin_time_ms] : []));
+
 /**
  * 再生の始まりの時刻。緊急地震速報があれば、その秒単位の発生時刻の HISTORY_LEAD_MS 前。
  * 無ければ最初の報が届いた時刻の HISTORY_LEAD_MS 前 (地震情報の発生時刻は分単位で、報はその 1〜2 分後に届くため)。報が無ければ null
  */
 export function historyStart(events: EqEvent[]): number | null {
-  const eew = events.flatMap((e) => (e.kind === "eew" && e.origin_time_ms != null ? [e.origin_time_ms] : []));
+  const eew = eewOrigins(events);
   if (eew.length) return Math.min(...eew) - HISTORY_LEAD_MS;
   return events.length ? Math.min(...events.map((e) => e.received_at_ms)) - HISTORY_LEAD_MS : null;
 }
@@ -64,4 +66,29 @@ export function skipRanges(ats: number[]): { from: number; to: number }[] {
     const a = ats[i];
     return b - a > HISTORY_MAX_GAP_MS ? [{ from: a + HISTORY_GAP_MARGIN_MS, to: b - HISTORY_GAP_MARGIN_MS }] : [];
   });
+}
+
+/** 再生の始まりから出す、後の報で分かった震源と発生時刻 */
+export interface Hindsight extends Center {
+  originMs: number;
+}
+
+/** 震源の情報のうち、後ろの報ほど確からしいもの: 各地の震度 → 震源の情報 (震度速報の震源は無い) */
+const QUAKE_RANK: Partial<Record<string, number>> = { detail_scale: 0, destination: 1, scale_and_destination: 1 };
+
+/**
+ * 集めた報 (同じ地震だけ) から、後から分かる震源を探す。優先順位は 各地の震度 → 震源の情報 → 緊急地震速報の最終報。
+ * 発生時刻は緊急地震速報の秒単位を優先し、無ければ地震情報の分単位 (起点が最大 59 秒ずれる)。見つからなければ null
+ */
+export function hindsightOf(events: EqEvent[]): Hindsight | null {
+  const centerOf = (h: Hypocenter | null): Center | null => (h?.latitude != null && h.longitude != null ? { lat: h.latitude, lon: h.longitude, depth: h.depth_km ?? 10 } : null);
+  const latest = <T extends EqEvent>(xs: T[]) => xs.reduce<T | null>((a, b) => (a && a.received_at_ms > b.received_at_ms ? a : b), null);
+  const quakes = events.flatMap((e) => (e.kind === "quake" && centerOf(e.hypocenter) && QUAKE_RANK[e.info_type] != null ? [e] : []));
+  const bestRank = Math.min(...quakes.map((e) => QUAKE_RANK[e.info_type]!));
+  const eews = events.flatMap((e) => (e.kind === "eew" && !e.cancelled && centerOf(e.hypocenter) ? [e] : []));
+  const src = latest(quakes.filter((e) => QUAKE_RANK[e.info_type] === bestRank)) ?? latest(eews);
+  const center = src && centerOf(src.hypocenter);
+  const origins = eewOrigins(events);
+  const originMs = origins.length ? Math.min(...origins) : latest(events.flatMap((e) => (e.kind === "quake" && e.origin_time_ms != null ? [e] : [])))?.origin_time_ms;
+  return center && originMs != null ? { ...center, originMs } : null;
 }

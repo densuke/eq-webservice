@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { makePlan } from "./demo.ts";
 import { GroupStore } from "./groups.ts";
-import { HISTORY_LEAD_MS, gatherEvents, historyStart, sameQuakeEvents, skipRanges } from "./history.ts";
+import { HISTORY_LEAD_MS, gatherEvents, hindsightOf, historyStart, sameQuakeEvents, skipRanges } from "./history.ts";
 import { groupPlace } from "./quakes.ts";
 import { app } from "./state.ts";
 import type { EewEvent, EqEvent, QuakeEvent } from "./types.ts";
@@ -112,4 +112,24 @@ test("the events the browser already holds are used when the archive is unavaila
       ["e1", "e2", "q1"],
     );
   }
+});
+
+test("the hindsight epicenter prefers the detailed intensities, then the epicenter report, then the last eew", () => {
+  const q = (id: string, recv: number, type: QuakeEvent["info_type"], lat: number) => ({ ...quake(id, recv, 0, lat, 140), info_type: type });
+  const [a, b, c] = [q("a", 3, "detail_scale", 36.1), q("b", 2, "destination", 36.2), q("c", 1, "scale_prompt", 36.3)];
+  const e = eew("e", "5", 0, at(14, 0, 37), 36.4, 140);
+  assert.equal(hindsightOf([e, c, b, a])?.lat, 36.1);
+  assert.equal(hindsightOf([e, c, b])?.lat, 36.2);
+  // 震度速報の震源は使わない
+  assert.equal(hindsightOf([e, c])?.lat, 36.4);
+  assert.equal(hindsightOf([{ ...c, hypocenter: null }]), null);
+  assert.equal(hindsightOf([]), null);
+  // 最終報 (後に届いた方)
+  assert.equal(hindsightOf([eew("e1", "1", 1, at(14, 0, 37), 36.5), eew("e2", "2", 2, at(14, 0, 37), 36.6)])?.lat, 36.6);
+});
+
+test("the hindsight origin is the eew second when there is one, else the minute of the quake report", () => {
+  assert.equal(hindsightOf([quake("q", 5, 0), eew("e", "1", 1)])?.originMs, at(14, 0, 37));
+  assert.equal(hindsightOf([quake("q", 5, 0)])?.originMs, at(14, 0, 0));
+  assert.deepEqual(hindsightOf([quake("q", 5, 0, 24.4, 123)]), { lat: 24.4, lon: 123, depth: 10, originMs: at(14, 0, 0) });
 });

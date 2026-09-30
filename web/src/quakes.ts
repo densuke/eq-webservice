@@ -1,6 +1,7 @@
 // 地震の選び方: 優先度・一時的な番号・P波/S波を描く対象・直近の地震 (DOM には触らない)。
 
 import { FULL_MS } from "./fade.ts";
+import type { Hindsight } from "./history.ts";
 import { type Group, latestEew, summarizeQuake } from "./groups.ts";
 import { assignNumbers } from "./numbering.ts";
 import { type Place, byPriority, sameQuake, settleMs } from "./priority.ts";
@@ -50,7 +51,8 @@ export function updateNumbers(now: number): boolean {
 export function displayedInfoMs(): number {
   const g = currentGroup();
   const q = g && relatedQuake(g);
-  return q ? q.updatedAt : 0;
+  // 履歴の再生の始まり (報がまだ無い) も、後で分かった震源をはっきり見せる
+  return q ? q.updatedAt : app.demo?.hindsight ? now() : 0;
 }
 
 export function currentGroup(): Group | undefined {
@@ -128,7 +130,14 @@ export function geoOf(g: Group): { center: Center | null; origin: number | null;
   return { center, origin, prefs };
 }
 
-export type WaveSource = Center & { origin: number; group: Group };
+/** group は本物の報から描く地震。後の報で分かった震源 (再生の始まり) から描くものは無い */
+export type WaveSource = Center & { origin: number; group?: Group };
+
+/** 後の報で分かった震源のうち、まだ本物の震源 (同じ地震の報で震源の付いたもの) が届いていないもの */
+export function pendingHindsight(h: Hindsight | null, groups: Group[]): Hindsight | null {
+  const p = h && { originMs: h.originMs, lat: h.lat, lon: h.lon };
+  return h && !groups.some((g) => geoOf(g)?.center && sameQuake(groupPlace(g), p!)) ? h : null;
+}
 
 /**
  * P波・S波を描く地震 (優先度順)。同じ地震の EEW と地震情報は EEW を使う
@@ -141,11 +150,14 @@ export function waveSources(now: number): WaveSource[] {
     const geo = geoOf(g);
     if (!geo?.center || geo.origin == null || now - geo.origin > WAVE_MAX_SEC * 1000 || g.updatedAt <= app.calmSince) continue;
     // EEW どうしは event_id で別の地震と分かっているので、重ねて消すのは地震情報だけ
-    if (g.kind === "quake" && out.some((s) => s.group.kind === "eew" && sameQuake(groupPlace(s.group), groupPlace(g)))) continue;
+    if (g.kind === "quake" && out.some((s) => s.group?.kind === "eew" && sameQuake(groupPlace(s.group), groupPlace(g)))) continue;
     out.push({ ...geo.center, origin: geo.origin, group: g });
   }
+  // 履歴の再生: 震源が届く前から、分かっている震源と発生時刻で波を描く (発生前は描かない)
+  const h = pendingHindsight(app.demo?.hindsight ?? null, groups);
+  if (h && now >= h.originMs && now - h.originMs <= WAVE_MAX_SEC * 1000) out.push({ lat: h.lat, lon: h.lon, depth: h.depth, origin: h.originMs });
   return out
-    .map((s) => ({ s, scale: groupScale(s.group), at: s.group.updatedAt }))
+    .map((s) => ({ s, scale: s.group ? groupScale(s.group) : -1, at: s.group?.updatedAt ?? 0 }))
     .sort(byPriority)
     .map((c) => c.s);
 }

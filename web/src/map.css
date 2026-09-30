@@ -57,6 +57,9 @@
 .epicenter-x { stroke: #ff1744; stroke-width: 4; stroke-linecap: round; fill: none; }
 .epicenter-x-bg { stroke: #fff; stroke-width: 8; stroke-linecap: round; fill: none; }
 .epicenter.sub { opacity: 0.8; }
+/* 後の報で分かった震源: 薄く点線で */
+.epicenter.ghost { opacity: 0.6; }
+.epicenter.ghost .epicenter-x { stroke-dasharray: 5 6; }
 .epicenter-label { font-size: 15px; font-weight: 700; fill: #fff; stroke: #000; stroke-width: 4px; paint-order: stroke; }
 .epicenter-pulse { fill: none; stroke: #ff1744; stroke-width: 2; animation: pulse 1.6s ease-out infinite; transform-box: fill-box; transform-origin: center; }
 @keyframes pulse { from { transform: scale(0.4); opacity: 1; } to { transform: scale(2.2); opacity: 0; } }

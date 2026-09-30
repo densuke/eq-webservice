@@ -4,6 +4,7 @@
 import type { Connection } from "./connection.ts";
 import type { Plan, ScenarioSummary } from "./demo.ts";
 import type { Station } from "./detail.ts";
+import type { Hindsight } from "./history.ts";
 import { GroupStore } from "./groups.ts";
 import { loadSettings } from "./personal.ts";
 import type { EqEvent, TsunamiEvent, UserquakeEvent } from "./types.ts";
@@ -40,6 +41,8 @@ export interface DemoState {
   /** 時計を飛ばす再生位置の区間 [from, to) (履歴の再生だけ。デモは空) と、「早送り」を出し続ける時刻 (performance.now) */
   skips: { from: number; to: number }[];
   ffUntil: number;
+  /** 履歴の再生で、後の報で分かった震源 (再生の始まりから薄く出す。本物の震源が届いたら消す)。デモは null */
+  hindsight: Hindsight | null;
   /** デモ専用の時計: anchor (performance.now) の時点で再生位置 pos。speed 倍で進む */
   clock: { pos: number; anchor: number; speed: number; paused: boolean };
 }

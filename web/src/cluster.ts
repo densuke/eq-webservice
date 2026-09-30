@@ -9,12 +9,18 @@ export interface Marker {
   primary: boolean;
   /** 地震のグループのキー (印を押したときに選ぶ) */
   key?: string;
+  /** 印の下に出す短い札 (緊急地震速報の予報の最大予想震度など) */
+  note?: string;
 }
 
 export interface Cluster {
   x: number;
   y: number;
   primary: boolean;
+  /** 札。まとめた印のものを並べる */
+  note?: string;
+  /** 後の報で分かった震源 (薄く点線で描く) */
+  ghost?: boolean;
   labels: { label: number; scale: number; key?: string }[];
 }
 
@@ -31,6 +37,7 @@ export function clusterMarkers(markers: Marker[], dist: number): Cluster[] {
     x: anchor.x,
     y: anchor.y,
     primary: members.some((m) => m.primary),
+    note: members.map((m) => m.note).filter(Boolean).join(" ／ ") || undefined,
     labels: members.map((m) => ({ label: m.label, scale: m.scale, key: m.key })).sort((a, b) => a.label - b.label),
   }));
 }
