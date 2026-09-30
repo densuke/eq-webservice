@@ -231,3 +231,53 @@ y=720 └───────────────────────�
 - 画面が N1.1 と変わらないこと (平時の PNG を比べる)
 - 既存のテストが通り、GeoJSON の読み取りと文字の描画のテストを必要なら足す
 - 利用者の配信 (`~/work/eq-broadcast`) には触らない。PR まで作り、マージしない
+
+## 10. N1.3 (e2 で BGM 無しの常時運用に向けた改善)
+
+### 10.1 背景 (2026-09-30 の e2 での 15 分試験、v0.15.2)
+
+- native・無音・5fps・ultrafast・ABR 500k・AAC 128k・`-threads 1`、`CPUQuota=25%`・`MemoryMax=200M`・`MemorySwapMax=0`。
+- 平均 CPU 9.1%、メモリは落ち着いて 82〜85MB だが起動時の最大 190MB (上限の近く)。4661 コマを 5fps・実時間どおり、警告 0。
+  本番の応答 0.001 秒前後、BGM の送り出しのエラー 0。送信量 約 508kbps (月約 160GB)。
+- 平時しか測れていない (地震の画面は未計測)。
+
+### 10.2 可変 fps
+
+- `broadcast.toml` に `fps_calm` (平時のコマ数) を足す。今の `fps` は地震の画面のときのコマ数とする。`fps_calm` を省けば今までどおり一定 (`fps`)。
+- 描く側は、平時か地震か (model の判断) に合わせて、ffmpeg に渡す間隔を変える。切り替えはすぐ反映する。
+- ffmpeg の入力は、届いた時刻をコマの時刻にする: `-use_wallclock_as_timestamps 1 -f rawvideo -pix_fmt yuv420p -s WxH -i -`
+  (native のときだけ。Chrome の経路は変えない)。出力は `-fps_mode passthrough`。
+- キーフレームは時刻で 2 秒ごと: `-g` の代わりに `-force_key_frames expr:gte(t,n_forced*2)` (YouTube は 4 秒以内を求める)。
+- 例: Mac・Pi は `fps = 15`・`fps_calm = 2`、e2 は `fps = 10`・`fps_calm = 2`。
+
+### 10.3 送る量を減らす
+
+- 音のビットレートを設定で決める (`audio_bitrate`、既定は今の `128k`)。無音で配信するなら `32k`。
+- 映像は `encode` で CRF と上限を指定できることを確かめ、設定例に書く:
+  `["-threads", "1", "-c:v", "libx264", "-preset", "ultrafast", "-tune", "stillimage", "-crf", "28", "-maxrate", "500k", "-bufsize", "1000k"]`
+- 平時の送信量を測って PR に書く (目標: 平時 250kbps 未満、音込み)。
+
+### 10.4 配信元を画面に出す (label)
+
+- `broadcast.toml` の `label` (例 `"配信元: e2"`) を、上部バーの右側に出す。BGM の曲名があるときは、その左に並べる。
+- 省けば今までどおり (何も出さない)。
+
+### 10.5 起動時のメモリの山を下げる
+
+- e2 では起動時に eq-server と ffmpeg の合計が 190MB まで上がった。どちらが山を作っているか (eq-server の地図の読み込み、ffmpeg (x264) の先読みなど) を Linux 相当の条件で測る。
+- ffmpeg なら `-rc-lookahead`・`-tune zerolatency` など、x264 の先読みを減らす設定を試し、画質と送信量への影響も見る。
+- 目標: 起動時の最大 (eq-server と ffmpeg の合計) 150MB 未満。
+
+### 10.6 地震の画面の負荷の試験
+
+- 手元で、記録の地震を流すサーバ (`[source] type = "replay"`、`samples/scenarios/*.jsonl`、`rebase_time = true`) を立て、native の `server` をそこに向ける。
+  noto2024 (大きい地震と多くの情報) と standard を使う。
+- 地震の画面の間の CPU・メモリ・コマの速さ・送信量を、Mac で測って PR に書く。e2 での試験はコーディネーターが行う。
+- 手順を `docs/broadcast-native.md` の付録か `tools/` のスクリプトに残し、e2 でも同じ手順で測れるようにする。
+
+### 10.7 完了の条件 (N1.3)
+
+- 可変 fps: 平時と地震の画面の切り替えで、コマの間隔が変わること (ffprobe でコマの時刻を見て確かめる)、キーフレームが約 2 秒ごとに入ること
+- 送信量・起動時のメモリ・地震の画面の負荷の数値を PR に書く
+- 既存のテストが通り、ffmpeg の引数 (可変 fps のとき・`fps_calm` を省いたとき・Chrome のとき) のテストを足す
+- 利用者の配信 (`~/work/eq-broadcast`) と e2 には触らない。YouTube には送らない。PR まで作り、マージしない
