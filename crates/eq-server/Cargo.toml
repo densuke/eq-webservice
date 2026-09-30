@@ -24,6 +24,11 @@ tiny-skia = "0.12"
 # 天気アイコンの SVG を描くだけ (文字は使わない。一部のアイコンは PNG を埋め込むので画像は要る)
 resvg = { version = "0.48", default-features = false, features = ["raster-images"] }
 ab_glyph = "0.2"
+# encoder = "builtin": H.264 の圧縮 (Cisco の OpenH264、BSD。ソースから組み込む) と RTMPS の TLS
+openh264 = { version = "0.9", features = ["source"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-native-certs = "0.8"
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 
 [dev-dependencies]
 tempfile = "3"

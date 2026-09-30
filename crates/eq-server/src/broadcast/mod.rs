@@ -5,19 +5,30 @@
 //! 送り先 (ストリームキー入りの URL) は `$VAR` で環境変数から読み、ログには出さない。
 
 mod audio;
+mod builtin;
 mod chrome;
+mod encoder;
+mod ffmpeg;
 mod mixer;
 mod native;
 
 use std::collections::BTreeMap;
-use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
+use encoder::Encoder;
 use serde::Deserialize;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::Command;
+
+/// 圧縮と送り出しの方法
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EncoderKind {
+    /// ffmpeg の子のプロセス (既定)
+    Ffmpeg,
+    /// eq-server の中で圧縮して送る (実験。native・無音のみ。docs/broadcast-builtin.md)
+    Builtin,
+}
 
 /// 画面の作り方
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -71,6 +82,10 @@ pub struct BroadcastConfig {
     pub bgm_url: String,
     /// 音のビットレート (ffmpeg の -b:a。無音なら 32k などに下げる)
     pub audio_bitrate: String,
+    /// 圧縮と送り出し (既定は ffmpeg)。builtin は native・無音のときだけ。output の最初の要素 (rtmp(s)://... か .flv のパス) に送る
+    pub encoder: EncoderKind,
+    /// builtin: 映像の目標ビットレート (bps)
+    pub builtin_bitrate: u32,
     /// 映像・音の圧縮 (ffmpeg の引数)
     pub encode: Vec<String>,
     /// 送り先 (ffmpeg の引数)。`$VAR` / `${VAR}` は環境変数に置き換える
@@ -127,6 +142,8 @@ impl Default for BroadcastConfig {
             mixer: false,
             bgm_url: "https://eq.fuga.jp/stream/bgm.mp3".into(),
             audio_bitrate: "128k".into(),
+            encoder: EncoderKind::Ffmpeg,
+            builtin_bitrate: 300_000,
             encode: default_encode(),
             output: Vec::new(),
         }
@@ -157,7 +174,14 @@ pub async fn run(args: &[String]) -> anyhow::Result<()> {
     let text = std::fs::read_to_string(path).with_context(|| format!("reading {path}"))?;
     let cfg: BroadcastConfig = toml::from_str(&text).with_context(|| format!("parsing {path}"))?;
     anyhow::ensure!(!cfg.output.is_empty(), "output (送り先) を設定してください");
-    if cfg.source == Source::Native && cfg.fps_calm.is_some() && cfg.encode.iter().any(|x| x == "-maxrate") {
+    if cfg.encoder == EncoderKind::Builtin {
+        builtin::BuiltinEncoder::check(&cfg)?;
+    }
+    if cfg.encoder == EncoderKind::Ffmpeg
+        && cfg.source == Source::Native
+        && cfg.fps_calm.is_some()
+        && cfg.encode.iter().any(|x| x == "-maxrate")
+    {
         tracing::warn!(
             "broadcast: fps_calm と -maxrate を組み合わせると、平時の画面が崩れます (encode は CRF だけにしてください)"
         );
@@ -226,16 +250,13 @@ async fn session(cfg: &BroadcastConfig, output: &[String], secrets: &[String]) -
         (None, Some(a)) => a.ffmpeg_input(),
         (None, None) => cfg.audio.clone(),
     };
-    let mut ffmpeg = Command::new(&cfg.ffmpeg)
-        .args(ffmpeg_args(cfg, &audio_in, output))
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .with_context(|| format!("starting {}", cfg.ffmpeg))?;
-    let mut stdin = ffmpeg.stdin.take().context("ffmpeg stdin")?;
-    let mut log = BufReader::new(ffmpeg.stderr.take().context("ffmpeg stderr")?).lines();
+    let mut encoder = match cfg.encoder {
+        EncoderKind::Ffmpeg => {
+            Encoder::Ffmpeg(Box::new(ffmpeg::FfmpegEncoder::start(cfg, &audio_in, output, secrets)?))
+        }
+        EncoderKind::Builtin => Encoder::Builtin(Box::new(builtin::BuiltinEncoder::start(cfg, output).await?)),
+    };
+    let started = std::time::Instant::now();
     tracing::info!(source = ?cfg.source, url = %cfg.url, width = cfg.width, height = cfg.height, fps = cfg.fps, fps_calm = ?cfg.fps_calm, "broadcast started");
     let mut frame: Arc<Vec<u8>> = Arc::default();
     let mut rate = frame_rate(cfg, true);
@@ -272,18 +293,9 @@ async fn session(cfg: &BroadcastConfig, output: &[String], secrets: &[String]) -
             }
             // 変化が無くても同じ画面を送り続ける (fps_calm を指定していなければ、ffmpeg は枚数から時刻を決める)
             _ = tick.tick(), if !frame.is_empty() => {
-                if stdin.write_all(&frame).await.is_err() {
-                    // ffmpeg が止まった。理由は ffmpeg の出力に出ているので、残りを読んでから終える
-                    while let Ok(Some(l)) = log.next_line().await {
-                        tracing::warn!("ffmpeg: {}", redact(&l, secrets));
-                    }
-                    anyhow::bail!("ffmpeg exited: {}", ffmpeg.wait().await?);
-                }
+                encoder.video(&frame, started.elapsed().as_millis() as u64).await?;
             }
-            line = log.next_line() => match line? {
-                Some(l) => tracing::warn!("ffmpeg: {}", redact(&l, secrets)),
-                None => anyhow::bail!("ffmpeg exited: {}", ffmpeg.wait().await?),
-            },
+            e = encoder.closed() => return Err(e),
             status = async { match chrome.as_mut() { Some(c) => c.wait().await, None => std::future::pending().await } } => {
                 anyhow::bail!("chrome exited: {}", status?)
             }

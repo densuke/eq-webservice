@@ -250,6 +250,18 @@ eq-server broadcast broadcast.toml
 - 安全装置: データの取得先 (`server`) が記録を流すサーバ (replay。`GET /api/source` が `replay` を返す) なのに `test = true` が無いと、
   配信を始めずにエラーを出して止まり、10 分後に見直します。取得先が答えないとき (古いサーバ) は replay ではないとみなします
 
+#### ffmpeg を使わず eq-server が圧縮して送る (encoder = "builtin"、実験)
+
+`source = "native"` で無音のとき、`encoder = "builtin"` にすると ffmpeg を使わず、eq-server が H.264 (openh264) と無音の AAC を FLV に詰めて
+RTMP / RTMPS で送ります (ffmpeg が要らず、メモリも減ります。仕様は [docs/broadcast-builtin.md](docs/broadcast-builtin.md))。省けば今までどおり ffmpeg です。
+
+- `output` の最初の要素が送り先です。`rtmp://` か `rtmps://` (ストリームキーは `$VAR` で環境変数から)、または `.flv` のパス (確かめる用)。
+  `output = ["rtmps://a.rtmps.youtube.com/live2/$YOUTUBE_LIVE_API_KEY"]` のように、ffmpeg の引数 (`-f flv`) は書きません
+- `builtin_bitrate` (bps、既定 300000): 映像の目標ビットレート。超えるコマは飛ばします (画質と引き換えに送信量を抑えます)
+- キーフレームは 2 秒ごと (時刻で決めるので、可変 fps でも崩れません)
+- `mixer = true`・`audio`・`audio_command` (音のある配信) と `source = "chrome"` では使えません (起動時にエラー)。音があるときは ffmpeg を使ってください
+- 送り先が切れたらエラーで止まり、5 秒後につなぎ直します (ffmpeg のときと同じ)
+
 #### e2 から常時配信する
 
 `deploy/eq-broadcast.service` (ユーザーユニット。CPUQuota 25%・MemoryMax 200M・Nice 19・Restart always) と
@@ -373,4 +385,6 @@ git config core.hooksPath .githooks
 - 天気アイコン (配信の native 描画): [気象庁ホームページ](https://www.jma.go.jp/bosai/forecast/)の天気予報のアイコンを加工して表示 (公共データ利用規約 第1.0版。コードとアイコンの対応は `tools/jma_telops.py` で作る)
 - 地震感知情報の地域の位置 (`web/public/userquake-areas.json`): [p2pquake/epsp-specifications](https://github.com/p2pquake/epsp-specifications) の `epsp-area.csv` を加工
   （MIT License, Copyright (c) 2018 takuya (P2PQuake)）
+- H.264 の圧縮 (`encoder = "builtin"`): [Cisco OpenH264](https://github.com/cisco/openh264) を [openh264](https://crates.io/crates/openh264) クレート経由でソースから組み込み
+  (BSD 2-Clause。H.264 の特許の扱いは OpenH264 の README を参照)
 - ソースコード: GPL-3.0-or-later（[LICENSE](LICENSE)）
