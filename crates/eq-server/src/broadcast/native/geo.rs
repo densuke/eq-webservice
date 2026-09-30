@@ -65,6 +65,20 @@ impl View {
     }
 }
 
+/// 緯度 1 度の長さ (km)。地図の座標の縦 (KY) がこれに当たる
+const KM_PER_DEG_LAT: f64 = 111.19;
+
+impl View {
+    /// 震央から半径 radius_km の円 (画面の座標の path)。投影は緯度で横に伸びるので、その分を直した楕円で近似する
+    pub fn circle(&self, lat: f64, lon: f64, radius_km: f64) -> Option<Path> {
+        let (cx, cy) = self.px(lon, lat);
+        let ry = radius_km / KM_PER_DEG_LAT * KY * self.scale;
+        let rx = ry * (LAT0.to_radians().cos() / lat.to_radians().cos());
+        let (rx, ry) = (rx as f32, ry as f32);
+        PathBuilder::from_oval(tiny_skia::Rect::from_xywh(cx - rx, cy - ry, rx * 2.0, ry * 2.0)?)
+    }
+}
+
 /// 1 つの区域 (都道府県・市町村等)
 pub struct Shape {
     /// properties の name (都道府県) か code (市町村等)
@@ -153,6 +167,23 @@ mod tests {
         let (x, y) = project(139.0, 36.0);
         assert!((x - 2.0 * 37f64.to_radians().cos() * 100.0).abs() < 1e-9);
         assert!((y - 100.0).abs() < 1e-9); // 南へ行くほど y が増える
+    }
+
+    #[test]
+    fn a_circle_is_round_at_the_origin_latitude_and_wider_in_the_north() {
+        let view = View::fit_home((0.0, 36.0, 900.0, 684.0));
+        let km = |lat: f64, r: f64| {
+            let b = view.circle(lat, 137.0, r).unwrap().bounds();
+            (b.width(), b.height())
+        };
+        let (w, h) = km(37.0, 111.19); // 緯度 1 度分の半径
+        assert!((w - h).abs() < 0.01 && w > 0.0, "{w} {h}");
+        // 緯度 1 度 = 地図の縦 100 なので、直径は 200 x scale
+        let (_, h1) = km(37.0, 55.595);
+        assert!((h - 2.0 * h1).abs() < 0.01);
+        let (wn, hn) = km(60.0, 111.19);
+        assert!((hn - h).abs() < 0.01); // 縦は同じ長さ
+        assert!(wn > w * 1.5, "{wn}"); // 北ほど経度が詰まるので、横に伸びる (cos 37 / cos 60 = 1.6)
     }
 
     #[test]

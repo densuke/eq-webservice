@@ -6,6 +6,7 @@
 mod calm;
 mod data;
 mod draw;
+mod eew;
 mod frame;
 mod geo;
 mod icon;
@@ -33,8 +34,8 @@ use data::{CityWeather, ServerMessage, Warnings};
 use draw::{Renderer, Scene};
 use icon::Icons;
 
-/// 描き直すかを調べる間隔
-const CHECK_EVERY: Duration = Duration::from_millis(200);
+/// 描き直すかを調べる間隔 (地震波が動く間は、この間隔ごとに描き直す。地震の画面の fps 10 に合わせる)
+const CHECK_EVERY: Duration = Duration::from_millis(100);
 const RECONNECT_AFTER: Duration = Duration::from_secs(5);
 /// 警報・天気を取り直す間隔 (取れなかったときは短く)
 const POLL_EVERY: Duration = Duration::from_secs(300);
@@ -184,6 +185,7 @@ struct Out {
 
 async fn render_loop(mut renderer: Renderer, st: Shared, out: Out, notices: Option<UnboundedSender<String>>) {
     let mut last_key = None;
+    let mut still = None;
     let mut last_calm = None;
     let mut tick = tokio::time::interval(CHECK_EVERY);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -192,27 +194,59 @@ async fn render_loop(mut renderer: Renderer, st: Shared, out: Out, notices: Opti
         let s = st.lock().unwrap_or_else(|e| e.into_inner());
         let now = model::server_now(local_now_ms(), s.offset);
         let groups = model::group_quakes(&s.events);
-        let quake = model::current_quake(&groups, now);
-        // 描き直すのは、データが変わったとき・平時と地震が切り替わったとき・秒が進んだときだけ
-        let key = (s.rev, quake.map(|q| (q.updated_ms, q.max_scale.0)), now / 1000);
+        let eews = eew::latest_eews(&s.events);
+        let current = eew::current(&groups, &eews, now);
+        let (quake, shown_eew) = match current {
+            Some(eew::Current::Quake(q)) => (Some(q), None),
+            Some(eew::Current::Eew(e)) => (None, Some(e)),
+            None => (None, None),
+        };
+        // 地震波は地震の画面のときだけ描く
+        let waves = if current.is_some() {
+            eew::waves(&groups, &eews, now)
+        } else {
+            Vec::new()
+        };
+        // 地震波以外を描き直すのは、データが変わったとき・平時と地震が切り替わったとき・秒が進んだときだけ。
+        // 地震波が動いている間は、その上にコマごとに波だけを重ねる
+        let still_key = (
+            s.rev,
+            quake.map(|q| (q.updated_ms, q.max_scale.0)),
+            shown_eew.map(|e| e.received_ms),
+            now / 1000,
+        );
+        let key = (still_key, if waves.is_empty() { 0 } else { now / 100 });
         if last_key == Some(key) {
             continue;
         }
         last_key = Some(key);
-        let scene = Scene {
-            quake,
-            history: &groups[..groups.len().min(HISTORY)],
-            warnings: s.warnings.as_ref(),
-            weather: s.weather.as_ref(),
-            icons: &s.icons,
-            now_ms: now,
-            connected: s.connected,
-            bgm_title: &s.bgm_title,
-            label: &out.label,
-            test: out.test,
+        if still.as_ref().is_none_or(|(k, _)| *k != still_key) {
+            let scene = Scene {
+                quake,
+                eew: shown_eew,
+                history: &groups[..groups.len().min(HISTORY)],
+                warnings: s.warnings.as_ref(),
+                weather: s.weather.as_ref(),
+                icons: &s.icons,
+                now_ms: now,
+                connected: s.connected,
+                bgm_title: &s.bgm_title,
+                label: &out.label,
+                test: out.test,
+            };
+            still = Some((still_key, renderer.render(&scene)));
+        }
+        let Some((_, base)) = &still else { continue };
+        let with_waves;
+        let pm = if waves.is_empty() {
+            base
+        } else {
+            let mut pm = base.clone();
+            renderer.draw_waves(&mut pm, &waves);
+            with_waves = pm;
+            &with_waves
         };
-        let pm = renderer.render(&scene);
-        let calm = quake.is_none();
+        let calm = current.is_none();
         drop(s);
         let _ = out.calm.send_if_modified(|c| std::mem::replace(c, calm) != calm);
         let _ = out.frames.send(Arc::new(yuv::rgba_to_i420(

@@ -27,6 +27,10 @@ pub const OKINAWA: InsetSpec = InsetSpec {
     h: 150.0,
 };
 
+/// 別枠の範囲の外でも、この度数以内の震央は枠の縁に寄せて印を置く / そのときの枠の縁からの余白
+const MARKER_MARGIN_DEG: f64 = 1.5;
+const MARKER_PAD: f32 = 8.0;
+
 /// 枠 (x, y, 幅, 高さ)
 pub type BoxRect = (f32, f32, f32, f32);
 
@@ -96,9 +100,31 @@ impl Frame {
 
     /// その地点をこの面に描くか (本図は全部、別枠は範囲の中だけ)
     pub fn contains(&self, lon: f64, lat: f64) -> bool {
-        self.inset
-            .as_ref()
-            .is_none_or(|i| (i.bounds.0..=i.bounds.1).contains(&lon) && (i.bounds.2..=i.bounds.3).contains(&lat))
+        self.within(lon, lat, 0.0)
+    }
+
+    /// 範囲を margin 度広げて見たとき、その地点が別枠の中か (本図は全部)
+    fn within(&self, lon: f64, lat: f64, margin: f64) -> bool {
+        self.inset.as_ref().is_none_or(|i| {
+            (i.bounds.0 - margin..=i.bounds.1 + margin).contains(&lon)
+                && (i.bounds.2 - margin..=i.bounds.3 + margin).contains(&lat)
+        })
+    }
+
+    /// 震央の印を置く画面の位置。別枠の範囲のすぐ外 (南西諸島の少し西の海など) の震央は、枠の縁に寄せて置く。
+    /// この面に置かないときは None
+    pub fn marker(&self, lon: f64, lat: f64) -> Option<(f32, f32)> {
+        if !self.within(lon, lat, MARKER_MARGIN_DEG) {
+            return None;
+        }
+        let (x, y) = self.view.px(lon, lat);
+        Some(match &self.inset {
+            Some(i) => (
+                x.clamp(i.rect.left() + MARKER_PAD, i.rect.right() - MARKER_PAD),
+                y.clamp(i.rect.top() + MARKER_PAD, i.rect.bottom() - MARKER_PAD),
+            ),
+            None => (x, y),
+        })
     }
 
     /// この path が面の中に見えるか (見えないものは描かずに済ませる)
@@ -157,6 +183,20 @@ mod tests {
         assert!(!ins.contains(139.69, 35.69)); // 東京
         assert!(main.contains(139.69, 35.69) && main.contains(127.68, 26.21));
         assert!(ins.is_inset() && !main.is_inset());
+    }
+
+    #[test]
+    fn a_marker_just_outside_the_inset_is_pinned_to_its_edge() {
+        let (main, ins) = frames();
+        let ((x, y, w, h), _) = ins.inset_box().unwrap();
+        // 与那国島の西の海 (範囲の外だが 1.5 度以内) は、枠の左下の隅に寄る
+        let (px, py) = ins.marker(122.8, 23.6).unwrap();
+        assert_eq!((px, py), (x + 8.0, y + h - 8.0));
+        // 枠の中はそのまま。遠い (東京) なら置かない。本図は常にそのまま
+        let (nx, ny) = ins.marker(127.68, 26.21).unwrap();
+        assert!(nx > x + 8.0 && nx < x + w - 8.0 && ny > y + 8.0 && ny < y + h - 8.0);
+        assert_eq!(ins.marker(139.69, 35.69), None);
+        assert_eq!(main.marker(139.69, 35.69), Some(main.view.px(139.69, 35.69)));
     }
 
     #[test]
