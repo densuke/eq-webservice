@@ -7,6 +7,7 @@ import { geoCircle } from "./waves.ts";
 import { union, type Box } from "./camera.ts";
 import mapCss from "./map.css";
 import { esc } from "./html.ts";
+import { INSET_MARGIN_DEG, INSET_PAD_PX, insetMarkerPos } from "./inset.ts";
 import { clusterMarkers, edgePoint, labelSize, type Cluster, type Marker } from "./cluster.ts";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -29,7 +30,7 @@ const HOME = { lonMin: 128, lonMax: 146.2, latMin: 30, latMax: 45.8 };
  * 地震に寄っているときは本図だけで描けるので隠す。always でないものは、その範囲に何かあるときだけ出す
  */
 const INSETS = [
-  { id: "okinawa", title: "南西諸島", lonMin: 122.9, lonMax: 131.4, latMin: 24.0, latMax: 30.0, always: true },
+  { id: "okinawa", title: "南西諸島", lonMin: 122.5, lonMax: 131.5, latMin: 24.0, latMax: 31.0, always: true },
   { id: "ogasawara", title: "小笠原", lonMin: 140.8, lonMax: 142.5, latMin: 24.0, latMax: 27.9, always: false },
 ];
 
@@ -169,13 +170,14 @@ export class JapanMap {
 
   constructor(container: HTMLElement) {
     this.svg = el("svg", { class: "map", preserveAspectRatio: "xMidYMid meet" });
-    // 別枠には塗り分け・津波予報・観測点の点だけを映す (震央の印は縮尺に合わせて別に描く)
+    // 別枠には塗り分け・津波予報・観測点の点・地震波だけを映す (震央の印は縮尺に合わせて別に描く)
     const base = el("g", { id: "map-base" });
     // 外部の CSS は <use> の複製に効かないので、図形のスタイルは SVG の中に置く
     const style = el("style");
     style.textContent = mapCss;
-    base.append(style, this.neighborLayer, this.prefLayer, this.warnLayer, this.rainLayer, this.areaLayer, this.tsunamiLayer, this.dotLayer);
-    this.svg.append(base, this.waveLayer, this.labelLayer, this.cityLayer, this.markerLayer);
+    // P 波・S 波の円も別枠に映す (本図では地名・印より下なので、base の最後に置いても重なりは変わらない)
+    base.append(style, this.neighborLayer, this.prefLayer, this.warnLayer, this.rainLayer, this.areaLayer, this.tsunamiLayer, this.dotLayer, this.waveLayer);
+    this.svg.append(base, this.labelLayer, this.cityLayer, this.markerLayer);
     for (const ins of INSETS) {
       const [x0, y0] = project(ins.lonMin, ins.latMax);
       const [x1, y1] = project(ins.lonMax, ins.latMin);
@@ -364,11 +366,16 @@ export class JapanMap {
     const b = ins.bounds;
     const r = 6;
     const x9 = `M${-r} ${-r}L${r} ${r}M${r} ${-r}L${-r} ${r}`;
+    // 枠のすぐ外の震央は、枠の縁から INSET_PAD_PX 内側に寄せて置く
+    const [mx, my, pad] = [INSET_MARGIN_DEG * KX, INSET_MARGIN_DEG * KY, INSET_PAD_PX * k];
     ins.markers.replaceChildren(
       ...this.markerItems
-        .filter((m) => m.x >= b.x0 && m.x <= b.x1 && m.y >= b.y0 && m.y <= b.y1)
-        .map((m) => {
-          const g = el("g", { class: "epicenter sub", transform: `translate(${m.x} ${m.y}) scale(${k})` });
+        .flatMap((m) => {
+          const pos = insetMarkerPos(m.x, m.y, b, mx, my, pad);
+          return pos ? [{ m, pos }] : [];
+        })
+        .map(({ m, pos: [x, y] }) => {
+          const g = el("g", { class: "epicenter sub", transform: `translate(${x} ${y}) scale(${k})` });
           g.append(el("path", { d: x9, class: "epicenter-x-bg" }), el("path", { d: x9, class: "epicenter-x" }));
           if (m.label != null) {
             const t = el("text", { x: 8, y: -6, class: "epicenter-label", style: "font-size: 11px" });

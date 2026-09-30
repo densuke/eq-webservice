@@ -20,11 +20,11 @@ pub struct InsetSpec {
 /// 南西諸島。日本全体の表示から外れる離島を、地図の左上に別枠で映す
 pub const OKINAWA: InsetSpec = InsetSpec {
     title: "南西諸島",
-    lon: (122.9, 131.4),
-    lat: (24.0, 30.0),
+    lon: (122.5, 131.5),
+    lat: (24.0, 31.0),
     x: 10.0,
     y: super::draw::BAR_H + 10.0,
-    h: 150.0,
+    h: 220.0,
 };
 
 /// 別枠の範囲の外でも、この度数以内の震央は枠の縁に寄せて印を置く / そのときの枠の縁からの余白
@@ -171,8 +171,8 @@ mod tests {
     fn the_inset_sits_at_the_top_left_and_does_not_reach_the_legend() {
         let (_, ins) = frames();
         let ((x, y, w, h), title) = ins.inset_box().unwrap();
-        assert_eq!((x, y, h, title), (10.0, 46.0, 150.0, "南西諸島"));
-        assert!((w - 169.8).abs() < 0.1, "{w}"); // 8.5 x cos(37) x 100 : 600 の縦横比
+        assert_eq!((x, y, h, title), (10.0, 46.0, 220.0, "南西諸島"));
+        assert!((w - 225.9).abs() < 0.1, "{w}"); // 9 x cos(37) x 100 : 700 の縦横比
         assert!(y + h < 720.0 - 10.0 - 147.0 - 6.0 - 78.0); // 左下の凡例より上
     }
 
@@ -189,8 +189,8 @@ mod tests {
     fn a_marker_just_outside_the_inset_is_pinned_to_its_edge() {
         let (main, ins) = frames();
         let ((x, y, w, h), _) = ins.inset_box().unwrap();
-        // 与那国島の西の海 (範囲の外だが 1.5 度以内) は、枠の左下の隅に寄る
-        let (px, py) = ins.marker(122.8, 23.6).unwrap();
+        // 台湾の東の海 (範囲の外だが 1.5 度以内) は、枠の左下の隅に寄る
+        let (px, py) = ins.marker(121.5, 23.6).unwrap();
         assert_eq!((px, py), (x + 8.0, y + h - 8.0));
         // 枠の中はそのまま。遠い (東京) なら置かない。本図は常にそのまま
         let (nx, ny) = ins.marker(127.68, 26.21).unwrap();
