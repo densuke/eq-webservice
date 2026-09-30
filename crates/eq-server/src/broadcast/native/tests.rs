@@ -75,6 +75,7 @@ fn scene<'a>(
         now_ms: NOW,
         connected: true,
         bgm_title: "テスト曲",
+        label: "",
     }
 }
 

@@ -281,3 +281,51 @@ y=720 └───────────────────────�
 - 送信量・起動時のメモリ・地震の画面の負荷の数値を PR に書く
 - 既存のテストが通り、ffmpeg の引数 (可変 fps のとき・`fps_calm` を省いたとき・Chrome のとき) のテストを足す
 - 利用者の配信 (`~/work/eq-broadcast`) と e2 には触らない。YouTube には送らない。PR まで作り、マージしない
+
+## 11. N1.3 の結果と測り方 (v0.16.0)
+
+### 11.1 実装したこと
+
+- `fps_calm` (native のみ): 指定すると ffmpeg の入力は `-use_wallclock_as_timestamps 1`、出力は `-fps_mode passthrough` と `-force_key_frames expr:gte(t,n_forced*2)`。
+  描く側の「平時か」の知らせ (watch) で、送る間隔をすぐ切り替える (平時は `fps_calm`、地震の画面は `fps`)。
+  `fps_calm` を省くと今までどおり (`-framerate fps`、`-g fps*2`)。Chrome の経路は変えていない。
+- `audio_bitrate` (既定 `128k`)、`label` (上部バーの右。BGM の曲名はその左)。
+- 起動時のメモリの山は、eq-server ではなく ffmpeg (x264) が作っていた。`encode` の設定だけで下げられるので、コードは変えていない。
+
+### 11.2 測った数値 (Mac、Apple Silicon、`tools/broadcast_load.py`。e2 とは数値が違う)
+
+設定: `fps = 10`・`fps_calm = 2`・`audio_bitrate = "32k"`・
+`encode = ["-threads","1","-c:v","libx264","-preset","veryfast","-tune","zerolatency","-crf","28","-maxrate","500k","-bufsize","1000k"]`。CPU は 1 コアを 100% とする。
+
+| 場面 | CPU (eq-server + ffmpeg) | メモリ (eq-server / ffmpeg) | コマ | 送信量 (音込み) |
+|---|---|---|---|---|
+| 平時 (eq.fuga.jp の実データ) | 約 2% | 約 50MB / 約 48MB | 2fps | 約 76kbps |
+| 地震の画面: noto2024 (100 秒、4 倍速) | 平時 約 2%、地震 約 4.4% | 41MB / 49MB | 2 → 10fps | 平均 約 175kbps |
+| 地震の画面: standard (100 秒) | 平時 約 1.5%、地震 約 3.5% | 38MB / 48MB | 2 → 10fps | 平均 約 182kbps |
+
+- 切り替わりは 5 秒ごとの表で 1.6〜2.0fps → 10.0fps と出る。キーフレームの間隔は 1.6〜2.4 秒 (ffprobe のパケットの旗で数えた)。
+- 平時の送信量は encode で大きく変わる (音 32k 込み、同じ CRF 28、`-tune stillimage`): ultrafast 約 410kbps、veryfast 約 250kbps、`zerolatency` (veryfast) 約 76kbps。
+  目標 (平時 250kbps 未満) は `veryfast` + `zerolatency` で満たす。文字は読めるが、天気アイコンは少しぼやける (CRF 28)。
+- 起動時のメモリ (Mac、`/usr/bin/time -l` は eq-server、ffmpeg は 0.1 秒ごとの標本):
+  - eq-server の最大 約 40MB (日本語フォントあり)。山を作っているのは ffmpeg だった。
+  - ffmpeg の最大: v0.15.2 の既定の encode (`veryfast`・`-b:v 3000k`・`-threads` なし) で 約 224MB、`-threads 1` で 約 94MB、さらに `-rc-lookahead 5` で 約 79MB、`-tune zerolatency` で 約 48MB (ultrafast + stillimage は 約 45MB)。
+  - 合計 (eq-server + ffmpeg) の最大は上の設定で 約 90〜98MB (目標 150MB 未満)。e2 (Linux) は ffmpeg のスレッドや libc が違うので、数値は e2 で測り直す。
+- `-tune stillimage` (veryfast) は先読み (`rc-lookahead` 40) のため、出力が 20 秒ほど遅れる。`zerolatency` は先読みが無く遅れない。
+- 既知 (N1.3 の前から): 起動の直後に ffmpeg が「音の入力が数秒〜15 秒遅れた」という警告を出す (無音の `-re` の入力が、最初の映像を待つため)。少しあとに追いつく。
+
+### 11.3 地震の画面の負荷の測り方
+
+```sh
+cargo build --release
+# 記録の地震を流すサーバ (別のポート 18099) を立て、native の server をそこへ向ける。出力は一時ディレクトリのファイルだけ
+tools/broadcast_load.py samples/scenarios/noto2024.jsonl --speed 4 --duration 100 --time-l \
+  --toml 'fps = 10' --toml 'fps_calm = 2' --toml 'audio_bitrate = "32k"' \
+  --toml 'encode = ["-threads","1","-c:v","libx264","-preset","veryfast","-tune","zerolatency","-crf","28","-maxrate","500k","-bufsize","1000k"]'
+# 平時 (実データ。読むだけ): replay を立てずに eq.fuga.jp の画面を測る
+tools/broadcast_load.py x --server https://eq.fuga.jp --duration 90 --toml 'fps = 10' --toml 'fps_calm = 2'
+```
+
+- 5 秒ごとの表: CPU (eq-server・ffmpeg)・メモリ・コマ数・映像の送信量。最後に平均の CPU・最大メモリ・送信量・キーフレームの間隔を出す。
+- Linux (e2) でも動く (CPU とメモリは /proc から読む)。e2 では `systemd-run --user -p CPUQuota=25% -p MemoryMax=200M -p MemorySwapMax=0 tools/broadcast_load.py ...` のように包むと、本番と同じ枠で測れる。
+- 記録は最初に緊急地震速報 (native はまだ描かない) が続き、地震情報 (震度) が来てから地震の画面になる。noto2024 は `--speed 4` で約 25 秒後、standard は約 20 秒後。
+- 送信量は、エンコーダが先読みで抱えているコマを除いて、出力の長さで割っている。

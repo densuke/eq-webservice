@@ -76,9 +76,15 @@ pub fn draw_frame(pm: &mut Pixmap, text: &mut Text) {
 pub fn draw_dynamic(pm: &mut Pixmap, text: &mut Text, scene: &Scene) {
     let mode = if scene.quake.is_some() { "[地震]" } else { "[平時]" };
     text.draw(pm, mode, 210.0, 24.0, 12.0, MUTED);
+    // 右端に配信元 (label)、その左に BGM の曲名
+    let mut right = W as f32 - PAD;
+    if !scene.label.is_empty() {
+        text.draw_right(pm, scene.label, right, 24.0, 12.0, MUTED);
+        right -= text.width(scene.label, 12.0) + 16.0;
+    }
     if !scene.bgm_title.is_empty() {
         let s = format!("BGM: {}", scene.bgm_title);
-        text.draw_right(pm, &s, W as f32 - PAD, 24.0, 12.0, MUTED);
+        text.draw_right(pm, &s, right, 24.0, 12.0, MUTED);
     }
     if scene.quake.is_none() {
         draw_warn_legend(pm, text);
