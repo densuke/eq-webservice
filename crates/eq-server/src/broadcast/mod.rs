@@ -193,7 +193,8 @@ async fn session(cfg: &BroadcastConfig, output: &[String], secrets: &[String]) -
     let mut log = BufReader::new(ffmpeg.stderr.take().context("ffmpeg stderr")?).lines();
     tracing::info!(source = ?cfg.source, url = %cfg.url, width = cfg.width, height = cfg.height, fps = cfg.fps, fps_calm = ?cfg.fps_calm, "broadcast started");
     let mut frame: Arc<Vec<u8>> = Arc::default();
-    let mut tick = new_tick(frame_rate(cfg, true));
+    let mut rate = frame_rate(cfg, true);
+    let mut tick = new_tick(rate);
     loop {
         tokio::select! {
             f = async { match screen.as_mut() { Some(s) => s.next_frame().await, None => std::future::pending().await } } => {
@@ -215,7 +216,12 @@ async fn session(cfg: &BroadcastConfig, output: &[String], secrets: &[String]) -
                     if is_frame {
                         frame = n.frames.borrow_and_update().clone();
                     } else {
-                        tick = new_tick(frame_rate(cfg, *n.calm.borrow_and_update()));
+                        let next = frame_rate(cfg, *n.calm.borrow_and_update());
+                        if next != rate {
+                            tracing::info!(fps = next, "broadcast: frame rate changed");
+                            rate = next;
+                            tick = new_tick(rate);
+                        }
                     }
                 }
             }
