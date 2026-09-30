@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 use tiny_skia::{Path, Pixmap};
 
+use super::banner;
 use super::calm;
 use super::data::{CityWeather, Warnings};
 use super::eew::{forecast_tag, EewSummary, Wave};
@@ -114,6 +115,11 @@ impl Renderer {
             }
         }
         panel::draw_dynamic(&mut pm, &mut self.text, scene);
+        // 警報以上の帯は平時だけ。テスト配信の赤い帯の下に置く
+        if let (None, None, Some(w)) = (scene.quake, scene.eew, scene.warnings) {
+            let below = if scene.test { test_mark::BAND_H } else { 0.0 };
+            banner::draw(&mut pm, &mut self.text, w, below);
+        }
         if scene.test {
             test_mark::draw(&mut pm, &mut self.text);
         }

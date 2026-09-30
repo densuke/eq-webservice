@@ -119,16 +119,17 @@ fn calm_frame_shows_the_sea_and_a_warned_prefecture() {
             .into_iter()
             .map(|c| (c, vec![kind.clone()]))
             .collect(),
+        ..Default::default()
     };
     let pm = r.render(&scene(None, &[], Some(&warnings), None));
     assert_eq!((pm.width(), pm.height()), (1280, 720));
     assert_eq!(rgb(&pm, sea_px()), SEA); // 日本海
                                          // 警報の赤 (陸に半透明で重なる) が地図に出る。県の全体を塗るのではなく、市町村等の区域だけを塗る
-                                         // (左下の凡例にも赤があるので、数えるのは凡例より右)
+                                         // (左下の凡例と上の帯にも赤があるので、数えるのは凡例より右・帯より下)
     let red = |pm: &Pixmap| {
         let w = pm.width() as usize;
         let hit = |(i, p): (usize, &tiny_skia::PremultipliedColorU8)| {
-            i % w >= 100 && p.red() > 150 && p.green() < 80 && p.blue() < 80
+            i % w >= 100 && i / w >= 100 && p.red() > 150 && p.green() < 80 && p.blue() < 80
         };
         pm.pixels().iter().enumerate().filter(|&e| hit(e)).count()
     };
@@ -321,6 +322,7 @@ fn warnings_in_okinawa_are_drawn_in_the_inset_too() {
             .filter(|s| s.key.starts_with("47"))
             .map(|s| (s.key, kind.clone()))
             .collect(),
+        ..Default::default()
     };
     let pm = r.render(&scene(None, &[], Some(&warnings), None));
     assert!(near(&pm, okinawa_px(), [0x13, 0x0a, 0x16])); // 特別警報の暗い色 (85%) が陸に重なる
@@ -434,6 +436,7 @@ fn write_fixture_pngs_when_asked() {
             .map(|c| (c, kind("レベル３大雨警報")))
             .chain([("2810000".to_string(), kind("レベル２大雨注意報"))])
             .collect(),
+        ..Default::default()
     };
     let city = |name: &str, lat, lon, code: &str, t| City {
         name: name.into(),
@@ -488,4 +491,45 @@ fn replay_without_test_is_refused_but_unknown_or_real_sources_are_not() {
     assert!(check_replay(None, false).is_ok()); // 取れない (古いサーバ) ときは replay ではないとみなす
     let e = check_replay(Some("replay"), false).unwrap_err();
     assert!(e.is::<crate::broadcast::Refused>());
+}
+
+/// 警報 1 件だけの入力 (八丈町の土砂災害警報)
+fn hachijo(name: &str) -> Warnings {
+    let mut w = Warnings::default();
+    w.areas.insert("1340100".into(), vec![Kind { name: name.into() }]);
+    w.names.insert("1340100".into(), "八丈町".into());
+    w
+}
+
+#[test]
+fn the_warning_banner_is_drawn_only_in_calm_and_only_for_warnings_and_above() {
+    let mut r = renderer(Text::none());
+    let at = |pm: &Pixmap| rgb(pm, (640, 50));
+    let warn = hachijo("レベル３土砂災害警報");
+    assert_eq!(at(&r.render(&scene(None, &[], Some(&warn), None))), [0xb3, 0x26, 0x1e]);
+    let danger = hachijo("レベル４土砂災害危険警報");
+    assert_eq!(
+        at(&r.render(&scene(None, &[], Some(&danger), None))),
+        [0x7a, 0x1f, 0xa2]
+    );
+    // 注意報だけ・警報が無い・地震の画面のときは出ない
+    let adv = hachijo("レベル２大雨注意報");
+    assert_eq!(at(&r.render(&scene(None, &[], Some(&adv), None))), SEA);
+    assert_eq!(at(&r.render(&scene(None, &[], None, None))), SEA);
+    let q = quake(Scale::S5_LOWER, &[("東京都", Scale::S5_LOWER)], None);
+    assert_ne!(
+        at(&r.render(&scene(Some(&q), &[], Some(&warn), None))),
+        [0xb3, 0x26, 0x1e]
+    );
+}
+
+#[test]
+fn the_warning_banner_sits_below_the_test_band() {
+    let mut r = renderer(Text::none());
+    let warn = hachijo("レベル３土砂災害警報");
+    let mut sc = scene(None, &[], Some(&warn), None);
+    sc.test = true;
+    let pm = r.render(&sc);
+    assert_eq!(rgb(&pm, (640, 38)), super::test_mark::BAND);
+    assert_eq!(rgb(&pm, (640, 36 + 20 + 14)), [0xb3, 0x26, 0x1e]);
 }

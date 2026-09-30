@@ -1,0 +1,8 @@
+[Unit]
+Description=eq-webservice YouTube のライブ配信の見張り (届いていなければ配信をつなぎ直す)
+
+[Service]
+Type=oneshot
+# 認証情報 (読むだけ) と受け口の名前は環境に合わせる
+ExecStart=%h/work/eq-e2cast/tools/youtube-live-watch.sh %h/.config/pd2/youtube-upload-token.json 地震モニター用
+Nice=19
