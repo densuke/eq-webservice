@@ -342,6 +342,34 @@ v0.18.3 を本番で使った利用者の要望。
   - CPU とメモリを、今の直送 (録画なし) と比べる。増えるのは copy の ffmpeg 1 つ分 (目安 CPU 1% 未満、メモリ 20MB 前後) に収まること。
 - テスト: ring の書き分け (1 分ごと、20 個で回る)、書き込みが詰まったときに送り出しを止めないこと。
 
+### 3.7 YouTube の配信が視聴者に届いているかの見張り
+
+2026-10-01 01:15 (JST)、YouTube のライブの枠が `complete` (終了) になった。
+
+- そのときの e2 の状態
+  - e2 は送り続けていて、受け口 (liveStream) は `active`・健全性 `good` のままだった。
+  - 01:17 に ffmpeg が `Thread message queue blocking` を出していて、e2 の通信か CPU が一瞬詰まったと見られる。
+- 枠の自動終了 (enableAutoStop) がオンなので、YouTube はその途切れで枠を閉じた。閉じた枠は開き直らない。
+- 2026-09-30 20:29 に視聴ページが止まった件も、同じ仕組みの可能性がある。
+
+作ったもの (deploy/):
+
+- `youtube_live_check.py`
+  - YouTube Data API (読み取りだけ、1 回 2 単位) で次の 2 つを見て、視聴者に届いているかを判定する。
+    - 受け口の `streamStatus`・`healthStatus`。
+    - ひもづいた枠の `lifeCycleStatus` が `live` か。
+  - 認証情報は e2 の `~/.config/pd2/youtube-upload-token.json` (pd2 と共有)。読むだけで、値は出さない。
+  - 割り当ても pd2 と共有する。5 分ごとで 1 日 576 単位。
+- `youtube-live-watch.sh`、`youtube-live-watch.service`、`youtube-live-watch.timer`
+  - 5 分ごとに見る。2 回続けて届いていなければ `eq-broadcast` を再起動して、つなぎ直す。つなぎ直しは 15 分に 1 回まで。
+  - つなぎ直すと、待機中 (`ready`) で自動開始がオンの枠は live に戻る。2026-10-01 04:05 に手で試して、16 秒で戻った。
+  - 待機中の枠が無ければ戻らない。そのときは利用者が YouTube Studio で枠を作る。
+    - 枠を作る操作 (`liveBroadcasts.insert`・`transition`) は公開の操作なので、自動ではしない。
+- 置き方 (e2)
+  - `youtube_live_check.py` と `youtube-live-watch.sh` を `~/work/eq-e2cast/tools/` に置く。
+  - `.service`・`.timer` を `~/.config/systemd/user/` に置き、`systemctl --user enable --now youtube-live-watch.timer`。
+- YouTube Studio の枠の設定で「自動終了」を切っておくと、短い途切れで枠が閉じにくくなる (利用者の操作)。
+
 ## 4. R3: 再現動画 (今回は作らない、宿題)
 
 - replay が内部の Event の jsonl (と `/api/archive` の結果) を読めるようにする。
