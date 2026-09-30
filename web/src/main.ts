@@ -11,7 +11,7 @@ import { fetchArchive, gatherEvents } from "./history.ts";
 import { esc } from "./html.ts";
 import { notify, renderCountdown, updateHome } from "./personal-ui.ts";
 import { sameQuake } from "./priority.ts";
-import { activeEews, calmState, currentGroup, displayedInfoMs, placeOf, priorityGroups, updateNumbers, updateTour } from "./quakes.ts";
+import { activeEews, calmState, currentGroup, displayedInfoMs, placeOf, priorityGroups, relatedQuake, updateNumbers, updateTour } from "./quakes.ts";
 import { renderMarkers, renderScene, scene } from "./scene.ts";
 import { play } from "./sound.ts";
 import { $, map } from "./dom.ts";
@@ -281,12 +281,14 @@ async function loadStations(): Promise<void> {
 
 /**
  * 履歴の行を選ぶ。地震 (発生時刻が分かるもの) は、その報を集めて当時の時刻で再生する。
- * 再生中は行を選べない (「リアルタイムに戻る」で戻ってから)。それ以外 (津波予報など) と、デモ中は、選んだ時点を発生とみなして波だけ描く
+ * 再生中は行を選べない (「リアルタイムに戻る」で戻ってから)。デモ中 (と発生時刻が分からないとき) は、選んだ時点を発生とみなして波だけ描く
  */
 async function select(key: string): Promise<void> {
   if (app.demo?.history) return;
+  // 津波予報の行は、その地震 (直前の地震情報・緊急地震速報) を再生する
   const g = app.world.store.get(key);
-  if (!app.demo && g && startHistory(await gatherEvents(g, fetchArchive))) return;
+  const quake = g && relatedQuake(g);
+  if (!app.demo && quake && startHistory(await gatherEvents(quake, fetchArchive))) return;
   app.selectedKey = key;
   app.selectedAt = now();
   map.release();
