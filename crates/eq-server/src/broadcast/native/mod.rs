@@ -35,8 +35,6 @@ use data::{CityWeather, ServerMessage, Warnings};
 use draw::{Renderer, Scene};
 use icon::Icons;
 
-/// 描き直すかを調べる間隔 (地震波が動く間は、この間隔ごとに描き直す。地震の画面の fps 10 に合わせる)
-const CHECK_EVERY: Duration = Duration::from_millis(100);
 const RECONNECT_AFTER: Duration = Duration::from_secs(5);
 /// 警報・天気を取り直す間隔 (取れなかったときは短く)
 const POLL_EVERY: Duration = Duration::from_secs(300);
@@ -129,6 +127,8 @@ pub fn start(cfg: &BroadcastConfig, notices: Option<UnboundedSender<String>>) ->
     let (calm_tx, calm) = watch::channel(true);
     let (shown_tx, shown) = watch::channel(Shown::NONE);
     let (label, test) = (cfg.label.clone(), cfg.test);
+    // 描き直すかを調べる間隔。地震波が動く間はこの間隔ごとに描き直すので、地震の画面の fps に合わせる
+    let check_ms = 1000 / u64::from(cfg.fps.max(1));
     let tasks = vec![
         tokio::spawn(ws_loop(ws_url(&server), st.clone())),
         tokio::spawn(poll(format!("{server}/api/warnings"), st.clone(), |s, v: Warnings| {
@@ -150,6 +150,7 @@ pub fn start(cfg: &BroadcastConfig, notices: Option<UnboundedSender<String>>) ->
                 shown: shown_tx,
                 label,
                 test,
+                check_ms,
             },
             notices,
         )),
@@ -192,13 +193,14 @@ struct Out {
     shown: watch::Sender<Shown>,
     label: String,
     test: bool,
+    check_ms: u64,
 }
 
 async fn render_loop(mut renderer: Renderer, st: Shared, out: Out, notices: Option<UnboundedSender<String>>) {
     let mut last_key = None;
     let mut still = None;
     let mut last_calm = None;
-    let mut tick = tokio::time::interval(CHECK_EVERY);
+    let mut tick = tokio::time::interval(Duration::from_millis(out.check_ms));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         tick.tick().await;
@@ -226,7 +228,7 @@ async fn render_loop(mut renderer: Renderer, st: Shared, out: Out, notices: Opti
             shown_eew.map(|e| e.received_ms),
             now / 1000,
         );
-        let key = (still_key, if waves.is_empty() { 0 } else { now / 100 });
+        let key = (still_key, if waves.is_empty() { 0 } else { now / out.check_ms });
         if last_key == Some(key) {
             continue;
         }
