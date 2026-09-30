@@ -5,6 +5,7 @@
 //! 送り先 (ストリームキー入りの URL) は `$VAR` で環境変数から読み、ログには出さない。
 
 mod audio;
+mod builtin;
 mod chrome;
 mod encoder;
 mod ffmpeg;
@@ -18,6 +19,16 @@ use std::time::Duration;
 use anyhow::Context;
 use encoder::Encoder;
 use serde::Deserialize;
+
+/// 圧縮と送り出しの方法
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EncoderKind {
+    /// ffmpeg の子のプロセス (既定)
+    Ffmpeg,
+    /// eq-server の中で圧縮して送る (実験。native・無音のみ。docs/broadcast-builtin.md)
+    Builtin,
+}
 
 /// 画面の作り方
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -71,6 +82,10 @@ pub struct BroadcastConfig {
     pub bgm_url: String,
     /// 音のビットレート (ffmpeg の -b:a。無音なら 32k などに下げる)
     pub audio_bitrate: String,
+    /// 圧縮と送り出し (既定は ffmpeg)。builtin は native・無音のときだけ。output の最初の要素 (rtmp(s)://... か .flv のパス) に送る
+    pub encoder: EncoderKind,
+    /// builtin: 映像の目標ビットレート (bps)
+    pub builtin_bitrate: u32,
     /// 映像・音の圧縮 (ffmpeg の引数)
     pub encode: Vec<String>,
     /// 送り先 (ffmpeg の引数)。`$VAR` / `${VAR}` は環境変数に置き換える
@@ -127,6 +142,8 @@ impl Default for BroadcastConfig {
             mixer: false,
             bgm_url: "https://eq.fuga.jp/stream/bgm.mp3".into(),
             audio_bitrate: "128k".into(),
+            encoder: EncoderKind::Ffmpeg,
+            builtin_bitrate: 300_000,
             encode: default_encode(),
             output: Vec::new(),
         }
@@ -157,7 +174,14 @@ pub async fn run(args: &[String]) -> anyhow::Result<()> {
     let text = std::fs::read_to_string(path).with_context(|| format!("reading {path}"))?;
     let cfg: BroadcastConfig = toml::from_str(&text).with_context(|| format!("parsing {path}"))?;
     anyhow::ensure!(!cfg.output.is_empty(), "output (送り先) を設定してください");
-    if cfg.source == Source::Native && cfg.fps_calm.is_some() && cfg.encode.iter().any(|x| x == "-maxrate") {
+    if cfg.encoder == EncoderKind::Builtin {
+        builtin::BuiltinEncoder::check(&cfg)?;
+    }
+    if cfg.encoder == EncoderKind::Ffmpeg
+        && cfg.source == Source::Native
+        && cfg.fps_calm.is_some()
+        && cfg.encode.iter().any(|x| x == "-maxrate")
+    {
         tracing::warn!(
             "broadcast: fps_calm と -maxrate を組み合わせると、平時の画面が崩れます (encode は CRF だけにしてください)"
         );
@@ -226,7 +250,12 @@ async fn session(cfg: &BroadcastConfig, output: &[String], secrets: &[String]) -
         (None, Some(a)) => a.ffmpeg_input(),
         (None, None) => cfg.audio.clone(),
     };
-    let mut encoder = Encoder::Ffmpeg(ffmpeg::FfmpegEncoder::start(cfg, &audio_in, output, secrets)?);
+    let mut encoder = match cfg.encoder {
+        EncoderKind::Ffmpeg => {
+            Encoder::Ffmpeg(Box::new(ffmpeg::FfmpegEncoder::start(cfg, &audio_in, output, secrets)?))
+        }
+        EncoderKind::Builtin => Encoder::Builtin(Box::new(builtin::BuiltinEncoder::start(cfg, output).await?)),
+    };
     let started = std::time::Instant::now();
     tracing::info!(source = ?cfg.source, url = %cfg.url, width = cfg.width, height = cfg.height, fps = cfg.fps, fps_calm = ?cfg.fps_calm, "broadcast started");
     let mut frame: Arc<Vec<u8>> = Arc::default();

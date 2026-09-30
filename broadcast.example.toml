@@ -40,6 +40,8 @@ audio_command = ["sox", "-q", "-t", "coreaudio", "BlackHole 2ch", "-t", "raw", "
 # label = "配信元: e2"               # 上部バーの右に出す (BGM の曲名はその左)。省けば出さない
 # fps = 10                           # 地震の画面のコマ数
 # fps_calm = 2                       # 平時のコマ数。省けば fps で一定。指定すると平時と地震でコマの間隔が変わる
+# encoder = "builtin"                # ffmpeg を使わず eq-server が圧縮して送る (実験。native・無音のみ。output の最初の要素に送る)。
+#   その場合の output は ["rtmps://a.rtmps.youtube.com/live2/$YOUTUBE_LIVE_API_KEY"] (-f flv は書かない)。builtin_bitrate = 300000 (bps)
 # audio_bitrate = "32k"              # 無音で配信するなら 32k (既定 128k)
 # e2 (e2-micro) 向け: 平時 2fps・地震 10fps、CRF だけにして、x264 の先読みと threads を減らしてメモリを抑える。
 #   (e2 の本番で、平時の送信量は音込みで約 216kbps。docs/broadcast-native.md 11 章)
