@@ -3,6 +3,7 @@
 import { type Scenario, type ScenarioSummary, makePlan } from "./demo.ts";
 import { hindsightOf, historyStart, skipRanges } from "./history.ts";
 import { GroupStore } from "./groups.ts";
+import { type StartSound, startSoundInit, startSoundLevel, stepStartSound } from "./replay-sound.ts";
 import { esc } from "./html.ts";
 import type { EqEvent } from "./types.ts";
 import { $, map } from "./dom.ts";
@@ -15,6 +16,13 @@ const TAIL_MS = 4 * 60_000;
 
 /** 時計を飛ばしたあと、「早送り」を出し続ける時間 */
 const FF_SHOW_MS = 3000;
+
+/** 履歴の再生で、揺れの始まりの音の進み具合と、その強さ (ふだんは使わない) */
+let startSound: StartSound = startSoundInit;
+let startLevel = startSoundLevel([]);
+
+/** 時計を飛ばした直後 (「早送り」を出している間) か */
+export const fastForwarding = (): boolean => performance.now() < (app.demo?.ffUntil ?? 0);
 
 /** 再生の長さ (最後の報 + TAIL_MS) */
 const lengthOf = (d: DemoState) => (d.plan ? d.plan.end + TAIL_MS : 0);
@@ -69,6 +77,8 @@ export function startHistory(events: EqEvent[]): boolean {
   const start = historyStart(events);
   if (start == null) return false;
   const run = (app.demo?.run ?? 0) + 1;
+  startSound = startSoundInit;
+  startLevel = startSoundLevel(events);
   const plan = makePlan(events, run, undefined, start);
   app.demo = { scenarios: [], running: null, plan, world: null, applied: 0, run, history: true, skips: skipRanges(plan.events.map((x) => x.at)), ffUntil: 0, hindsight: hindsightOf(events), clock: { pos: 0, anchor: performance.now(), speed: 1, paused: false } };
   rebuild(app.demo);
@@ -97,6 +107,12 @@ export function advanceDemo(quiet = false): void {
     d.clock = { ...d.clock, pos: skip.to, anchor: performance.now() };
     d.ffUntil = performance.now() + FF_SHOW_MS;
     pos = skip.to;
+  }
+  // 履歴の再生: 発生時刻をまたいだ瞬間に 1 回だけ鳴らす (位置のつまみや早送りで飛んだときは鳴らさない)
+  if (d.history) {
+    const step = stepStartSound(startSound, d.plan.toReal(pos), d.hindsight?.originMs ?? null, quiet || skip != null);
+    startSound = step.state;
+    if (step.play) hooks.playAlert(startLevel);
   }
   const due = [];
   while (d.applied < d.plan.events.length && d.plan.events[d.applied].at <= pos) due.push(d.plan.events[d.applied++].event);
@@ -165,7 +181,7 @@ export function renderDemoControls(): void {
   const time = `${mmss(pos)} / ${mmss(max)}`;
   const t = $("#demo-time");
   if (t.textContent !== time) t.textContent = time;
-  const ff = performance.now() < d.ffUntil ? "早送り" : "";
+  const ff = fastForwarding() ? "早送り" : "";
   const f = $("#demo-ff");
   if (f.textContent !== ff) f.textContent = ff;
 }

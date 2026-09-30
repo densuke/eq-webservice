@@ -5,7 +5,7 @@ import "./broadcast.ts";
 import { type AlertLevel, alertLevel } from "./alert.ts";
 import { loadTelop, renderClock, renderSound, renderTelop, setStatus } from "./chrome.ts";
 import { Connection } from "./connection.ts";
-import { advanceDemo, enterDemo, exitDemo, renderDemoControls, renderDemoPanel, runScenario, startHistory } from "./demo-ui.ts";
+import { advanceDemo, enterDemo, exitDemo, fastForwarding, renderDemoControls, renderDemoPanel, runScenario, startHistory } from "./demo-ui.ts";
 import { fadeOpacity } from "./fade.ts";
 import { fetchArchive, gatherEvents } from "./history.ts";
 import { esc } from "./html.ts";
@@ -13,6 +13,7 @@ import { notify, renderCountdown, updateHome } from "./personal-ui.ts";
 import { sameQuake } from "./priority.ts";
 import { activeEews, calmState, currentGroup, displayedInfoMs, placeOf, priorityGroups, relatedQuake, updateNumbers, updateTour } from "./quakes.ts";
 import { renderMarkers, renderScene, scene } from "./scene.ts";
+import { pipSlot } from "./replay-sound.ts";
 import { play } from "./sound.ts";
 import { $, map } from "./dom.ts";
 import { type World, app, hooks, liveWorld, now, now as serverNow } from "./state.ts";
@@ -38,6 +39,15 @@ let lastCurrentKey: string | undefined;
 /** 直前に鳴らした警戒音 (数秒以内に重なったら強い方だけ鳴らす) */
 let lastAlert = { level: "info" as AlertLevel, at: 0 };
 
+const RANK: Record<AlertLevel, number> = { info: 0, low: 1, medium: 2, strong: 3 };
+
+/** 警戒音を鳴らす。数秒以内に重なったら、前より強いときだけ鳴らす */
+function playAlert(level: AlertLevel): void {
+  if (now() - lastAlert.at < ALERT_MERGE_MS && RANK[level] <= RANK[lastAlert.level]) return;
+  play(level);
+  lastAlert = { level, at: now() };
+}
+
 let timer = 0;
 
 export function tick(): void {
@@ -57,8 +67,8 @@ export function tick(): void {
   renderMarkers(now);
   const sc = scene(now);
   const { box, waving } = renderScene(sc);
-  // 波の広がり中 (ライブのみ) は 2 秒ごとに短い音で警戒中を知らせる (地震が重なっても 1 本)
-  const pip = waving && !sc!.replay && (app.demo?.clock.speed ?? 1) <= 1 ? Math.floor(now / 2000) : -1;
+  // 波の広がり中 (履歴の再生の早送りの最中を除く) は 2 秒ごとに短い音で警戒中を知らせる (地震が重なっても 1 本)
+  const pip = pipSlot(now, { waving, replay: sc!.replay, speed: app.demo?.clock.speed ?? 1, fastForward: fastForwarding() });
   if (pip > lastPip && lastPip !== -1) play("pip");
   lastPip = pip;
   // 優先度は時間で入れ替わる (大きい方が古くなるなど) ので、表示中の地震が変わったら描き直す
@@ -101,7 +111,6 @@ function urgent(e: EqEvent): boolean {
 
 /** target は情報を入れる先。デモモード中も実際の情報は liveWorld に入れ続ける */
 export function onEvents(all: EqEvent[], live: boolean, target: World = liveWorld): void {
-  const rank: Record<AlertLevel, number> = { info: 0, low: 1, medium: 2, strong: 3 };
   let alert: AlertLevel | null = null;
   // 地震感知情報は一覧に入れず、最新のものだけ持つ (地図の印は tick で描く)
   for (const e of all) if (e.kind === "userquake") receiveUserquake(e, live, target);
@@ -123,7 +132,7 @@ export function onEvents(all: EqEvent[], live: boolean, target: World = liveWorl
       const prev = activeAreas(app.world.tsunami);
       app.world.tsunami = latestTsunami(app.world.tsunami, e);
       const lv = live ? tsunamiAlert(prev, activeAreas(app.world.tsunami)) : null;
-      if (lv && (!alert || rank[lv] > rank[alert])) alert = lv;
+      if (lv && (!alert || RANK[lv] > RANK[alert])) alert = lv;
     }
     if (!live) continue;
     // その地震の EEW で既に鳴らしていれば、地震情報では鳴らさない
@@ -133,7 +142,7 @@ export function onEvents(all: EqEvent[], live: boolean, target: World = liveWorl
     const isNew =
       g.events.length === 1 || (e.kind === "eew" && e.warning && !g.events.slice(0, -1).some((x) => (x as EewEvent).warning));
     const lv = alertLevel(e, isNew, eewActive);
-    if (lv && (!alert || rank[lv] > rank[alert])) alert = lv;
+    if (lv && (!alert || RANK[lv] > RANK[alert])) alert = lv;
     // 新しい地震は、巡回より先にしばらく見せる
     if (isNew && (e.kind === "eew" || e.kind === "quake")) {
       app.tourHold = { key: g.key, until: now() + Math.max(20, app.settings.tourSec * 2) * 1000 };
@@ -144,10 +153,7 @@ export function onEvents(all: EqEvent[], live: boolean, target: World = liveWorl
   // ブラウザ通知は実際の情報だけ (デモは通知しない)
   if (live && target === liveWorld) events.forEach(notify);
   renderAll();
-  if (alert && !(now() - lastAlert.at < ALERT_MERGE_MS && rank[alert] <= rank[lastAlert.level])) {
-    play(alert);
-    lastAlert = { level: alert, at: now() };
-  }
+  if (alert) playAlert(alert);
 }
 
 let toastTimer = 0;
@@ -334,6 +340,7 @@ $("#back-live").addEventListener("click", () => {
 // ほかのモジュールから呼ぶ処理を登録する
 hooks.renderAll = renderAll;
 hooks.onEvents = onEvents;
+hooks.playAlert = playAlert;
 
 loadTelop();
 // 気象警報・注意報は 5 分ごとに取り直す

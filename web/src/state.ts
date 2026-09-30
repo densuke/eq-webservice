@@ -1,6 +1,7 @@
 // 画面全体で共有する状態と、よく使う定数・関数 (DOM には触らない。テストから読み込めるように)。
 // モジュールをまたいで書き換える状態は app にまとめる (import した変数は書き換えられないため)。
 
+import type { AlertLevel } from "./alert.ts";
 import type { Connection } from "./connection.ts";
 import type { Plan, ScenarioSummary } from "./demo.ts";
 import type { Station } from "./detail.ts";
@@ -88,6 +89,8 @@ export const app = {
 export const hooks = {
   renderAll: (): void => {},
   onEvents: (_events: EqEvent[], _live: boolean, _target?: World): void => {},
+  /** 警戒音を鳴らす (数秒以内に重なったら強い方だけ) */
+  playAlert: (_level: AlertLevel): void => {},
 };
 
 /** サーバの時刻 (接続前はブラウザの時刻) */
