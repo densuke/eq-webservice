@@ -36,8 +36,9 @@ impl H264 {
             .bitrate(BitRate::from_bps(bitrate_bps))
             .max_frame_rate(FrameRate::from_hz(max_fps.max(1) as f32))
             .complexity(Complexity::Low)
-            // 目標ビットレートを守るには、超えたコマを飛ばす必要がある (飛ばしたコマは何も出力されず、時刻はそのまま進む)
-            .skip_frames(true);
+            // コマは飛ばさない。飛ばすと地震の画面 (毎コマ大きく変わる) でほとんどのコマが消え、
+            // 強制したキーフレームまで飛ぶ。目標ビットレートは画質 (QP) の調整だけに使う
+            .skip_frames(false);
         let enc = Encoder::with_api_config(OpenH264API::from_source(), cfg).context("openh264 の初期化")?;
         Ok(Self {
             enc,
@@ -116,6 +117,39 @@ mod tests {
             .filter(|&t| e.encode(&img, t).unwrap().keyframe)
             .collect();
         assert_eq!(keys, [2000, 4000]);
+    }
+
+    /// 上半分が毎コマ違う画面 (地震の画面のように、1 コマが目標ビットレートよりずっと大きくなる)
+    fn busy(w: usize, h: usize, frame: usize) -> Vec<u8> {
+        let mut v = Vec::with_capacity(w * h * 3 / 2);
+        for y in 0..h {
+            for x in 0..w {
+                let base = 60 + (x + y) % 40;
+                v.push(if y < h / 2 {
+                    (x * 31 + y * 17 + frame * 13 + (x ^ y) * frame) % 251
+                } else {
+                    base
+                } as u8);
+            }
+        }
+        v.extend(vec![128u8; w * h / 2]);
+        v
+    }
+
+    #[test]
+    fn every_frame_is_output_even_when_the_screen_changes_a_lot() {
+        let (w, h) = (1280, 720);
+        let mut e = H264::new(w as u32, h as u32, 300_000, 10).unwrap();
+        let mut keys = Vec::new();
+        for i in 0..60u64 {
+            let pts = i * 100;
+            let out = e.encode(&busy(w, h, i as usize), pts).unwrap();
+            assert!(!out.annex_b.is_empty(), "コマ {i} が飛ばされた");
+            if out.keyframe {
+                keys.push(pts);
+            }
+        }
+        assert_eq!(keys, [0, 2000, 4000]);
     }
 
     #[test]

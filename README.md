@@ -257,7 +257,7 @@ RTMP / RTMPS で送ります (ffmpeg が要らず、メモリも減ります。�
 
 - `output` の最初の要素が送り先です。`rtmp://` か `rtmps://` (ストリームキーは `$VAR` で環境変数から)、または `.flv` のパス (確かめる用)。
   `output = ["rtmps://a.rtmps.youtube.com/live2/$YOUTUBE_LIVE_API_KEY"]` のように、ffmpeg の引数 (`-f flv`) は書きません
-- `builtin_bitrate` (bps、既定 300000): 映像の目標ビットレート。超えるコマは飛ばします (画質と引き換えに送信量を抑えます)
+- `builtin_bitrate` (bps、既定 300000): 映像の目標ビットレート。コマは飛ばさず、画面が大きく変わるときは画質を下げて目標に近づけます (超えることがあります)
 - キーフレームは 2 秒ごと (時刻で決めるので、可変 fps でも崩れません)
 - `mixer = true`・`audio`・`audio_command` (音のある配信) と `source = "chrome"` では使えません (起動時にエラー)。音があるときは ffmpeg を使ってください
 - 送り先が切れたらエラーで止まり、5 秒後につなぎ直します (ffmpeg のときと同じ)
