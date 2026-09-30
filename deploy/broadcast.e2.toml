@@ -28,10 +28,9 @@ encode = ["-threads", "1", "-c:v", "libx264", "-preset", "veryfast", "-tune", "z
 # 送り先 (ffmpeg の引数)。$VAR は環境変数に置き換え、ログでは伏せる
 output = ["-f", "flv", "rtmps://a.rtmps.youtube.com/live2/$YOUTUBE_LIVE_API_KEY"]
 
-# 直近 15 分の録画 (ring) と、地震のときの切り出し (archive)。使うときは、上の output をこれに置き換え、[record] を足す。
+# 直近 15 分の録画 (ring) と、地震のときの切り出し (archive)。使うときは、下の [record] のコメントを外す (output はそのまま)。
+# [record] があると、圧縮する ffmpeg の出力を eq-server が受け、送り出し用の ffmpeg (-c copy) と ring に分ける。上の output は送り出し用の引数になる。
 # ディスクの空きは少ないので (e2 は約 3.8GB)、keep と min_free_mb で抑える。詳しくは README の「配信の録画のリングバッファ」
-# output = ["-f", "tee",
-#   "[f=flv:onfail=abort]rtmps://a.rtmps.youtube.com/live2/$YOUTUBE_LIVE_API_KEY|[f=segment:segment_time=60:segment_wrap=20:reset_timestamps=1:onfail=ignore]ring/%02d.ts"]
 # [record]
 # ring_dir = "ring"
 # archive_dir = "archive"

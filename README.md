@@ -269,16 +269,18 @@ RTMP / RTMPS で送ります (ffmpeg が要らず、メモリも減ります。�
 
 #### 配信の録画のリングバッファと、地震のときの切り出し
 
-`output` に ffmpeg の `tee` を書くと、YouTube に送りながら、直近 15 分を 1 分ごとのファイルで持ち続けられます (圧縮し直さないので、CPU はほとんど増えません)。
-`[record]` を足すと、地震の画面に切り替わって `after_min` 分後に、`before_min` 分前からの分を 1 本 (`archive/YYYYMMDD-HHMMSS.ts`、UTC) にして残します
+`[record]` を足すと、直近 15 分ほどを 1 分ごとのファイル (`ring/00.ts` 〜 `19.ts`、20 個で回る) で持ち続け、
+地震の画面に切り替わって `after_min` 分後に、`before_min` 分前からの分を 1 本 (`archive/YYYYMMDD-HHMMSS.ts`、UTC) にして残します
 (仕様は [docs/quake-archive.md](docs/quake-archive.md) 3 章)。`source = "native"` かつ `encoder = "ffmpeg"` のときだけ働きます (それ以外では起動時に警告を出すだけ)。
 
+`[record]` があると、圧縮する ffmpeg の出力 (mpegts) を eq-server が受け、送り出し用の ffmpeg (`-c copy`。圧縮し直さない) と ring のファイルに分けます。
+このとき `output` は **送り出し用の ffmpeg の引数** になります (`[record]` が無いときと同じ `-f flv rtmps://...` のまま書けます。`tee` は書きません)。
+
 ```toml
-output = ["-f", "tee",
-  "[f=flv:onfail=abort]rtmps://a.rtmps.youtube.com/live2/$YOUTUBE_LIVE_API_KEY|[f=segment:segment_time=60:segment_wrap=15:reset_timestamps=1:onfail=ignore]ring/%02d.ts"]
+output = ["-f", "flv", "rtmps://a.rtmps.youtube.com/live2/$YOUTUBE_LIVE_API_KEY"]
 
 [record]
-ring_dir = "ring"        # tee の segment が書くディレクトリ (無ければ作る)
+ring_dir = "ring"        # ring のファイルを書くディレクトリ (無ければ作る)
 archive_dir = "archive"
 before_min = 5
 after_min = 10
@@ -287,10 +289,11 @@ min_free_mb = 500        # ディスクの空きがこれ未満なら切り出�
 min_scale = 0            # 切り出す地震の最大震度 (10 倍した整数。30 = 震度 3)。0 で全部。緊急地震速報の警報は震度にかかわらず切り出す
 ```
 
-- 録画 (segment) の側は `onfail=ignore` なので、ディスクが満杯でもディレクトリが消えても、YouTube への配信は止まりません。切り出しの失敗もログに出すだけです
-- `segment_time` は 60 のままにしてください (切り出しは、ファイルの更新時刻の前の 60 秒をそのファイルの中身とみなします)
-- 切り出しの間隔が長く、`before_min + after_min` が `segment_wrap` 分に近いときは、いちばん古い 1 本が上書きされて欠けることがあります。`segment_wrap` を大きめ (20 など) にしてください
+- ring への書き込みは別のタスクです。ディスクが満杯でもディレクトリが消えても、詰まったぶんは捨てるだけで、送り出しは止まりません (ディレクトリは次のファイルで作り直します)。切り出しの失敗もログに出すだけです
+- 送り出し用の ffmpeg が終わったら、今までと同じく 5 秒後に配信をやり直します。録画側の失敗では、やり直しません
+- ring のファイルは 1 分ごと (キーフレームの位置で切るので 1 分と数秒) で、20 個より古いものは上書きします。`before_min + after_min` は 18 分までにしてください
 - 切り出しは `nice -n 19 ffmpeg -f concat -c copy` で、配信の邪魔にならないようにしています
+- `-progress` は送り出し用の ffmpeg に付くので、`output` に書きます (今までどおり)
 
 #### e2 から常時配信する
 

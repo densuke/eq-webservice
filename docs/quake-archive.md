@@ -243,7 +243,7 @@ v0.18.3 を本番で使った利用者の要望。
 
 ### 3.2 作り
 
-- **リングバッファは ffmpeg に任せる**。eq-server の broadcast.toml の `output` に `tee` を書けば済むか、まず試す。
+- **リングバッファは ffmpeg に任せる** (2026-09-30 の配信の不具合で、3.6 章のとおり tee をやめ、eq-server が書く形にした)。eq-server の broadcast.toml の `output` に `tee` を書けば済むか、まず試す。
   ```
   output = ["-progress", "…/progress.txt", "-f", "tee", "-map", "0:v", "-map", "1:a",
     "[f=flv:onfail=abort]rtmps://…|[f=segment:segment_time=60:segment_wrap=15:reset_timestamps=1:onfail=ignore]/…/ring/%02d.ts"]

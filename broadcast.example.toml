@@ -57,7 +57,7 @@ output = ["-f", "flv", "rtmps://a.rtmps.youtube.com/live2/$YOUTUBE_LIVE_API_KEY"
 # 手元で確かめるだけならファイルに保存する
 # output = ["-t", "60", "-f", "mpegts", "broadcast-test.ts"]
 # 録画のリングバッファ (直近 15 分を 1 分ごとのファイルで) と、地震の画面のときの切り出し。README の「配信の録画のリングバッファ」
-# output = ["-f", "tee", "[f=flv:onfail=abort]rtmps://a.rtmps.youtube.com/live2/$YOUTUBE_LIVE_API_KEY|[f=segment:segment_time=60:segment_wrap=15:reset_timestamps=1:onfail=ignore]ring/%02d.ts"]
+# [record] があると、上の output は送り出し用の ffmpeg (-c copy) の引数になる (tee は書かない)
 # [record]   # source = "native"・encoder = "ffmpeg" のときだけ。省けば何もしない
 # ring_dir = "ring"
 # archive_dir = "archive"

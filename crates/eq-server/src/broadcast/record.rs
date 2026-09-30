@@ -1,5 +1,5 @@
 //! 地震の画面になったときの切り出し (`[record]`、docs/quake-archive.md 3 章)。
-//! リングバッファそのものは ffmpeg の tee (segment) が作る。ここはそれを読むだけで、
+//! リングバッファそのものは ring.rs が作る。ここはそれを読むだけで、
 //! 地震の画面に切り替わって `after_min` 分たったら、`before_min` 分前からの分を 1 本にまとめて archive_dir に置く。
 //! 失敗はログに出すだけで、配信は止めない。
 
@@ -10,13 +10,15 @@ use anyhow::Context;
 use serde::Deserialize;
 use tokio::sync::watch;
 
-/// tee の segment_time (秒)。1 つのファイルが、更新時刻の前のこの長さの分を持つとみなす
-const SEGMENT_SECS: u64 = 60;
+use super::ring::{RING_FILES, SEGMENT_SECS};
+
+/// before_min + after_min の上限 (分)。ring の 1 個ぶんは書きかけ、もう 1 個は切り出しの端のぶん
+pub const MAX_SPAN_MIN: u64 = RING_FILES as u64 - 2;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct RecordConfig {
-    /// tee の segment が書くディレクトリ (00.ts, 01.ts, ...)
+    /// ring のファイルを書くディレクトリ (00.ts, 01.ts, ...)
     pub ring_dir: String,
     /// 切り出した動画を置くディレクトリ
     pub archive_dir: String,
@@ -172,7 +174,7 @@ async fn free_mb(dir: &Path) -> Option<u64> {
 }
 
 /// ring の中のファイルと更新時刻
-fn list_ring(dir: &Path) -> anyhow::Result<Vec<(PathBuf, SystemTime)>> {
+pub(super) fn list_ring(dir: &Path) -> anyhow::Result<Vec<(PathBuf, SystemTime)>> {
     let mut files = Vec::new();
     for e in std::fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))? {
         let e = e?;
@@ -243,7 +245,6 @@ pub fn spawn(
     mut calm: watch::Receiver<bool>,
     mut shown: watch::Receiver<Shown>,
 ) -> anyhow::Result<()> {
-    // ring は ffmpeg の tee が書くが、ディレクトリは作らない (無いと片側が失敗するので、ここで作る)
     for d in [&cfg.ring_dir, &cfg.archive_dir] {
         std::fs::create_dir_all(d).with_context(|| format!("creating {d}"))?;
     }
