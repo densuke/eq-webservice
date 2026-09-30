@@ -1,0 +1,105 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { makePlan } from "./demo.ts";
+import { GroupStore } from "./groups.ts";
+import { HISTORY_LEAD_MS, gatherEvents, historyStart, sameQuakeEvents } from "./history.ts";
+import { groupPlace } from "./quakes.ts";
+import { app } from "./state.ts";
+import type { EewEvent, EqEvent, QuakeEvent } from "./types.ts";
+
+// 2026-09-30 14:00:37 JST の地震 (地震情報の発生時刻は分単位で 14:00)
+const at = (h: number, m: number, s: number) => Date.UTC(2026, 8, 30, h - 9, m, s);
+const jst = (h: number, m: number, s: number) => `2026/09/30 ${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+const hypo = (lat: number, lon: number) => ({ name: "x", latitude: lat, longitude: lon, depth_km: 10, magnitude: 4 });
+
+const eew = (id: string, serial: string, recv: number, origin = at(14, 0, 37), lat = 24.4, lon = 123): EewEvent =>
+  ({
+    id,
+    source: "wolfx",
+    received_at_ms: recv,
+    kind: "eew",
+    event_id: "E1",
+    serial,
+    cancelled: false,
+    test: false,
+    warning: false,
+    issued_at: jst(14, 0, 50),
+    origin_time: jst(14, 0, 37),
+    origin_time_ms: origin,
+    hypocenter: hypo(lat, lon),
+    areas: [],
+    pref_max: [],
+    max_scale: 30,
+  }) as EewEvent;
+const quake = (id: string, recv: number, minute = 0, lat = 24.4, lon = 123): QuakeEvent =>
+  ({
+    id,
+    source: "p2pquake",
+    received_at_ms: recv,
+    kind: "quake",
+    info_type: "scale_and_destination",
+    origin_time: jst(14, minute, 0),
+    origin_time_ms: at(14, minute, 0),
+    issued_at: jst(14, 5, 36),
+    hypocenter: hypo(lat, lon),
+    max_scale: 30,
+    domestic_tsunami: "None",
+    points: [],
+    pref_max: [],
+    comment: "",
+  }) as QuakeEvent;
+
+const mine = [eew("e2", "2", at(14, 0, 55)), eew("e1", "1", at(14, 0, 50)), quake("q1", at(14, 5, 36))];
+const other = [{ ...eew("far", "1", at(14, 0, 52), at(14, 0, 40), 35, 139), event_id: "E9" }, quake("later", at(14, 30, 0), 30)];
+const target = groupPlace(new GroupStore().add(mine[0])!);
+
+test("only events of the same earthquake are kept, in the order they arrived", () => {
+  const got = sameQuakeEvents([...other, ...mine, { id: "t", source: "x", received_at_ms: 1, kind: "tsunami" } as EqEvent], target);
+  assert.deepEqual(
+    got.map((e) => e.id),
+    ["e1", "e2", "q1"],
+  );
+});
+
+test("playback starts 10 seconds before the second-resolution origin of the eew, not the minute-resolution one of the quake", () => {
+  assert.equal(historyStart(mine), at(14, 0, 37) - HISTORY_LEAD_MS);
+  assert.equal(historyStart([quake("q", 0)]), at(14, 0, 0) - HISTORY_LEAD_MS);
+  assert.equal(historyStart([]), null);
+});
+
+test("the plan starts at that time, and each report arrives at its issued time", () => {
+  const start = historyStart(mine)!;
+  const p = makePlan(sameQuakeEvents(mine, target), 1, undefined, start);
+  assert.equal(p.toReal(0), start);
+  // 14:00:27 から 14:00:50 (第 1 報) までは実時間 (23 秒)
+  assert.equal(p.events[0].at, 23_000);
+  assert.equal(p.toReal(p.events[0].at), at(14, 0, 50));
+});
+
+const store = (events: EqEvent[]) => {
+  app.world = { store: new GroupStore(), tsunami: null, userquake: null };
+  events.forEach((e) => app.world.store.add(e));
+};
+
+test("the archive is used when it has the earthquake", async () => {
+  store([]);
+  let range: [number, number] | null = null;
+  const got = await gatherEvents(new GroupStore().add(mine[0])!, async (from, to) => ((range = [from, to]), [...other, ...mine]));
+  assert.deepEqual(
+    got.map((e) => e.id),
+    ["e1", "e2", "q1"],
+  );
+  assert.deepEqual(range, [at(14, 0, 37) - 60_000, at(14, 0, 37) + 15 * 60_000]);
+});
+
+test("the events the browser already holds are used when the archive is unavailable or does not have it", async () => {
+  store(mine);
+  const g = app.world.store.list()[0];
+  for (const fetchArchive of [async () => null, async () => [], async () => other, async () => Promise.reject(new Error("net"))]) {
+    const got = await gatherEvents(g, fetchArchive);
+    assert.deepEqual(
+      got.map((e) => e.id),
+      ["e1", "e2", "q1"],
+    );
+  }
+});

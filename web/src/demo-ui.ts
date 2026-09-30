@@ -1,8 +1,10 @@
 // デモモード: 場面の一覧と再生・操作 (ブラウザの中だけで再生し、実際の情報は裏で受け続ける)。
 
 import { type Scenario, type ScenarioSummary, makePlan } from "./demo.ts";
+import { historyStart } from "./history.ts";
 import { GroupStore } from "./groups.ts";
 import { esc } from "./html.ts";
+import type { EqEvent } from "./types.ts";
 import { $, map } from "./dom.ts";
 import { type DemoState, app, demoPos, hooks, liveWorld, now, type World } from "./state.ts";
 
@@ -27,7 +29,7 @@ export async function enterDemo(): Promise<void> {
   if (app.demo) return;
   const res = await fetch("demo/index.json");
   const scenarios: ScenarioSummary[] = res.ok ? await res.json() : [];
-  app.demo = { scenarios, running: null, plan: null, world: null, applied: 0, run: 0, clock: { pos: 0, anchor: performance.now(), speed: 1, paused: false } };
+  app.demo = { scenarios, running: null, plan: null, world: null, applied: 0, run: 0, history: false, clock: { pos: 0, anchor: performance.now(), speed: 1, paused: false } };
   showWorld({ store: new GroupStore(), tsunami: null, userquake: null });
   hooks.renderAll();
 }
@@ -54,6 +56,21 @@ export async function runScenario(id: string): Promise<void> {
   d.clock = { pos: 0, anchor: performance.now(), speed: d.clock.speed, paused: false };
   rebuild(d);
   hooks.renderAll();
+}
+
+/**
+ * 履歴の再生を始める: 過去の地震の報を、当時の時刻で ×1 から流す (最初の揺れの HISTORY_LEAD_MS 前から)。
+ * 始まりの時刻が分からなければ何もせず false を返す
+ */
+export function startHistory(events: EqEvent[]): boolean {
+  const start = historyStart(events);
+  if (start == null) return false;
+  const run = (app.demo?.run ?? 0) + 1;
+  const plan = makePlan(events, run, undefined, start);
+  app.demo = { scenarios: [], running: null, plan, world: null, applied: 0, run, history: true, clock: { pos: 0, anchor: performance.now(), speed: 1, paused: false } };
+  rebuild(app.demo);
+  hooks.renderAll();
+  return true;
 }
 
 /** 場面の世界をまっさらにする (最初から、または巻き戻したとき) */
@@ -99,6 +116,9 @@ export function renderDemoPanel(): void {
   panel.hidden = !app.demo;
   if (!app.demo) return;
   const d = app.demo;
+  $("#demo-head").hidden = d.history;
+  $("#history-head").hidden = !d.history;
+  $("#demo-list").hidden = d.history;
   const html = d.scenarios
     .map(
       (s) => `<li class="${s.id === d.running ? "running" : ""}"><div class="demo-text"><b>${esc(s.name)}</b><div class="muted">${esc(
@@ -118,8 +138,11 @@ export function renderDemoControls(): void {
   box.hidden = !d?.plan;
   if (!d?.plan) return;
   const max = lengthOf(d);
-  // 末尾まで来たら止める
-  if (!d.clock.paused && demoPos(d) >= max) setClock(d, { paused: true, pos: max });
+  // 末尾まで来たら、デモは止め、履歴の再生はライブに戻る (描き直しの最中に画面を組み替えないよう、あとで)
+  if (!d.clock.paused && demoPos(d) >= max) {
+    if (d.history) return void setTimeout(exitDemo, 0);
+    setClock(d, { paused: true, pos: max });
+  }
   const pos = Math.min(demoPos(d), max);
   const play = $<HTMLButtonElement>("#demo-play");
   const label = d.clock.paused ? "再生" : "一時停止";

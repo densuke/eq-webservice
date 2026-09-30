@@ -94,7 +94,7 @@ export function renderList(): void {
 
 /** 今の表示モード (リアルタイム / リプレイ中 / デモモード中) と「リアルタイムに戻る」ボタン */
 export function renderMode(): void {
-  const mode = app.demo ? "demo" : app.selectedKey ? "replay" : app.tourKey ? "tour" : "live";
+  const mode = app.demo ? (app.demo.history ? "replay" : "demo") : app.selectedKey ? "replay" : app.tourKey ? "tour" : "live";
   const el = $("#mode");
   if (el.dataset.mode !== mode) {
     el.dataset.mode = mode;
