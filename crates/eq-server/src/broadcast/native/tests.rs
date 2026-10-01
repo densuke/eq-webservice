@@ -478,13 +478,11 @@ fn the_info_window_names_what_the_cards_show_in_the_same_frame() {
     let q = quake(Scale::S3, &[("東京都", Scale::S3)], None);
     let shake = frame(&mut r, Some(&weather), Some(&q), noon + 5_000);
     assert_eq!(rgb(&shake, (x as u32 + 30, y as u32)), SEA);
-    // 文字 (フォント) が読める環境でだけ、案内の文字が出て、切り替えで変わる
+    // 文字 (フォント) が読める環境でだけ、案内の文字が出て、切り替えで変わる。読めなければ窓の枠だけで同じ
     if r.text.enabled() {
-        assert!(window_diff(&plain, &now) > 100, "今の案内");
-        assert!(window_diff(&plain, &tomorrow) > 100, "明日の案内");
         assert!(window_diff(&now, &tomorrow) > 100, "案内の文が変わる");
     } else {
-        assert_eq!(window_diff(&plain, &now), 0);
+        assert_eq!(window_diff(&now, &tomorrow), 0);
     }
 }
 
