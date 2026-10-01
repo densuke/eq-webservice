@@ -7,7 +7,7 @@ use tiny_skia::{Path, Pixmap};
 
 use super::banner;
 use super::calm;
-use super::camera::{Fit, MapBox};
+use super::camera::Fit;
 use super::data::{CityWeather, Warnings};
 use super::eew::{forecast_tag, EewSummary, Wave};
 use super::frame::{Clip, Frame, OKINAWA};
@@ -17,6 +17,7 @@ use super::icon::Icons;
 use super::model::{scale_color, scale_text_color, QuakeSummary};
 use super::paint::{epicenter, ghost_epicenter, rect, rrect, LAND, LAND_EDGE, MUTED, NEIGHBOR, NEIGHBOR_EDGE, SEA};
 use super::panel;
+use super::shaken::{Stations, Zones};
 use super::test_mark;
 use super::text::Text;
 use crate::quake::{Hypocenter, Scale};
@@ -67,7 +68,7 @@ pub struct Renderer {
     zoomed: Option<Frame>,
     /// 寄りの設定が有効なとき: 地図の枠の型と、地震情報細分区域の外接矩形 (名前 -> 地図の座標)
     clip: Option<Clip>,
-    zones: HashMap<String, MapBox>,
+    zones: Zones,
     /// 周辺国の陸地 (都道府県より下に描く。無ければ空)
     neighbors: Vec<Shape>,
     prefs: Vec<Shape>,
@@ -86,7 +87,7 @@ impl Renderer {
             main: Frame::main(view),
             zoomed: None,
             clip: None,
-            zones: HashMap::new(),
+            zones: Zones::default(),
             neighbors,
             prefs,
             areas: areas.into_iter().map(|s| (s.key.clone(), s)).collect(),
@@ -97,25 +98,18 @@ impl Renderer {
     }
 
     /// 寄りを有効にする。zones は地震情報細分区域 (寄りの範囲の計算にだけ使い、塗りは描かない)
-    pub fn enable_zoom(&mut self, zones: Vec<Shape>) {
+    pub fn enable_zoom(&mut self, areas: Vec<Shape>, stations: Stations) {
         self.clip = Frame::map_clip();
-        self.zones = zones.into_iter().map(|s| (s.key, s.bounds)).collect();
+        self.zones = Zones::new(areas, &self.prefs, stations);
     }
 
     pub fn zoom_enabled(&self) -> bool {
         self.clip.is_some()
     }
 
-    /// 揺れた範囲の外接矩形。細分区域の和 (区域が読めていない・名前が引けないときは県の本土の和)
-    pub fn shaken_box(&self, areas: &[&str], prefs: &[&str]) -> Option<MapBox> {
-        let union = |boxes: &mut dyn Iterator<Item = MapBox>| boxes.fold(None, |a, b| MapBox::union(a, Some(b)));
-        union(&mut areas.iter().filter_map(|n| self.zones.get(*n).copied())).or_else(|| {
-            union(
-                &mut prefs
-                    .iter()
-                    .filter_map(|p| self.prefs.iter().find(|s| s.key == *p).map(|s| s.main)),
-            )
-        })
+    /// 寄りの範囲を求める表 (細分区域・観測点・県)
+    pub fn zones(&self) -> &Zones {
+        &self.zones
     }
 
     /// 次に描く地図の表示範囲 (地図の座標)。None なら日本全体 (別枠も出す)。寄りが有効でなければ何もしない

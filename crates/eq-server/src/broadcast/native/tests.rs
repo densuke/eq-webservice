@@ -60,6 +60,7 @@ fn quake(max: Scale, prefs: &[(&str, Scale)], at: Option<(f64, f64)>) -> QuakeSu
         max_scale: max,
         tsunami: "None".into(),
         pref_scales: prefs.iter().map(|(p, s)| (p.to_string(), *s)).collect(),
+        points: Vec::new(),
     }
 }
 

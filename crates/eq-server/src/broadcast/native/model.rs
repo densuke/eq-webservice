@@ -3,6 +3,7 @@
 
 use std::collections::BTreeMap;
 
+use super::shaken::Point;
 use crate::quake::{jst, Event, EventBody, Hypocenter, Quake, Scale};
 
 /// 同じ地震とみなす発生時刻の差と震央の距離
@@ -64,6 +65,8 @@ pub struct QuakeSummary {
     pub tsunami: String,
     /// 都道府県ごとの最大震度
     pub pref_scales: Vec<(String, Scale)>,
+    /// 観測点 (寄りの範囲に使う。観測点のある最新の報のもの)
+    pub points: Vec<Point>,
 }
 
 fn place_of(q: &Quake) -> Place {
@@ -127,6 +130,21 @@ fn summarize(g: &[(u64, &Quake)]) -> QuakeSummary {
         max_scale: g.iter().map(|(_, q)| q.max_scale).max().unwrap_or(Scale::UNKNOWN),
         tsunami: latest.domestic_tsunami.clone(),
         pref_scales: pref_scales(g),
+        points: g
+            .iter()
+            .rev()
+            .find(|(_, q)| !q.points.is_empty())
+            .map(|(_, q)| {
+                q.points
+                    .iter()
+                    .map(|p| Point {
+                        addr: p.addr.clone(),
+                        is_area: p.is_area,
+                        station: p.station.as_ref().map(|s| (s.lat, s.lon, s.area.clone())),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
     }
 }
 

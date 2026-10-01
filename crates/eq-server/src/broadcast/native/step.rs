@@ -8,6 +8,7 @@ use super::data::{CityWeather, Warnings};
 use super::draw::{self, Renderer, Scene};
 use super::hindsight::{self, Hindsight};
 use super::icon::Icons;
+use super::shaken::Point;
 use super::{eew, model, yuv, HISTORY};
 use crate::broadcast::record::Shown;
 use crate::quake::{Event, Hypocenter};
@@ -85,8 +86,8 @@ type ViewKey = Option<(u64, u64, u64)>;
 type StillKey = (u64, Option<(u64, i32)>, Option<u64>, u64, bool, ViewKey);
 
 /// 地震の画面の地震から、寄りの目標の材料を作る。平時は None (日本全体)
-fn aim_of(renderer: &Renderer, current: Option<eew::Current>) -> Option<Aim> {
-    let make = |h: Option<&Hypocenter>, origin_ms, areas: &[&str], prefs: &[&str], forecast| Aim {
+fn aim_of(renderer: &Renderer, current: Option<eew::Current>, hindsight: Option<&Hindsight>) -> Option<Aim> {
+    let make = |h: Option<&Hypocenter>, origin_ms, areas: &[&str], points: &[Point], prefs: &[&str], forecast| Aim {
         epicenter: h.and_then(|h| {
             Some(Epicenter {
                 lat: h.latitude?,
@@ -95,18 +96,31 @@ fn aim_of(renderer: &Renderer, current: Option<eew::Current>) -> Option<Aim> {
                 origin_ms,
             })
         }),
-        shaken: renderer.shaken_box(areas, prefs),
+        shaken: renderer.zones().shaken(areas, points, prefs),
         forecast,
     };
-    match current? {
+    let Some(current) = current else {
+        // 本物の震源が届くまでは、のちに分かった震源へ寄る (波は追わず、震央の周りを映す)
+        return hindsight.map(|h| Aim {
+            epicenter: Some(Epicenter {
+                lat: h.lat,
+                lon: h.lon,
+                depth_km: h.depth_km,
+                origin_ms: None,
+            }),
+            shaken: None,
+            forecast: false,
+        });
+    };
+    match current {
         eew::Current::Quake(q) => {
             let prefs: Vec<&str> = q.pref_scales.iter().map(|(p, _)| p.as_str()).collect();
-            Some(make(q.hypocenter.as_ref(), q.origin_ms, &[], &prefs, false))
+            Some(make(q.hypocenter.as_ref(), q.origin_ms, &[], &q.points, &prefs, false))
         }
         eew::Current::Eew(e) => {
             let areas: Vec<&str> = e.area_scales.iter().map(|(a, _)| a.as_str()).collect();
             let prefs: Vec<&str> = e.pref_scales.iter().map(|(p, _)| p.as_str()).collect();
-            Some(make(e.hypocenter.as_ref(), e.origin_ms, &areas, &prefs, true))
+            Some(make(e.hypocenter.as_ref(), e.origin_ms, &areas, &[], &prefs, true))
         }
     }
 }
@@ -136,12 +150,23 @@ impl Stepper {
         super::camera::home_fit().w / self.camera.fit().w
     }
 
+    #[cfg(test)]
+    pub fn zoom_fit(&self) -> super::camera::Fit {
+        self.camera.fit()
+    }
+
     /// コマの時刻 now で寄りを進め、描く面に渡す。寄っているときの表示範囲の判定を返す
-    fn aim_camera(&mut self, current: Option<eew::Current>, now: u64, snap: bool) -> ViewKey {
+    fn aim_camera(
+        &mut self,
+        current: Option<eew::Current>,
+        hindsight: Option<&Hindsight>,
+        now: u64,
+        snap: bool,
+    ) -> ViewKey {
         if !self.renderer.zoom_enabled() {
             return None;
         }
-        let target = aim_of(&self.renderer, current)
+        let target = aim_of(&self.renderer, current, hindsight)
             .and_then(|a| target_box(&a, now))
             .map(|b| fit_box(b, map_aspect()));
         self.camera.advance(target, now, snap);
@@ -161,7 +186,8 @@ impl Stepper {
             Some(eew::Current::Eew(e)) => (None, Some(e)),
             None => (None, None),
         };
-        let view = self.aim_camera(current, now, i.fast_forward);
+        let pending = hindsight::pending(i.hindsight, &groups, &eews);
+        let view = self.aim_camera(current, pending, now, i.fast_forward);
         // 地震波は地震の画面のときだけ描く (のちに分かった震源の波は、平時の画面でも描く)
         let waves = frame_waves(&groups, &eews, current.is_some(), i.hindsight, now);
         // 地震波以外を描き直すのは、データが変わったとき・平時と地震が切り替わったとき・秒が進んだときだけ。
@@ -193,7 +219,7 @@ impl Stepper {
                 bgm_title: i.bgm_title,
                 label: i.label,
                 test: i.test,
-                hindsight: hindsight::pending(i.hindsight, &groups, &eews),
+                hindsight: pending,
                 fast_forward: i.fast_forward,
             };
             self.still = Some((still_key, self.renderer.render(&scene)));

@@ -202,6 +202,79 @@ fn the_insets_are_not_drawn_while_zoomed_and_come_back_at_home() {
     assert_eq!(line(&r.render(&scene)), draw::INSET_LINE);
 }
 
+/// 2026-10-02 04:05 トカラ列島近海: 十島村だけが震度 3 (震度速報は区域で届く)。県の本土 (九州) を映さない
+#[test]
+fn an_observed_quake_zooms_on_the_shaken_area_not_on_the_prefecture_mainland() {
+    use crate::quake::{ObservationPoint, Quake, QuakeInfoType};
+    let ev = vec![Event {
+        id: "q".into(),
+        source: "test".into(),
+        received_at_ms: (T0 + 60_000) as u64,
+        body: EventBody::Quake(Quake {
+            info_type: QuakeInfoType::ScalePrompt,
+            origin_time: "2026/10/02 04:05:00".into(),
+            origin_time_ms: Some(T0),
+            issued_at: "2026/10/02 04:06:00".into(),
+            hypocenter: Some(Hypocenter {
+                name: "トカラ列島近海".into(),
+                latitude: Some(29.5),
+                longitude: Some(129.6),
+                depth_km: Some(10),
+                magnitude: Some(4.0),
+            }),
+            max_scale: Scale::S3,
+            domestic_tsunami: "None".into(),
+            points: vec![ObservationPoint {
+                pref: "鹿児島県".into(),
+                addr: "鹿児島県十島村".into(),
+                is_area: true,
+                scale: Scale::S3,
+                station: None,
+            }],
+            pref_max: vec![PrefScale {
+                pref: "鹿児島県".into(),
+                scale: Scale::S3,
+            }],
+            comment: String::new(),
+        }),
+    }];
+    let mut st = Stepper::new(load_renderer(&config(true)).unwrap());
+    run(&mut st, &ev, (T0 + 200_000) as u64, 20); // 波が終わって落ち着いた範囲
+    let f = st.zoom_fit();
+    let (x, y) = geo::project(130.55, 31.6); // 鹿児島市
+    assert!(st.zoom_ratio() > 4.0);
+    assert!(
+        !(f.x..=f.x + f.w).contains(&x) || !(f.y..=f.y + f.h).contains(&y),
+        "{f:?}"
+    );
+    let (tx, ty) = geo::project(129.6, 29.5);
+    assert!((f.x..=f.x + f.w).contains(&tx) && (f.y..=f.y + f.h).contains(&ty));
+}
+
+/// 再現動画: 本物の震源が届くまでは、のちに分かった震源 (薄い印) へ寄る
+#[test]
+fn the_pending_hindsight_epicenter_is_zoomed_to_until_the_real_one_arrives() {
+    let h = Hindsight {
+        lat: 35.7,
+        lon: 140.8,
+        depth_km: 40.0,
+        origin_ms: T0,
+    };
+    let icons = Icons::new();
+    let mut st = Stepper::new(load_renderer(&config(true)).unwrap());
+    for k in 0..20 {
+        let i = Input {
+            hindsight: Some(&h),
+            ..input(&[], (T0 + 5_000) as u64 + k * 200, &icons)
+        };
+        st.step(&i);
+    }
+    assert!(st.zoom_ratio() > 4.0, "{}", st.zoom_ratio());
+    // 報も震源も無く、のちに分かった震源も無くなれば日本全体へ戻る
+    run(&mut st, &[], (T0 + 600_000) as u64, 2);
+    assert_eq!(st.zoom_ratio(), 1.0);
+}
+
 /// 寄る・寄らないで 1 コマを描く時間 (リリースビルドで。e2 の配信に寄りを使えるかの見積もり)。
 /// 波が広がって表示範囲が毎コマ動く間 (発生の 20 秒後から 8 秒。S 波が揺れた範囲の端へ届くまで) と、落ち着いた後 (60 秒後から 8 秒) を測る。
 /// フォントは EQ_NATIVE_FONT (無ければ文字は描かない)。
@@ -259,7 +332,9 @@ fn write_zoomed_png_when_asked() {
             depth_km: 40.0,
             origin_ms: Some(T0),
         }),
-        shaken: r.shaken_box(&["千葉県北東部", "茨城県南部"], &["千葉県", "茨城県"]),
+        shaken: r
+            .zones()
+            .shaken(&["千葉県北東部", "茨城県南部"], &[], &["千葉県", "茨城県"]),
         forecast: true,
     };
     r.set_view(camera::target_box(&aim, SHOWN_AT).map(|b| camera::fit_box(b, camera::map_aspect())));

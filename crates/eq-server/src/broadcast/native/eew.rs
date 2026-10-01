@@ -303,6 +303,7 @@ mod tests {
             max_scale: scale,
             tsunami: "None".into(),
             pref_scales: vec![],
+            points: vec![],
         }
     }
 

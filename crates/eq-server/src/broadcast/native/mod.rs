@@ -17,6 +17,7 @@ mod icon;
 mod model;
 mod paint;
 mod panel;
+mod shaken;
 mod step;
 mod telops;
 mod test_mark;
@@ -196,7 +197,12 @@ pub(super) fn load_renderer(cfg: &BroadcastConfig) -> anyhow::Result<Renderer> {
             tracing::warn!("broadcast: 地震情報細分区域を読めないので、県の範囲で寄ります: {e:#}");
             Vec::new()
         });
-        renderer.enable_zoom(zones);
+        // 観測点の表は、各地の震度の観測点から区域を引くのに使う。読めなければ区域で届いた分だけで寄る
+        let stations = shaken::load_stations(&dir.join("stations.json")).unwrap_or_else(|e| {
+            tracing::warn!("broadcast: 観測点の表を読めないので、観測点では寄りません: {e:#}");
+            Default::default()
+        });
+        renderer.enable_zoom(zones, stations);
     }
     Ok(renderer)
 }
