@@ -48,6 +48,10 @@ async fn main() -> anyhow::Result<()> {
     if args.first().map(String::as_str) == Some("broadcast") {
         return broadcast::run(&args[1..]).await;
     }
+    // eq-server replay-video --from <ms> --to <ms> --out x.mp4 ...: 記録から音入りの動画を描き直す
+    if args.first().map(String::as_str) == Some("replay-video") {
+        return broadcast::replay_video(&args[1..]).await;
+    }
     let cli = Cli::parse(args)?.with_env(|k| std::env::var(k).ok())?;
     if cli.help {
         println!("{USAGE}");

@@ -12,7 +12,10 @@ mod ffmpeg;
 mod mixer;
 mod native;
 mod record;
+mod replay;
 mod ring;
+
+pub use replay::run as replay_video;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

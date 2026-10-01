@@ -8,15 +8,15 @@ use crate::broadcast::record::Shown;
 use super::model::{current_quake, same_quake, Place, QuakeSummary};
 
 /// 緊急地震速報を表示し続ける時間 (web の EEW_BANNER_MS)
-const EEW_ACTIVE_MS: u64 = 3 * 60_000;
+pub const EEW_ACTIVE_MS: u64 = 3 * 60_000;
 /// 地震情報が届いた緊急地震速報を、その地震情報に任せるかを見る範囲 (web の FULL_MS)
 const RECENT_MS: u64 = 10 * 60_000;
 /// 発生からこの時間を過ぎた地震波は描かない (web の WAVE_MAX_SEC)
-const WAVE_MAX_MS: i64 = 180_000;
-const VP_KM_S: f64 = 6.5;
-const VS_KM_S: f64 = 3.75;
+pub const WAVE_MAX_MS: i64 = 180_000;
+pub const VP_KM_S: f64 = 6.5;
+pub const VS_KM_S: f64 = 3.75;
 /// 深さが分からないときの深さ (web の geoOf)
-const DEFAULT_DEPTH_KM: f64 = 10.0;
+pub const DEFAULT_DEPTH_KM: f64 = 10.0;
 
 /// 同じ地震 (event_id) の最新の報
 #[derive(Debug, Clone, PartialEq)]
@@ -69,7 +69,7 @@ pub fn latest_eews(events: &[Event]) -> Vec<EewSummary> {
         .collect()
 }
 
-fn eew_place(e: &EewSummary) -> Place {
+pub fn eew_place(e: &EewSummary) -> Place {
     let h = e.hypocenter.as_ref();
     Place {
         origin_ms: e.origin_ms,
@@ -78,7 +78,7 @@ fn eew_place(e: &EewSummary) -> Place {
     }
 }
 
-fn quake_place(q: &QuakeSummary) -> Place {
+pub fn quake_place(q: &QuakeSummary) -> Place {
     let h = q.hypocenter.as_ref();
     Place {
         origin_ms: q.origin_ms,

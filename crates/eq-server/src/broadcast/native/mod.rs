@@ -10,6 +10,7 @@ mod draw;
 mod eew;
 mod frame;
 mod geo;
+mod hindsight;
 mod icon;
 mod model;
 mod paint;
@@ -35,8 +36,13 @@ use super::BroadcastConfig;
 use crate::quake::Event;
 use data::{CityWeather, ServerMessage, Warnings};
 use draw::Renderer;
-use icon::Icons;
-use step::{Input, Output, Stepper};
+
+// 記録から描き直す動画 (broadcast/replay) が使う
+pub(super) use eew::{eew_place, latest_eews, quake_place, EEW_ACTIVE_MS};
+pub(super) use hindsight::{hindsight_of, Hindsight};
+pub(super) use icon::Icons;
+pub(super) use model::{event_place, group_quakes, same_quake};
+pub(super) use step::{look, Input, Output, Stepper};
 
 const RECONNECT_AFTER: Duration = Duration::from_secs(5);
 /// 警報・天気を取り直す間隔 (取れなかったときは短く)
@@ -167,7 +173,7 @@ pub fn start(cfg: &BroadcastConfig, notices: Option<UnboundedSender<String>>) ->
     })
 }
 
-fn load_renderer(cfg: &BroadcastConfig) -> anyhow::Result<Renderer> {
+pub(super) fn load_renderer(cfg: &BroadcastConfig) -> anyhow::Result<Renderer> {
     let view = geo::View::fit_home(draw::MAP_RECT);
     let dir = std::path::Path::new(&cfg.map_dir);
     // 周辺国の陸地は背景なので、無くても続ける
@@ -224,6 +230,8 @@ async fn render_loop(renderer: Renderer, st: Shared, out: Out, notices: Option<U
                 test: out.test,
                 check_ms: out.check_ms,
                 flip_s: out.flip_s,
+                hindsight: None,
+                fast_forward: false,
             })
         };
         let Some(Output { i420, calm, shown }) = o else {

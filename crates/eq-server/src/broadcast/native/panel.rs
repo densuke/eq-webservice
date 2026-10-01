@@ -96,7 +96,7 @@ pub fn draw_dynamic(pm: &mut Pixmap, text: &mut Text, scene: &Scene) {
         (q, _) => draw_detail(pm, text, q.or(scene.history.first()), q.is_some()),
     }
     draw_history(pm, text, scene.history);
-    draw_clock(pm, text, scene.now_ms, scene.connected);
+    draw_clock(pm, text, scene.now_ms, scene.connected, scene.fast_forward);
 }
 
 fn draw_warn_legend(pm: &mut Pixmap, text: &mut Text) {
@@ -233,7 +233,7 @@ pub fn weekday(days: i64) -> &'static str {
 }
 
 /// 地図の右下の時計。枠の色は接続の状態 (緑 = つながっている / 赤 = 切れている)
-fn draw_clock(pm: &mut Pixmap, text: &mut Text, now_ms: u64, connected: bool) {
+fn draw_clock(pm: &mut Pixmap, text: &mut Text, now_ms: u64, connected: bool, fast_forward: bool) {
     let (w, h) = (176.0, 74.0);
     let (x, y) = (MAP_W - 10.0 - w, H as f32 - 10.0 - h);
     let (border, fill) = if connected {
@@ -254,6 +254,9 @@ fn draw_clock(pm: &mut Pixmap, text: &mut Text, now_ms: u64, connected: bool) {
         13.0,
         MUTED,
     );
+    if fast_forward {
+        text.draw_right(pm, "早送り", x + w - 12.0, y + 22.0, 13.0, [0xff, 0xb3, 0x00]);
+    }
     let (hm, sec) = (time.get(..5).unwrap_or(""), time.get(6..).unwrap_or(""));
     let wd = text.draw(pm, hm, x + 12.0, y + 60.0, 34.0, TEXT);
     text.draw(pm, sec, x + 16.0 + wd, y + 60.0, 18.0, MUTED);

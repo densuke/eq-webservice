@@ -107,6 +107,8 @@ fn scene<'a>(
         bgm_title: "テスト曲",
         label: "",
         test: false,
+        hindsight: None,
+        fast_forward: false,
     }
 }
 
@@ -664,4 +666,137 @@ fn the_warning_banner_sits_below_the_test_band() {
     let pm = r.render(&sc);
     assert_eq!(rgb(&pm, (640, 38)), super::test_mark::BAND);
     assert_eq!(rgb(&pm, (640, 36 + 20 + 14)), [0xb3, 0x26, 0x1e]);
+}
+
+fn hindsight_at(lat: f64, lon: f64) -> Hindsight {
+    Hindsight {
+        lat,
+        lon,
+        depth_km: 10.0,
+        origin_ms: NOW as i64,
+    }
+}
+
+#[test]
+fn a_hindsight_epicenter_is_a_faint_cross_that_is_drawn_only_when_given() {
+    let mut r = renderer(Text::none());
+    let h = hindsight_at(36.0, 138.0);
+    let plain = r.render(&scene(None, &[], None, None));
+    let ghost = r.render(&Scene {
+        hindsight: Some(&h),
+        ..scene(None, &[], None, None)
+    });
+    let (x, y) = View::fit_home(MAP_RECT).px(138.0, 36.0);
+    let at = (x as u32, y as u32);
+    assert_ne!(rgb(&ghost, at), rgb(&plain, at));
+    // 本物の ✕ (中心は赤) ほど濃くない
+    let solid = {
+        let e = eew(false, &[], Some((36.0, 138.0)));
+        let mut sc = scene(None, &[], None, None);
+        sc.eew = Some(&e);
+        rgb(&r.render(&sc), at)
+    };
+    assert_eq!(solid, [0xe0, 0x1e, 0x1e]);
+    assert_ne!(rgb(&ghost, at), solid);
+    // 離れたところは変わらない
+    assert_eq!(rgb(&ghost, sea_px()), rgb(&plain, sea_px()));
+}
+
+#[test]
+fn the_clock_shows_fast_forward_only_when_asked() {
+    let mut r = renderer(Text::none());
+    let a = r.render(&scene(None, &[], None, None));
+    let b = r.render(&Scene {
+        fast_forward: true,
+        ..scene(None, &[], None, None)
+    });
+    // 文字を描かない設定では、見た目は同じ (落ちないことと、既定の false が画面を変えないことの確認)
+    assert_eq!(a.data(), b.data());
+}
+
+fn eew_event(origin_ms: u64, at: (f64, f64)) -> Event {
+    use crate::quake::{Eew, EventBody};
+    Event {
+        id: "e1".into(),
+        source: "wolfx".into(),
+        received_at_ms: origin_ms + 5_000,
+        body: EventBody::Eew(Eew {
+            event_id: "E".into(),
+            serial: "1".into(),
+            cancelled: false,
+            test: false,
+            warning: false,
+            issued_at: String::new(),
+            origin_time: None,
+            origin_time_ms: Some(origin_ms as i64),
+            hypocenter: Some(Hypocenter {
+                name: "x".into(),
+                latitude: Some(at.0),
+                longitude: Some(at.1),
+                depth_km: Some(10),
+                magnitude: Some(5.0),
+            }),
+            areas: vec![],
+            pref_max: vec![],
+            max_scale: Scale::S3,
+        }),
+    }
+}
+
+fn input<'a>(events: &'a [Event], now: u64, h: Option<&'a Hindsight>) -> Input<'a> {
+    Input {
+        events,
+        now,
+        rev: events.len() as u64,
+        warnings: None,
+        weather: None,
+        icons: &NO_ICONS,
+        bgm_title: "",
+        connected: true,
+        label: "記録から再現",
+        test: false,
+        check_ms: 200,
+        flip_s: 0,
+        hindsight: h,
+        fast_forward: false,
+    }
+}
+
+#[test]
+fn a_pending_hindsight_draws_waves_in_the_calm_screen_until_a_located_report_arrives() {
+    let h = hindsight_at(36.0, 138.0);
+    let t = NOW + 10_000;
+    // 報がまだ無い: 平時の画面のまま、波は出る。ライブ (hindsight なし) は出ない
+    let look_h = look(&[], t, Some(&h));
+    assert!(look_h.calm && look_h.waving);
+    assert!(!look(&[], t, None).waving);
+    // 発生前・180 秒を過ぎたあとは出ない
+    assert!(!look(&[], NOW - 1, Some(&h)).waving);
+    assert!(!look(&[], NOW + 181_000, Some(&h)).waving);
+    // 震源の付いた緊急地震速報が届いたら、のちに判明する震源は退き、波はその報から描く (二重にならない)
+    let events = [eew_event(NOW, (36.0, 138.0))];
+    let waves_ms = t + 1_000;
+    assert!(super::eew::waves(&group_quakes(&events), &latest_eews(&events), waves_ms).len() == 1);
+    let l = look(&events, waves_ms, Some(&h));
+    assert!(!l.calm && l.waving);
+    assert!(hindsight::pending(Some(&h), &group_quakes(&events), &latest_eews(&events)).is_none());
+}
+
+#[test]
+fn the_stepper_skips_an_unchanged_frame_and_redraws_when_the_wave_moves() {
+    let mut s = Stepper::new(renderer(Text::none()));
+    let h = hindsight_at(36.0, 138.0);
+    let t = NOW + 10_000;
+    let first = s.step(&input(&[], t, Some(&h))).unwrap();
+    assert!(first.calm);
+    assert_eq!(first.i420.len(), 1280 * 720 * 3 / 2);
+    // 同じ入力なら描き直さない
+    assert!(s.step(&input(&[], t, Some(&h))).is_none());
+    // 波が動けば (check_ms 進めば) 描き直す。波が無ければ同じ秒の間は描き直さない
+    let moved = s.step(&input(&[], t + 200, Some(&h))).unwrap();
+    assert_ne!(first.i420, moved.i420);
+    let mut plain = Stepper::new(renderer(Text::none()));
+    assert!(plain.step(&input(&[], t, None)).is_some());
+    assert!(plain.step(&input(&[], t + 200, None)).is_none());
+    assert!(plain.step(&input(&[], t + 1_000, None)).is_some());
 }

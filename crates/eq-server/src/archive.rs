@@ -18,7 +18,7 @@ use tokio::sync::Semaphore;
 /// 範囲の上限 (ミリ秒)
 const MAX_RANGE_MS: u64 = 3_600_000;
 /// 返す件数の上限
-const MAX_EVENTS: usize = 500;
+pub const MAX_EVENTS: usize = 500;
 /// 同時に読む数。毎回全部読むので、大量に開かれても e2 (メモリ 1GB) を圧迫しないように
 const MAX_READERS: usize = 2;
 
@@ -69,7 +69,7 @@ async fn handler(State(a): State<Archive>, Query(r): Query<Range>) -> Response {
 
 /// jsonl を 1 行ずつ読み、範囲に入る情報を時刻順に返す (最大 MAX_EVENTS 件)。壊れた行は飛ばす。
 /// ponytail: 毎回ファイルを頭から全部読む。数十 MB を超えたら、索引や日付ごとのファイルを考える
-async fn read_range(path: &Path, from: u64, to: u64) -> anyhow::Result<Vec<Event>> {
+pub async fn read_range(path: &Path, from: u64, to: u64) -> anyhow::Result<Vec<Event>> {
     let file = match tokio::fs::File::open(path).await {
         Ok(f) => f,
         // まだ 1 件も書かれていない

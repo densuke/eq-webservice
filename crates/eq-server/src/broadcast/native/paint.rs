@@ -73,9 +73,18 @@ pub fn line(pm: &mut Pixmap, from: (f32, f32), to: (f32, f32), w: f32, c: [u8; 3
 
 /// 白い縁取り付きの × (震央)
 pub fn epicenter(pm: &mut Pixmap, x: f32, y: f32) {
+    cross(pm, x, y, 1.0);
+}
+
+/// のちに分かった震源の薄い印 (半透明)
+pub fn ghost_epicenter(pm: &mut Pixmap, x: f32, y: f32) {
+    cross(pm, x, y, 0.4);
+}
+
+fn cross(pm: &mut Pixmap, x: f32, y: f32, a: f32) {
     let d = 9.0;
     for (w, c) in [(7.0, [255, 255, 255]), (3.5, [0xe0, 0x1e, 0x1e])] {
-        line(pm, (x - d, y - d), (x + d, y + d), w, c, 1.0);
-        line(pm, (x - d, y + d), (x + d, y - d), w, c, 1.0);
+        line(pm, (x - d, y - d), (x + d, y + d), w, c, a);
+        line(pm, (x - d, y + d), (x + d, y - d), w, c, a);
     }
 }
