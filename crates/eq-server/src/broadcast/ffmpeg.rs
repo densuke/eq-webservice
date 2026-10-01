@@ -72,6 +72,35 @@ async fn pump(
     }
 }
 
+/// 送り出し用の ffmpeg の引数。圧縮し直さず (`-c copy`)、読み取りを短くして始まりを早める。
+/// `-dts_delta_threshold 3600`: 圧縮する側は映像の時刻を壁時計で付けるので、送り出しが詰まる (YouTube への通信が
+/// 一瞬止まる) と、映像の時刻に 10 秒を超える跳びができる。mpegts を読む ffmpeg は、それを「時刻の途切れ」とみなして
+/// 全部の時刻を付け直し (timestamp discontinuity)、音と映像の時刻が乱れて受け口が不健全になる。
+/// 途切れとみなす跳びを 1 時間にして、詰まりの跳びはそのまま通す (直送の flv と同じ)。
+/// `-copyts` にしないのは、mpegts の時刻が 26.5 時間で一周するとき、途切れの補正まで止まって flv の時刻が壊れるため
+/// (1 時間の閾値なら一周の跳びは今までどおり直る。docs/quake-archive.md 3.8 章)
+fn sender_args(output: &[String]) -> Vec<String> {
+    let mut args: Vec<String> = [
+        "-hide_banner",
+        "-loglevel",
+        "warning",
+        "-analyzeduration",
+        "3000000",
+        "-dts_delta_threshold",
+        "3600",
+        "-f",
+        "mpegts",
+        "-i",
+        "pipe:0",
+        "-c",
+        "copy",
+    ]
+    .map(String::from)
+    .to_vec();
+    args.extend(output.iter().cloned());
+    args
+}
+
 impl FfmpegEncoder {
     pub fn start(
         cfg: &BroadcastConfig,
@@ -106,23 +135,7 @@ impl FfmpegEncoder {
         )?;
         let stdin = main.child.stdin.take().context("ffmpeg stdin")?;
         let from = main.child.stdout.take().context("ffmpeg stdout")?;
-        // 圧縮し直さない。読み取りを短くして、送り出しの始まりを早める
-        let mut args: Vec<String> = [
-            "-hide_banner",
-            "-loglevel",
-            "warning",
-            "-analyzeduration",
-            "3000000",
-            "-f",
-            "mpegts",
-            "-i",
-            "pipe:0",
-            "-c",
-            "copy",
-        ]
-        .map(String::from)
-        .to_vec();
-        args.extend(output.iter().cloned());
+        let args = sender_args(output);
         let mut send = spawn(cfg, "ffmpeg (送り出し)", args, Stdio::piped(), Stdio::null())?;
         let to = send.child.stdin.take().context("sender stdin")?;
         let pump = tokio::spawn(pump(from, to, ring::spawn(rc.ring_dir.clone().into())));
@@ -175,6 +188,21 @@ impl Proc {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_sender_copies_streams_and_lets_a_stall_gap_through() {
+        let a = sender_args(&["-f".to_string(), "flv".to_string(), "rtmp://x/y".to_string()]);
+        let pos = |k: &str| a.iter().position(|x| x == k).unwrap();
+        // 入力の指定 (-i) より前に置く (入力のオプション)。-copyts にはしない (mpegts の一周の補正が止まる)
+        assert!(a.windows(2).any(|w| w == ["-dts_delta_threshold", "3600"]));
+        assert!(pos("-dts_delta_threshold") < pos("-i"));
+        assert!(!a.contains(&"-copyts".to_string()));
+        assert!(a.windows(2).any(|w| w == ["-f", "mpegts"]));
+        assert!(a.windows(2).any(|w| w == ["-i", "pipe:0"]));
+        assert!(a.windows(2).any(|w| w == ["-c", "copy"]));
+        // 送り先 (output) は最後にそのまま付く
+        assert_eq!(a[a.len() - 3..], ["-f", "flv", "rtmp://x/y"]);
+    }
 
     #[tokio::test]
     async fn a_stuck_ring_does_not_hold_back_the_sender() {
