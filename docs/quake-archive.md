@@ -368,6 +368,7 @@ v0.18.3 を本番で使った利用者の要望。
 - 置き方 (e2)
   - `youtube_live_check.py` と `youtube-live-watch.sh` を `~/work/eq-e2cast/tools/` に置く。
   - `.service`・`.timer` を `~/.config/systemd/user/` に置き、`systemctl --user enable --now youtube-live-watch.timer`。
+- e2 全体が詰まっている間 (`/proc/pressure/io` か `/proc/pressure/memory` の full の 60 秒平均が 20% を超えるとき) は、つなぎ直しを見送る。2026-10-01 07:00 の詰まりで、つなぎ直しの連発が悪化させたため。
 - YouTube Studio の枠の設定で「自動終了」を切っておくと、短い途切れで枠が閉じにくくなる (利用者の操作)。
 
 ### 3.8 R2.3: 送り出しの時刻の乱れを直す (R2.2 の手直し)
