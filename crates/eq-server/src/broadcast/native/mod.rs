@@ -41,7 +41,7 @@ use draw::Renderer;
 pub(super) use eew::{eew_place, latest_eews, quake_place, EEW_ACTIVE_MS};
 pub(super) use hindsight::{hindsight_of, Hindsight};
 pub(super) use icon::Icons;
-pub(super) use model::{event_place, group_quakes, same_quake};
+pub(super) use model::{event_place, group_quakes, same_quake, Place};
 pub(super) use step::{look, Input, Output, Stepper};
 
 const RECONNECT_AFTER: Duration = Duration::from_secs(5);

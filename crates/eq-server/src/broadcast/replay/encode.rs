@@ -12,7 +12,7 @@ use super::plan::{duration_ms, Plan};
 use super::psi::Throttle;
 use super::Options;
 use crate::broadcast::mixer::{AudioMixer, Notice, RATE};
-use crate::broadcast::native::{Hindsight, Icons, Input, Stepper};
+use crate::broadcast::native::{Icons, Input, Stepper};
 use crate::quake::Event;
 
 /// 音を混ぜる 1 回の長さ (20ms)。音を鳴らす時刻はこの単位に丸まる
@@ -131,7 +131,6 @@ pub async fn encode_video(
     o: &Options,
     events: &[Event],
     plan: &Plan,
-    hindsight: Option<&Hindsight>,
     stepper: &mut Stepper,
     audio: &Path,
     throttle: &mut Throttle,
@@ -157,7 +156,7 @@ pub async fn encode_video(
             test: false,
             check_ms,
             flip_s: 0,
-            hindsight,
+            hindsight: f.hindsight.as_ref(),
             fast_forward: f.fast_forward,
         };
         // 前のコマと同じなら、描き直さずに同じ画面を渡す

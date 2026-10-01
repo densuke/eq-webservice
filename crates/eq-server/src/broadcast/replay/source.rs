@@ -16,22 +16,22 @@ use crate::source::replay;
 /// /api/archive が受ける範囲の上限 (archive.rs の MAX_RANGE_MS と同じ)
 const ARCHIVE_MAX_RANGE_MS: u64 = 3_600_000;
 
+/// 記録のファイルから読む件数の上限 (/api/archive は archive::MAX_EVENTS 件で切る。数時間の連続地震を丸ごと読むため、ファイルは広げる)
+pub const FILE_MAX_EVENTS: usize = 50_000;
+
 /// 範囲の報を時刻順に返す
 pub async fn load(o: &Options) -> anyhow::Result<Vec<Event>> {
-    let events = match &o.source {
-        Source::Events(path) => from_file(path, o.from, o.to).await?,
-        Source::Archive(base) => from_archive(base, o.from, o.to).await?,
+    let (events, max) = match &o.source {
+        Source::Events(path) => (from_file(path, o.from, o.to).await?, FILE_MAX_EVENTS),
+        Source::Archive(base) => (from_archive(base, o.from, o.to).await?, archive::MAX_EVENTS),
     };
-    if events.len() >= archive::MAX_EVENTS {
-        tracing::warn!(
-            "報が {} 件の上限に達しました。範囲の終わりの報が欠けているかもしれません",
-            archive::MAX_EVENTS
-        );
+    if events.len() >= max {
+        tracing::warn!("報が {max} 件の上限に達しました。範囲の終わりの報が欠けているかもしれません");
     }
     Ok(events)
 }
 
-async fn from_archive(base: &str, from: u64, to: u64) -> anyhow::Result<Vec<Event>> {
+pub async fn from_archive(base: &str, from: u64, to: u64) -> anyhow::Result<Vec<Event>> {
     anyhow::ensure!(
         to - from <= ARCHIVE_MAX_RANGE_MS,
         "--archive は 1 時間までの範囲しか取れません"
@@ -42,9 +42,9 @@ async fn from_archive(base: &str, from: u64, to: u64) -> anyhow::Result<Vec<Even
         .context("fetching /api/archive")
 }
 
-async fn from_file(path: &Path, from: u64, to: u64) -> anyhow::Result<Vec<Event>> {
+pub async fn from_file(path: &Path, from: u64, to: u64) -> anyhow::Result<Vec<Event>> {
     if is_sink_format(path)? {
-        return archive::read_range(path, from, to).await;
+        return archive::read_range_upto(path, from, to, FILE_MAX_EVENTS).await;
     }
     let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     from_raw(&text, from, to)

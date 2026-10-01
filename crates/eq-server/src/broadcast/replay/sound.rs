@@ -43,8 +43,8 @@ pub struct Step<'a> {
 }
 
 pub struct Sounds {
-    /// 前のコマの当時の時刻と、揺れの始まりの音をもう鳴らしたか
-    start: (i64, bool),
+    /// 前のコマの当時の時刻と、揺れの始まりの音を鳴らした地震 (発生時刻)
+    start: (i64, Vec<i64>),
     start_level: AlertLevel,
     last_pip: i64,
     last_alert: Option<(AlertLevel, u64)>,
@@ -59,7 +59,7 @@ impl Sounds {
             .max()
             .unwrap_or(Scale::UNKNOWN);
         Sounds {
-            start: (i64::MIN, false),
+            start: (i64::MIN, Vec::new()),
             start_level: if max >= Scale::S3 {
                 AlertLevel::Medium
             } else {
@@ -100,15 +100,18 @@ impl Sounds {
         out
     }
 
-    /// 発生時刻をまたいだコマ (または始まりで既に波が出ているコマ) で 1 回だけ真。飛んだコマでは鳴らさない
+    /// 発生時刻をまたいだコマ (または始まりで既に波が出ているコマ) で、地震ごとに 1 回だけ真。飛んだコマでは鳴らさない
     fn step_start(&mut self, s: &Step) -> bool {
         let next = s.now_ms as i64;
         let crossed = s
             .origin_ms
-            .is_some_and(|o| self.start.0 < o && o <= next && next - o <= START_WITHIN_MS);
-        let play = crossed && !s.jumped && !self.start.1;
-        self.start = (next, self.start.1 || crossed);
-        play
+            .filter(|&o| self.start.0 < o && o <= next && next - o <= START_WITHIN_MS);
+        let fresh = crossed.filter(|o| !self.start.1.contains(o));
+        if let Some(o) = fresh {
+            self.start.1.push(o);
+        }
+        self.start.0 = next;
+        fresh.is_some() && !s.jumped
     }
 
     /// 3 秒以内に続けて鳴らすときは、前より強いときだけ鳴らす
@@ -165,12 +168,18 @@ fn alert_level(events: &[Event], now_ms: u64) -> Option<AlertLevel> {
             }
         }
         EventBody::Quake(q) => {
-            // 動画は 1 つの地震の報だけなので、地震情報の最初の報は、最初に届いた地震情報
-            if prior.iter().any(|p| matches!(p.body, EventBody::Quake(_))) {
+            // 地震情報の最初の報は、その地震で最初に届いた地震情報 (連続地震では、地震ごと)
+            let place = event_place(e)?;
+            let earlier = |p: &&Event| {
+                matches!(p.body, EventBody::Quake(_))
+                    && event_place(p).is_some_and(|pp| {
+                        pp.origin_ms.is_none() || place.origin_ms.is_none() || same_quake(&pp, &place)
+                    })
+            };
+            if prior.iter().any(|p| earlier(&p)) {
                 return (q.info_type == QuakeInfoType::DetailScale).then_some(AlertLevel::Info);
             }
             // その地震の緊急地震速報で既に鳴らしていれば、地震情報では鳴らさない
-            let place = event_place(e)?;
             let eew_active = latest_eews(events)
                 .iter()
                 .any(|a| now_ms.saturating_sub(a.received_ms) < EEW_ACTIVE_MS && same_quake(&eew_place(a), &place));
