@@ -1,0 +1,24 @@
+# eq-server replay-worker: 地震の再現動画を、空き時間に自動で作る (docs/replay-video.md の 5 章、README の「動画を自動で作る」)
+# ~/.config/systemd/user/eq-replay-worker.service に置く。eq-broadcast と同じディレクトリの eq-server・設定を使う。
+# 動画を作る本体 (replay-video) は、作る係が systemd-run で別の一時的な単位 (eq-replay-job-*) として起動する。
+# この単位自身は記録を見直してキューを管理するだけなので、小さく縛る。
+[Unit]
+Description=eq-webservice 再現動画を作る係 (eq-server replay-worker)
+After=eq-broadcast.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/work/eq-e2cast
+ExecStart=%h/work/eq-e2cast/eq-server replay-worker replay.toml
+Environment=RUST_LOG=info
+Restart=always
+RestartSec=30
+Nice=19
+CPUQuota=10%
+MemoryMax=100M
+MemorySwapMax=0
+# 止めるとき、作っている途中の単位は作る係が止める。作る係が落ちて残った単位は、次に始まるときに止める
+TimeoutStopSec=60
+
+[Install]
+WantedBy=default.target

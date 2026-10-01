@@ -37,6 +37,7 @@ audio_command = ["sox", "-q", "-t", "coreaudio", "BlackHole 2ch", "-t", "raw", "
 # server = "https://eq.fuga.jp"      # データの取得先
 # map_dir = "web/public"             # 地図のデータ
 # font = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+# state_file = ""                    # 地震の画面か平時かを書くファイル (再現動画を作る係が読む)。省けば $XDG_STATE_HOME/eq-broadcast/state.json (native のとき)
 # label = "配信元: e2"               # 上部バーの右に出す (BGM の曲名はその左)。省けば出さない
 # fps = 10                           # 地震の画面のコマ数
 # fps_calm = 2                       # 平時のコマ数。省けば fps で一定。指定すると平時と地震でコマの間隔が変わる

@@ -2,7 +2,7 @@
 //! 描かずに決めるので、音を先に作り、映像はこの筋書きのとおりに描ける (docs/replay-video.md 4.1・4.3)。
 //! 動画に入れる地震は 1 つ (範囲で最大震度のもの) か、続けて起きた複数 (R3.3a の連続地震。時計は 1 本で、地震と地震の間は早送りで詰める)。
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::sound::{Sound, Sounds, Step};
 use crate::broadcast::native::{
@@ -231,7 +231,7 @@ pub fn build(series: &Series, fps: u32) -> Option<Plan> {
 }
 
 /// チャプター (各地震の始まりの、動画の中の時刻)。連続地震の説明文に使う
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Chapter {
     pub video_ms: u64,
     /// 発生時刻 (epoch ミリ秒)

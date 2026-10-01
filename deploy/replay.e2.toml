@@ -1,0 +1,46 @@
+# e2 の再現動画を作る係の設定 (eq-server replay-worker replay.toml)。docs/replay-video.md の 5.2。
+# 省いた項目は、ここに書いた既定値になる。変えたいものだけ書く。~/ はホームディレクトリ。
+[replay]
+# eq-server の記録 (config.toml の jsonl の sink の path)。作業ディレクトリからの相対か、絶対パス
+events = "data/events.jsonl"
+# 作業場所。queue/ (待ちの印)・work/ (作りかけ)・done/ (できた動画) を下に作る
+dir = "~/work/eq-replay"
+# 配信の状態のファイル (broadcast.toml の state_file と同じ)。空なら $XDG_STATE_HOME/eq-broadcast/state.json
+state_file = ""
+
+# 検知: この震度 (30 = 震度 3) 以上、または緊急地震速報の警報が出た地震を動画にする。broadcast の [record] の min_scale と同じ値にする
+min_scale = 30
+warning = true
+
+# まとめ (連続地震): 前の地震から 50km 以内・30 分以内に続いたものを 1 本にする。
+# 最後の報から 60 分静かになったら閉じて動画にする。1 本は最長 3 時間 (超えたら次の 1 本)
+join_km = 50.0
+join_min = 30
+quiet_min = 60
+max_group_hours = 3
+# 記録を見直す範囲 (時間) と間隔 (秒)。範囲は max_group_hours + quiet_min より長くする
+lookback_hours = 6
+scan_secs = 300
+
+# 作る・見張る
+tick_secs = 5            # 見張る間隔 (秒)
+calm_min = 30            # 最後の地震の画面から、この時間 (分) たつまで作り始めない
+psi_limit = 20.0         # e2 の PSI (io・memory の full の 60 秒平均。%) がこれを超えたら凍結
+freeze_give_up_min = 10  # 凍結がこの時間 (分) 続いたら、止めて待ちに戻す
+max_retries = 5          # 失敗のやり直しがこの回数を超えたら failed
+retry_wait_min = 10      # 失敗してから、やり直すまでの時間 (分)
+cpu_quota = "5%"         # 作る間の上限 (10% では配信に響いた)
+memory_max = "200M"
+
+# YouTube の健全性 (作っている間だけ 1 分ごとに見る。liveStreams.list を 1 回 1 単位)
+health_secs = 60
+stream_name = "地震モニター用"
+# pd2 と共有する認証情報。読むだけで書き戻さない。空なら見ない
+youtube_token = "~/.config/pd2/youtube-upload-token.json"
+
+# replay-video に渡すもの (地図・フォントは配信と同じ。作業ディレクトリからの相対か、絶対パス)
+fps = 5
+label = "記録から再現"
+map_dir = "map"
+font = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+ffmpeg = "ffmpeg"

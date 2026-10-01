@@ -18,13 +18,23 @@ pub fn full_avg60(text: &str) -> Option<f64> {
         .find_map(|w| w.strip_prefix("avg60=")?.parse().ok())
 }
 
-/// io か memory のどちらかが詰まっているか。読めないものは詰まっていないとみなす
-pub fn is_congested(io: Option<&str>, memory: Option<&str>) -> bool {
+/// io か memory のどちらかが、limit (%) を超えて詰まっているか。読めないものは詰まっていないとみなす
+pub fn is_congested(io: Option<&str>, memory: Option<&str>, limit: f64) -> bool {
     [io, memory]
         .into_iter()
         .flatten()
         .filter_map(full_avg60)
-        .any(|v| v > LIMIT)
+        .any(|v| v > limit)
+}
+
+/// 今、詰まっているか (作る係が見張りで使う。Mac など /proc が無いときは詰まっていない)
+pub fn congested_now(limit: f64) -> bool {
+    let read = |p: &str| std::fs::read_to_string(p).ok();
+    is_congested(
+        read("/proc/pressure/io").as_deref(),
+        read("/proc/pressure/memory").as_deref(),
+        limit,
+    )
 }
 
 #[derive(Debug, PartialEq)]
@@ -61,7 +71,7 @@ impl Throttle {
                 tokio::fs::read_to_string("/proc/pressure/io").await.ok(),
                 tokio::fs::read_to_string("/proc/pressure/memory").await.ok(),
             );
-            match verdict(is_congested(io.as_deref(), mem.as_deref()), started.elapsed()) {
+            match verdict(is_congested(io.as_deref(), mem.as_deref(), LIMIT), started.elapsed()) {
                 Verdict::Go => break,
                 Verdict::Wait => {
                     tracing::warn!("e2 が詰まっているので、待ちます (io・memory の full の 60 秒平均が {LIMIT}% 超)");
@@ -100,14 +110,24 @@ mod tests {
 
     #[test]
     fn waits_only_when_io_or_memory_is_over_the_limit() {
-        assert!(!is_congested(Some(IDLE), Some(IDLE)));
-        assert!(is_congested(Some(IDLE), Some(BUSY)));
-        assert!(is_congested(Some(BUSY), None));
-        assert!(!is_congested(Some(SOME_ONLY), Some(SOME_ONLY)));
+        assert!(!is_congested(Some(IDLE), Some(IDLE), LIMIT));
+        assert!(is_congested(Some(IDLE), Some(BUSY), LIMIT));
+        assert!(is_congested(Some(BUSY), None, LIMIT));
+        assert!(!is_congested(Some(SOME_ONLY), Some(SOME_ONLY), LIMIT));
         // Mac など、読めないときは待たない
-        assert!(!is_congested(None, None));
+        assert!(!is_congested(None, None, LIMIT));
         // ちょうど 20% は待たない
-        assert!(!is_congested(Some("full avg10=0 avg60=20.00 avg300=0 total=0"), None));
+        assert!(!is_congested(
+            Some("full avg10=0 avg60=20.00 avg300=0 total=0"),
+            None,
+            LIMIT
+        ));
+    }
+
+    #[test]
+    fn the_limit_is_a_parameter() {
+        assert!(!is_congested(Some(BUSY), None, 30.0));
+        assert!(is_congested(Some(BUSY), None, 25.0));
     }
 
     #[test]

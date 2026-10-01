@@ -14,7 +14,6 @@ use tokio::task::JoinHandle;
 /// 書き直す間隔
 const WRITE_EVERY: Duration = Duration::from_secs(30);
 /// これより古い書き込みは、配信の状態がわからないものとして扱う
-#[allow(dead_code)] // 作る係 (replay/worker) が使う
 pub const STALE_MS: u64 = 120_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -29,7 +28,6 @@ pub struct Snapshot {
 
 /// 作る係から見た配信の画面
 #[derive(Debug, Clone, Copy, PartialEq)]
-#[allow(dead_code)]
 pub enum Screen {
     /// 平時。since_ms から続いている
     Calm {
@@ -41,7 +39,6 @@ pub enum Screen {
 }
 
 /// 状態のファイルの中身から、今の画面を決める
-#[allow(dead_code)]
 pub fn screen(snapshot: Option<&Snapshot>, now_ms: u64) -> Screen {
     match snapshot {
         Some(s) if now_ms.saturating_sub(s.updated_ms) <= STALE_MS => {
@@ -75,7 +72,6 @@ pub fn path_of(configured: &str) -> PathBuf {
 }
 
 /// ファイルを読む。無い・壊れているときは None
-#[allow(dead_code)]
 pub fn read(path: &Path) -> Option<Snapshot> {
     serde_json::from_slice(&std::fs::read(path).ok()?).ok()
 }

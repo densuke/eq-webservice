@@ -16,7 +16,7 @@ mod record;
 mod replay;
 mod ring;
 
-pub use replay::run as replay_video;
+pub use replay::{run as replay_video, run_worker as replay_worker};
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

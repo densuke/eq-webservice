@@ -10,6 +10,7 @@ mod sound;
 mod source;
 #[cfg(test)]
 mod testkit;
+mod worker;
 
 use std::path::PathBuf;
 
@@ -18,6 +19,7 @@ use anyhow::Context;
 use super::native::{self, Stepper};
 use super::BroadcastConfig;
 use args::{Options, USAGE};
+pub use worker::run as run_worker;
 
 pub async fn run(args: &[String]) -> anyhow::Result<()> {
     if args.iter().any(|a| a == "-h" || a == "--help") {
