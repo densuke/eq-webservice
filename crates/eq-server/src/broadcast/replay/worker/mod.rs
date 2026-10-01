@@ -1,13 +1,14 @@
 //! 再現動画を自動で作る係 (`eq-server replay-worker`。docs/replay-video.md の 5 章、R3.3a)。
 //! systemd のユーザー単位で常駐し、記録から動画にする地震を見つけて (detect)、キューに積み (queue)、
 //! 条件がそろったときだけ 1 つずつ `replay-video` を作らせる (job)。作っている間は配信の状態・e2 の詰まり・
-//! YouTube の健全性を見張り (decide)、地震の画面になれば止め、重くなれば凍結する。
+//! YouTube の健全性を見張り (decide)、地震の画面になれば止め、重くなれば (既定は) 止める。
 //! 配信と本番が最優先で、動画作りはいつでも捨ててよい仕事。判断は decide.rs・detect.rs・queue.rs の純粋な関数で、ここは外とのやり取りだけ。
 
 mod config;
 mod decide;
 mod detect;
 mod health;
+mod hours;
 mod job;
 mod queue;
 mod scan;
@@ -23,7 +24,7 @@ use super::source::FILE_MAX_EVENTS;
 use crate::archive;
 use crate::broadcast::calm_state;
 use config::WorkerConfig;
-use decide::{Action, Seen, Why};
+use decide::{Action, Seen, StartRules, Why};
 use health::{Checker, Health};
 use queue::{Job, Outcome, Policy, State};
 
@@ -178,6 +179,7 @@ impl Worker {
             screen: calm_state::screen(calm_state::read(&self.state_path).as_ref(), now_ms()),
             congested: super::psi::congested_now(self.cfg.psi_limit),
             health,
+            mem_available_mb: super::psi::mem_available_now(),
         }
     }
 
@@ -205,13 +207,17 @@ impl Worker {
         let Some(job) = queue::next_job(&jobs, now).cloned() else {
             return;
         };
-        let calm_ms = self.cfg.calm_min * 60_000;
+        let rules = StartRules {
+            calm_ms: self.cfg.calm_min * 60_000,
+            hours: self.cfg.start_hours(),
+            min_mem_mb: self.cfg.min_mem_mb,
+        };
         // 健全性は API を使うので、ほかの条件がそろってから見る
-        if !decide::may_start(&self.seen(Health::Unknown), now, calm_ms) {
+        if !decide::may_start(&self.seen(Health::Unknown), now, &rules) {
             return;
         }
         let health = self.health().await;
-        if decide::may_start(&self.seen(health), now_ms(), calm_ms) {
+        if decide::may_start(&self.seen(health), now_ms(), &rules) {
             self.start(job).await;
         }
     }
@@ -296,7 +302,7 @@ impl Worker {
         let health = self.health().await;
         let seen = self.seen(health);
         let give_up = Duration::from_secs(self.cfg.freeze_give_up_min * 60);
-        match decide::watch(&seen, r.frozen_since.map(|t| t.elapsed()), give_up) {
+        match decide::watch(&seen, r.frozen_since.map(|t| t.elapsed()), give_up, self.cfg.on_busy) {
             Action::Keep => {}
             Action::Freeze => {
                 tracing::info!(id = %r.job.id, ?seen, "replay-worker: 凍結します");
@@ -322,6 +328,8 @@ impl Worker {
                 tracing::info!(id = %r.job.id, ?why, ?seen, "replay-worker: 止めて待ちに戻します");
                 let outcome = match why {
                     Why::Quake => Outcome::Interrupted,
+                    // 重くて止めたものは、やり直しに数えて、retry_wait_min の間を空ける
+                    Why::Busy => Outcome::Failed("e2 が重い (詰まり・YouTube の健全性) ので止めました".into()),
                     Why::FrozenTooLong => Outcome::FrozenTooLong,
                 };
                 self.stop(&mut r, outcome).await;

@@ -25,10 +25,13 @@ scan_secs = 300
 # 作る・見張る
 tick_secs = 5            # 見張る間隔 (秒)
 calm_min = 30            # 最後の地震の画面から、この時間 (分) たつまで作り始めない
-psi_limit = 20.0         # e2 の PSI (io・memory の full の 60 秒平均。%) がこれを超えたら凍結
-freeze_give_up_min = 10  # 凍結がこの時間 (分) 続いたら、止めて待ちに戻す
+hours = "1-5"            # 作り始める時間帯 (日本時間。1:00 から 5:00 まで)。作りかけは過ぎても続ける
+min_mem_mb = 250         # 作り始めるのに必要なメモリの空き (MemAvailable。MB)
+psi_limit = 20.0         # e2 の PSI (io・memory の full の 60 秒平均。%) がこれを超えたら重いとみなす
+on_busy = "kill"         # 重いとき・YouTube の健全性が落ちたとき: "kill" (止めて作り直す) か "freeze" (凍結)
+freeze_give_up_min = 10  # 凍結 (on_busy = "freeze") がこの時間 (分) 続いたら、止めて待ちに戻す
 max_retries = 5          # 失敗のやり直しがこの回数を超えたら failed
-retry_wait_min = 10      # 失敗してから、やり直すまでの時間 (分)
+retry_wait_min = 10      # 失敗・重くて止めてから、やり直すまでの時間 (分)
 cpu_quota = "5%"         # 作る間の上限 (10% では配信に響いた)
 memory_max = "200M"
 

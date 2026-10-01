@@ -6,6 +6,17 @@ use anyhow::Context;
 use serde::Deserialize;
 
 use super::super::super::BroadcastConfig;
+use super::hours::Hours;
+
+/// 作っている間に重くなったとき (e2 が詰まった・YouTube の健全性が落ちた) どうするか
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OnBusy {
+    /// すぐ止めて、作りかけを消す (既定。凍結はメモリを抱えたままで、配信を助けきれない)
+    Kill,
+    /// 凍結して、落ち着いたら解凍する
+    Freeze,
+}
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields, default)]
@@ -43,9 +54,15 @@ pub struct WorkerConfig {
     pub tick_secs: u64,
     /// 最後の地震の画面から、この時間 (分) たつまで、作り始めない
     pub calm_min: u64,
-    /// e2 の PSI (io・memory の full の 60 秒平均。%) がこれを超えたら、凍結する
+    /// 作り始める時間帯 (日本時間の時。"1-5" は 1:00 から 5:00 まで)。作りかけは終わりを過ぎても続ける
+    pub hours: String,
+    /// 作り始めるのに必要な、e2 のメモリの空き (MemAvailable。MB)。読めない (Mac) ときは見ない
+    pub min_mem_mb: u64,
+    /// e2 の PSI (io・memory の full の 60 秒平均。%) がこれを超えたら、重いとみなす
     pub psi_limit: f64,
-    /// 凍結がこの時間 (分) 続いたら、止めて待ちに戻す
+    /// 重くなったときの動き。"kill" (止めて待ちに戻す。やり直しに数える) か "freeze" (凍結)
+    pub on_busy: OnBusy,
+    /// 凍結 (on_busy = "freeze") がこの時間 (分) 続いたら、止めて待ちに戻す
     pub freeze_give_up_min: u64,
     /// やり直しがこの回数を超えたら、失敗にする
     pub max_retries: u32,
@@ -92,7 +109,10 @@ impl Default for WorkerConfig {
             scan_secs: 300,
             tick_secs: 5,
             calm_min: 30,
+            hours: "1-5".into(),
+            min_mem_mb: 250,
             psi_limit: 20.0,
+            on_busy: OnBusy::Kill,
             freeze_give_up_min: 10,
             max_retries: 5,
             retry_wait_min: 10,
@@ -140,7 +160,13 @@ impl WorkerConfig {
             "間隔は 1 秒以上"
         );
         anyhow::ensure!((1..=60).contains(&self.fps), "fps must be 1..=60");
+        Hours::parse(&self.hours)?;
         Ok(self)
+    }
+
+    /// 作り始めてよい時間帯 (`check` で確かめ済み)
+    pub fn start_hours(&self) -> Hours {
+        Hours::parse(&self.hours).expect("hours is validated by check()")
     }
 
     /// eq-server の記録 (`~/` はホームディレクトリ)
@@ -187,9 +213,19 @@ mod tests {
             (30, 20.0, 10, 5)
         );
         assert_eq!(c.cpu_quota, "5%");
+        assert_eq!((c.hours.as_str(), c.min_mem_mb, c.on_busy), ("1-5", 250, OnBusy::Kill));
         let f: File = toml::from_str("[replay]\nmin_scale = 40\ncpu_quota = \"10%\"").unwrap();
         assert_eq!((f.replay.min_scale, f.replay.cpu_quota.as_str()), (40, "10%"));
         assert!(toml::from_str::<File>("[replay]\nnope = 1").is_err());
+    }
+
+    #[test]
+    fn on_busy_and_hours_are_checked() {
+        let f: File = toml::from_str("[replay]\non_busy = \"freeze\"\nhours = \"22-5\"").unwrap();
+        assert_eq!(f.replay.check().unwrap().on_busy, OnBusy::Freeze);
+        assert!(toml::from_str::<File>("[replay]\non_busy = \"pause\"").is_err());
+        let f: File = toml::from_str("[replay]\nhours = \"9\"").unwrap();
+        assert!(f.replay.check().is_err());
     }
 
     #[test]
@@ -204,6 +240,10 @@ mod tests {
         assert_eq!(
             (c.calm_min, c.psi_limit, c.cpu_quota.as_str()),
             (d.calm_min, d.psi_limit, d.cpu_quota.as_str())
+        );
+        assert_eq!(
+            (c.hours.as_str(), c.min_mem_mb, c.on_busy),
+            (d.hours.as_str(), d.min_mem_mb, d.on_busy)
         );
         assert_eq!(
             (c.max_group_hours, c.lookback_hours, c.max_retries),
