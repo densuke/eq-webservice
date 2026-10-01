@@ -10,6 +10,7 @@ mod draw;
 mod eew;
 mod frame;
 mod geo;
+mod held;
 mod hindsight;
 mod icon;
 mod model;
