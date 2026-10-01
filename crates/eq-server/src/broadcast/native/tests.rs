@@ -3,7 +3,7 @@
 
 use tiny_skia::Pixmap;
 
-use super::data::{City, CityWeather, Kind, Warnings};
+use super::data::{City, CityWeather, Kind, Tomorrow, Warnings};
 use super::draw::{Renderer, Scene, MAP_RECT};
 use super::eew::{EewSummary, Wave};
 use super::geo::{self, View};
@@ -95,6 +95,7 @@ fn scene<'a>(
 ) -> Scene<'a> {
     Scene {
         icons: &NO_ICONS,
+        flip_s: 0,
         quake,
         eew: None,
         history,
@@ -338,6 +339,7 @@ fn the_weather_icon_replaces_the_kanji_and_is_shown_at_night_too() {
             lon: 139.69,
             code: "100".into(),
             temp: Some(24.0),
+            tomorrow: None,
         }],
         rain: vec![],
     };
@@ -362,6 +364,51 @@ fn the_weather_icon_replaces_the_kanji_and_is_shown_at_night_too() {
     // 夜のアイコンはまだ取れていないので、漢字 (文字なしの設定なので何も出ない) に戻る
     with.now_ms = NOW - NOW % 86_400_000 + 12 * 3_600_000;
     assert_eq!(orange(&r.render(&with)), 0);
+}
+
+#[test]
+fn the_card_shows_tomorrow_every_other_interval_and_only_when_asked() {
+    let mut r = renderer(Text::none());
+    let city = City {
+        name: "東京".into(),
+        lat: 35.69,
+        lon: 139.69,
+        code: "100".into(),
+        temp: Some(24.0),
+        tomorrow: Some(Tomorrow {
+            code: "101".into(),
+            temp_min: Some(17.0),
+            temp_max: Some(24.0),
+            pop: Some(30),
+        }),
+    };
+    let weather = CityWeather {
+        cities: vec![city],
+        rain: vec![],
+    };
+    let orange = |pm: &Pixmap| {
+        pm.pixels()
+            .iter()
+            .filter(|p| p.red() > 230 && (90..115).contains(&p.green()) && p.blue() < 20)
+            .count()
+    };
+    // 今の天気 (100) のアイコンは取れていない。明日の天気 (101) のアイコンだけ取れている
+    let sun = icon::rasterize(include_bytes!("testdata/sun.svg")).unwrap();
+    let icons: Icons = [("101.svg".to_string(), sun)].into();
+    let mut sc = scene(None, &[], None, Some(&weather));
+    sc.icons = &icons;
+    let noon = NOW - NOW % 86_400_000 + 3 * 3_600_000; // 12 時 JST (20 秒の区切りの頭)
+    sc.flip_s = 20;
+    sc.now_ms = noon + 5_000;
+    assert_eq!(orange(&r.render(&sc)), 0); // 今の札
+    sc.now_ms = noon + 25_000;
+    assert!(orange(&r.render(&sc)) > 100); // 明日の札
+    sc.now_ms = noon + 45_000;
+    assert_eq!(orange(&r.render(&sc)), 0);
+    // 0 なら切り替えない
+    sc.flip_s = 0;
+    sc.now_ms = noon + 25_000;
+    assert_eq!(orange(&r.render(&sc)), 0);
 }
 
 #[test]
@@ -444,6 +491,12 @@ fn write_fixture_pngs_when_asked() {
         lon,
         code: code.into(),
         temp: Some(t),
+        tomorrow: Some(Tomorrow {
+            code: "101".into(),
+            temp_min: Some(t - 7.0),
+            temp_max: Some(t + 1.0),
+            pop: Some(30),
+        }),
     };
     let weather = CityWeather {
         cities: vec![

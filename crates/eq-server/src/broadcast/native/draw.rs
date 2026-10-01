@@ -39,6 +39,8 @@ pub struct Scene<'a> {
     pub weather: Option<&'a CityWeather>,
     /// 取得済みの天気アイコン
     pub icons: &'a Icons,
+    /// 天気の札を今と明日で切り替える間隔 (秒。0 は今だけ)
+    pub flip_s: u64,
     /// サーバの時計での今 (epoch ミリ秒)
     pub now_ms: u64,
     pub connected: bool,
