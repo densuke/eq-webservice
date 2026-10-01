@@ -141,7 +141,9 @@ export function onEvents(all: EqEvent[], live: boolean, target: World = liveWorl
     // EEW は予報から警報に上がったときも鳴らす
     const isNew =
       g.events.length === 1 || (e.kind === "eew" && e.warning && !g.events.slice(0, -1).some((x) => (x as EewEvent).warning));
-    const lv = alertLevel(e, isNew, eewActive);
+    // 同じ地震のそれまでの EEW の最大震度 (最初でない EEW が震度を上げたかの判断)
+    const prevMax = Math.max(-1, ...g.events.slice(0, -1).map((x) => (x as EewEvent).max_scale));
+    const lv = alertLevel(e, isNew, eewActive, prevMax);
     if (lv && (!alert || RANK[lv] > RANK[alert])) alert = lv;
     // 新しい地震は、巡回より先にしばらく見せる
     if (isNew && (e.kind === "eew" || e.kind === "quake")) {
