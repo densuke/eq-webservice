@@ -3,13 +3,14 @@
 
 use tiny_skia::Pixmap;
 
+use super::camera::{fit_box, map_aspect, target_box, Aim, Camera, Epicenter};
 use super::data::{CityWeather, Warnings};
 use super::draw::{self, Renderer, Scene};
 use super::hindsight::{self, Hindsight};
 use super::icon::Icons;
 use super::{eew, model, yuv, HISTORY};
 use crate::broadcast::record::Shown;
-use crate::quake::Event;
+use crate::quake::{Event, Hypocenter};
 
 /// 1 コマの入力 (時刻はサーバの時計。epoch ミリ秒)
 pub struct Input<'a> {
@@ -78,11 +79,43 @@ pub struct Output {
     pub shown: Shown,
 }
 
-type StillKey = (u64, Option<(u64, i32)>, Option<u64>, u64, bool);
+/// 寄った表示範囲の同一判定 (日本全体は None)
+type ViewKey = Option<(u64, u64, u64)>;
+
+type StillKey = (u64, Option<(u64, i32)>, Option<u64>, u64, bool, ViewKey);
+
+/// 地震の画面の地震から、寄りの目標の材料を作る。平時は None (日本全体)
+fn aim_of(renderer: &Renderer, current: Option<eew::Current>) -> Option<Aim> {
+    let make = |h: Option<&Hypocenter>, origin_ms, areas: &[&str], prefs: &[&str], forecast| Aim {
+        epicenter: h.and_then(|h| {
+            Some(Epicenter {
+                lat: h.latitude?,
+                lon: h.longitude?,
+                depth_km: h.depth_km.map_or(eew::DEFAULT_DEPTH_KM, f64::from),
+                origin_ms,
+            })
+        }),
+        shaken: renderer.shaken_box(areas, prefs),
+        forecast,
+    };
+    match current? {
+        eew::Current::Quake(q) => {
+            let prefs: Vec<&str> = q.pref_scales.iter().map(|(p, _)| p.as_str()).collect();
+            Some(make(q.hypocenter.as_ref(), q.origin_ms, &[], &prefs, false))
+        }
+        eew::Current::Eew(e) => {
+            let areas: Vec<&str> = e.area_scales.iter().map(|(a, _)| a.as_str()).collect();
+            let prefs: Vec<&str> = e.pref_scales.iter().map(|(p, _)| p.as_str()).collect();
+            Some(make(e.hypocenter.as_ref(), e.origin_ms, &areas, &prefs, true))
+        }
+    }
+}
 
 /// 描き直す必要があるかの覚えと、1 秒ごとに描く文字・塗りの絵
 pub struct Stepper {
     renderer: Renderer,
+    /// 震源へ寄るカメラ (コマの時刻で進める。寄りが無効なら動かない)
+    camera: Camera,
     last_key: Option<(StillKey, u64)>,
     still: Option<(StillKey, Pixmap)>,
 }
@@ -91,9 +124,30 @@ impl Stepper {
     pub fn new(renderer: Renderer) -> Self {
         Stepper {
             renderer,
+            camera: Camera::new(),
             last_key: None,
             still: None,
         }
+    }
+
+    /// 日本全体の表示の幅 / いまの表示の幅 (1 なら日本全体)
+    #[cfg(test)]
+    pub fn zoom_ratio(&self) -> f64 {
+        super::camera::home_fit().w / self.camera.fit().w
+    }
+
+    /// コマの時刻 now で寄りを進め、描く面に渡す。寄っているときの表示範囲の判定を返す
+    fn aim_camera(&mut self, current: Option<eew::Current>, now: u64, snap: bool) -> ViewKey {
+        if !self.renderer.zoom_enabled() {
+            return None;
+        }
+        let target = aim_of(&self.renderer, current)
+            .and_then(|a| target_box(&a, now))
+            .map(|b| fit_box(b, map_aspect()));
+        self.camera.advance(target, now, snap);
+        let zoomed = (!self.camera.is_home()).then(|| self.camera.fit());
+        self.renderer.set_view(zoomed);
+        zoomed.map(|f| (f.x.to_bits(), f.y.to_bits(), f.w.to_bits()))
     }
 
     /// 前のコマから変わっていなければ None
@@ -107,6 +161,7 @@ impl Stepper {
             Some(eew::Current::Eew(e)) => (None, Some(e)),
             None => (None, None),
         };
+        let view = self.aim_camera(current, now, i.fast_forward);
         // 地震波は地震の画面のときだけ描く (のちに分かった震源の波は、平時の画面でも描く)
         let waves = frame_waves(&groups, &eews, current.is_some(), i.hindsight, now);
         // 地震波以外を描き直すのは、データが変わったとき・平時と地震が切り替わったとき・秒が進んだときだけ。
@@ -117,6 +172,7 @@ impl Stepper {
             shown_eew.map(|e| e.received_ms),
             now / 1000,
             i.fast_forward,
+            view,
         );
         let key = (still_key, if waves.is_empty() { 0 } else { now / i.check_ms });
         if self.last_key == Some(key) {

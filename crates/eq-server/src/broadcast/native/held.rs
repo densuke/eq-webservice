@@ -33,7 +33,10 @@ pub fn hold(reports: &[&Eew]) -> Held {
         .iter()
         .flat_map(|e| &e.areas)
         .map(|a| (a.name.as_str(), a.scale_to.unwrap_or(a.scale_from).max(a.scale_from)));
-    let prefs = reports.iter().flat_map(|e| &e.pref_max).map(|p| (p.pref.as_str(), p.scale));
+    let prefs = reports
+        .iter()
+        .flat_map(|e| &e.pref_max)
+        .map(|p| (p.pref.as_str(), p.scale));
     Held {
         warning: reports.iter().any(|e| e.warning),
         max_scale: reports.iter().map(|e| e.max_scale).max().unwrap_or(Scale::UNKNOWN),
@@ -103,7 +106,13 @@ mod tests {
             report(6, Scale::S3, vec![], &[], false),
             report(7, Scale::S3, vec![], &[], false),
             report(8, Scale::S4, both(), &prefs, false),
-            report(9, Scale::S4, vec![area("千葉県北東部", Scale::S4, Some(Scale::S4))], &prefs[..1], false),
+            report(
+                9,
+                Scale::S4,
+                vec![area("千葉県北東部", Scale::S4, Some(Scale::S4))],
+                &prefs[..1],
+                false,
+            ),
             report(10, Scale::S3, vec![], &[], false),
         ];
         for n in [3, 4, 7] {
@@ -121,7 +130,13 @@ mod tests {
 
     #[test]
     fn an_open_ended_bound_does_not_erase_a_larger_value_and_the_order_of_arrival_does_not_matter() {
-        let a = report(1, Scale::S4, vec![area("茨城県南部", Scale::S3, Some(Scale::S4))], &[], false);
+        let a = report(
+            1,
+            Scale::S4,
+            vec![area("茨城県南部", Scale::S3, Some(Scale::S4))],
+            &[],
+            false,
+        );
         let b = report(2, Scale::S3, vec![area("茨城県南部", Scale::S3, None)], &[], false);
         for r in [[&a, &b], [&b, &a]] {
             assert_eq!(named(&hold(&r).area_scales), [("茨城県南部", 40)]);

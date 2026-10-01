@@ -118,6 +118,7 @@ y=720 └───────────────────────�
   - macOS: `/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc`
   - Linux: `/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc`
   フォントのファイルはリポジトリに入れない。
+- 地震のとき震源へ寄る `zoom` (既定 false) は docs/eew-hold-and-native-zoom.md。再現動画 (`replay-video`) は既定で寄る。
 - 地図のデータ (geojson) は `web/dist` か `web/public` から読む (`broadcast.toml` の `map_dir`、既定 `web/public`)。
 - ffmpeg への映像: native のときは I420 の生データで渡す (`-f rawvideo -pix_fmt yuv420p -s 1280x720 -framerate <fps> -i -`。N1 は RGBA だったが、8.2 で変えた)。
   Chrome のとき (JPEG) の引数は変えない。

@@ -338,7 +338,10 @@ mod tests {
             }),
         ];
         let l = latest_eews(&events);
-        assert_eq!((l[0].serial.as_str(), l[0].max_scale, l[0].received_ms), ("2", Scale::S4, t + 2_000));
+        assert_eq!(
+            (l[0].serial.as_str(), l[0].max_scale, l[0].received_ms),
+            ("2", Scale::S4, t + 2_000)
+        );
         assert!(l[0].warning, "警報は持ち続ける");
         assert_eq!(l[0].pref_scales, [("東京都".to_string(), Scale::S5_LOWER)]);
         assert_eq!(l[0].hypocenter.as_ref().and_then(|h| h.latitude), Some(36.0));

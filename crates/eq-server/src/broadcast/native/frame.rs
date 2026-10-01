@@ -1,8 +1,11 @@
 //! 地図を映す面 (本図と、離島の別枠)。path は本図の座標で 1 度だけ作り、別枠は変換をかけて映す
 //! (別枠は枠の外に描かない)。web/src/map.ts の INSETS と同じ。
 
+use std::sync::Arc;
+
 use tiny_skia::{FillRule, Mask, Path, PathBuilder, Pixmap, Rect, Stroke, Transform};
 
+use super::draw::MAP_RECT;
 use super::geo::{project, View};
 use super::paint::paint;
 
@@ -37,14 +40,42 @@ pub type BoxRect = (f32, f32, f32, f32);
 pub struct Frame {
     /// この面の経度・緯度 -> 画面の座標
     pub view: View,
-    /// 本図の path をこの面に映す変換 (本図は何もしない)
+    /// 本図 (日本全体) の path をこの面に映す変換 (日本全体の本図は何もしない)
     ts: Transform,
-    /// 別枠だけ: (枠の外を隠す型、枠、範囲 lon0 lon1 lat0 lat1、題)
+    /// 描いてよい枠。別枠と、寄った本図 (地図の枠の外の上部バーや右パネルに描かない)。日本全体の本図は無し
+    clip: Option<Clip>,
+    /// 別枠だけ: (枠、範囲 lon0 lon1 lat0 lat1、題)
     inset: Option<Inset>,
 }
 
+/// 描いてよい枠と、その外を隠す型 (作るのが重いので、使い回す)
+#[derive(Clone)]
+pub struct Clip {
+    mask: Arc<Mask>,
+    rect: Rect,
+}
+
+impl Clip {
+    fn new(rect: Rect) -> Option<Clip> {
+        let mut mask = Mask::new(super::draw::W, super::draw::H)?;
+        mask.fill_path(
+            &PathBuilder::from_rect(rect),
+            FillRule::Winding,
+            false,
+            Transform::identity(),
+        );
+        Some(Clip {
+            mask: Arc::new(mask),
+            rect,
+        })
+    }
+
+    fn contains(&self, (x, y): (f32, f32)) -> bool {
+        (self.rect.left()..=self.rect.right()).contains(&x) && (self.rect.top()..=self.rect.bottom()).contains(&y)
+    }
+}
+
 struct Inset {
-    mask: Mask,
     rect: Rect,
     bounds: (f64, f64, f64, f64),
     title: &'static str,
@@ -55,6 +86,23 @@ impl Frame {
         Frame {
             view,
             ts: Transform::identity(),
+            clip: None,
+            inset: None,
+        }
+    }
+
+    /// 寄った本図の枠 (地図の枠)
+    pub fn map_clip() -> Option<Clip> {
+        let (x, y, w, h) = MAP_RECT;
+        Clip::new(Rect::from_xywh(x as f32, y as f32, w as f32, h as f32)?)
+    }
+
+    /// 日本全体の本図 home の path を、view に寄せて映す本図。地図の枠の外には描かない
+    pub fn zoomed(home: &View, view: View, clip: &Clip) -> Frame {
+        Frame {
+            ts: view.transform_from(home),
+            view,
+            clip: Some(clip.clone()),
             inset: None,
         }
     }
@@ -68,18 +116,11 @@ impl Frame {
             (spec.lon.0, spec.lon.1, spec.lat.0, spec.lat.1),
             (spec.x as f64, spec.y as f64, w as f64, spec.h as f64),
         );
-        let mut mask = Mask::new(super::draw::W, super::draw::H)?;
-        mask.fill_path(
-            &PathBuilder::from_rect(rect),
-            FillRule::Winding,
-            false,
-            Transform::identity(),
-        );
         Some(Frame {
             ts: view.transform_from(main),
             view,
+            clip: Some(Clip::new(rect)?),
             inset: Some(Inset {
-                mask,
                 rect,
                 bounds: (spec.lon.0, spec.lon.1, spec.lat.0, spec.lat.1),
                 title: spec.title,
@@ -118,37 +159,48 @@ impl Frame {
             return None;
         }
         let (x, y) = self.view.px(lon, lat);
-        Some(match &self.inset {
-            Some(i) => (
+        match &self.inset {
+            Some(i) => Some((
                 x.clamp(i.rect.left() + MARKER_PAD, i.rect.right() - MARKER_PAD),
                 y.clamp(i.rect.top() + MARKER_PAD, i.rect.bottom() - MARKER_PAD),
-            ),
-            None => (x, y),
-        })
+            )),
+            // 寄った本図は、枠の外 (右パネルや上部バーの上) には置かない
+            None => self.clip.as_ref().is_none_or(|c| c.contains((x, y))).then_some((x, y)),
+        }
+    }
+
+    /// 日本全体の本図の画面の座標 (県の札の位置など) を、この面の画面の座標にする。
+    /// 寄った本図で枠の外になるときは None
+    pub fn point(&self, (x, y): (f32, f32)) -> Option<(f32, f32)> {
+        let p = (x * self.ts.sx + self.ts.tx, y * self.ts.sy + self.ts.ty);
+        match (&self.clip, &self.inset) {
+            (Some(c), None) if !c.contains(p) => None,
+            _ => Some(p),
+        }
     }
 
     /// この path が面の中に見えるか (見えないものは描かずに済ませる)
     pub fn sees(&self, path: &Path) -> bool {
-        let Some(i) = &self.inset else { return true };
+        let Some(c) = &self.clip else { return true };
         path.bounds().transform(self.ts).is_some_and(|b| {
-            b.left() < i.rect.right()
-                && b.right() > i.rect.left()
-                && b.top() < i.rect.bottom()
-                && b.bottom() > i.rect.top()
+            b.left() < c.rect.right()
+                && b.right() > c.rect.left()
+                && b.top() < c.rect.bottom()
+                && b.bottom() > c.rect.top()
         })
     }
 
     pub fn fill(&self, pm: &mut Pixmap, path: &Path, c: [u8; 3], a: f32) {
         if self.sees(path) {
-            let mask = self.inset.as_ref().map(|i| &i.mask);
+            let mask = self.clip.as_ref().map(|c| &*c.mask);
             pm.fill_path(path, &paint(c, a), FillRule::EvenOdd, self.ts, mask);
         }
     }
 
-    /// 線の太さ width は画面での太さ (別枠でも同じ太さに見える)
+    /// 線の太さ width は画面での太さ (別枠・寄った本図でも同じ太さに見える)
     pub fn stroke(&self, pm: &mut Pixmap, path: &Path, c: [u8; 3], a: f32, width: f32) {
         if self.sees(path) {
-            let mask = self.inset.as_ref().map(|i| &i.mask);
+            let mask = self.clip.as_ref().map(|c| &*c.mask);
             let s = Stroke {
                 width: width / self.ts.sx,
                 ..Stroke::default()
@@ -161,6 +213,8 @@ impl Frame {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::broadcast::native::camera::{fit_box, map_aspect, MapBox};
+    use crate::broadcast::native::draw::MAP_RECT;
 
     fn frames() -> (Frame, Frame) {
         let main = View::fit_home((0.0, 36.0, 900.0, 684.0));
@@ -197,6 +251,49 @@ mod tests {
         assert!(nx > x + 8.0 && nx < x + w - 8.0 && ny > y + 8.0 && ny < y + h - 8.0);
         assert_eq!(ins.marker(139.69, 35.69), None);
         assert_eq!(main.marker(139.69, 35.69), Some(main.view.px(139.69, 35.69)));
+    }
+
+    /// 千葉県北東部のあたりに寄った本図
+    fn zoomed() -> (Frame, View) {
+        let home = View::fit_home(MAP_RECT);
+        let (x, y) = project(140.8, 35.7);
+        let fit = fit_box(MapBox::around(x, y, 80.0).pad(), map_aspect());
+        let view = View::from_fit(&fit, MAP_RECT);
+        (Frame::zoomed(&home, view, &Frame::map_clip().unwrap()), home)
+    }
+
+    #[test]
+    fn a_zoomed_main_maps_home_pixels_to_the_zoomed_view_and_centers_the_epicenter() {
+        let (z, home) = zoomed();
+        let (hx, hy) = home.px(140.8, 35.7);
+        let (px, py) = z.point((hx, hy)).unwrap();
+        let (vx, vy) = z.view.px(140.8, 35.7);
+        assert!((px - vx).abs() < 0.01 && (py - vy).abs() < 0.01);
+        // 地図の枠の中央 (x 450, y 36 + 342)
+        assert!((px - 450.0).abs() < 1.0 && (py - 378.0).abs() < 1.0, "{px},{py}");
+        assert!(!z.is_inset() && z.inset_box().is_none());
+        // 日本全体の本図は、点をそのまま返す
+        let main = Frame::main(home);
+        assert_eq!(main.point((1000.0, -5.0)), Some((1000.0, -5.0)));
+    }
+
+    #[test]
+    fn a_zoomed_main_skips_what_is_off_screen_and_does_not_place_marks_over_the_panel() {
+        let (z, home) = zoomed();
+        let rect = |x: f32, y: f32| {
+            let mut b = PathBuilder::new();
+            b.push_rect(Rect::from_xywh(x, y, 10.0, 10.0).unwrap());
+            b.finish().unwrap()
+        };
+        // 札幌は日本全体の図では見えるが、寄った図では枠の外
+        let (sx, sy) = home.px(141.35, 43.06);
+        assert!(!z.sees(&rect(sx, sy)));
+        let (cx, cy) = home.px(140.8, 35.7);
+        assert!(z.sees(&rect(cx, cy)));
+        assert!(Frame::main(home).sees(&rect(sx, sy)));
+        assert_eq!(z.point((sx, sy)), None);
+        assert!(z.marker(140.8, 35.7).is_some());
+        assert_eq!(z.marker(141.35, 43.06), None); // 右パネルや上部バーの上には置かない
     }
 
     #[test]
