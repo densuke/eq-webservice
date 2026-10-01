@@ -3,6 +3,7 @@
 import { $, map } from "./dom.ts";
 import { dotPaths, el, project } from "./map.ts";
 import { app } from "./state.ts";
+import { WEATHER_OFF } from "./personal.ts";
 import { type CityWeather, rainColor, rangeLabel, tempLabel, weatherCaption, weatherIcon, weatherView } from "./weather.ts";
 
 let data: CityWeather | null = null;
@@ -17,25 +18,36 @@ export async function loadCityWeather(): Promise<void> {
 /** 平時 (show) だけ出し、地震の表示の間は消す */
 export function renderCityWeather(show: boolean, now: number): void {
   const w = show ? data : null;
+  // 札だけ消す設定 (雨の点は残す)。案内も札と一緒に消す
+  const badges = w && app.settings.weatherFlipSec !== WEATHER_OFF ? w : null;
   const hour = new Date(now + 9 * 3600_000).getUTCHours();
   const night = hour < 6 || hour >= 18;
   // 札を「今」と「明日」で交互に出す (明日の予報がある都市だけ。明日の予報がまだ無いうちは今のまま)。
   // 案内も同じ種類から決めて、札と同じ回に描く (切り替わった秒に描き直す)
-  const view = w?.cities.some((c) => c.tomorrow) ? weatherView(now, app.settings.weatherFlipSec) : "now";
-  const caption = w ? weatherCaption(view, now) : "";
+  const view = badges?.cities.some((c) => c.tomorrow) ? weatherView(now, app.settings.weatherFlipSec) : "now";
+  const caption = badges ? weatherCaption(view, now) : "";
   const tomorrow = view === "tomorrow";
-  const next = w ? `${w.observed_at}|${night}|${caption}` : "";
-  if (next === sig) return;
+  const next = w ? `${w.observed_at}|${night}|${caption}|${badges != null}` : "";
+  // 凡例の行や時計の大きさは地図の外で変わるので、描き直さない回も間引きだけはやり直す
+  if (next === sig) return map.thinCities();
   sig = next;
   const box = $("#weather-caption");
-  box.hidden = !w;
+  box.hidden = !badges;
   box.textContent = caption;
   // 雨の強い地点ほど上に
   const rain = w ? [...w.rain].sort((a, b) => a[2] - b[2]).map(([lat, lon, mm]) => ({ lat, lon, color: rainColor(mm) })) : [];
   map.rainLayer.replaceChildren(...dotPaths(rain, "rain-dot"));
-  map.cityLayer.replaceChildren(...(w ? w.cities.map((c) => cityMarker(c, night, tomorrow)) : []));
+  map.cityLayer.replaceChildren(...(badges ? [...badges.cities].sort((a, b) => rank(a.name) - rank(b.name)).map((c) => cityMarker(c, night, tomorrow)) : []));
   map.refreshCities();
 }
+
+/**
+ * 札を置く優先の順。狭い画面で重なるときは、後ろの都市の札から出さない。
+ * 人口と、天気を見たい人の多さで大都市を先に (東京・大阪・名古屋)、次に地方の中心 (札幌・福岡・那覇・仙台・広島・新潟)。
+ * 東京・大阪の近所の千葉・神戸と、福岡の近所の鹿児島・高知は、近くの大都市と同じ天気を読めるので最後
+ */
+const PRIORITY = ["東京", "大阪", "札幌", "福岡", "那覇", "名古屋", "仙台", "広島", "新潟", "鹿児島", "高知", "千葉", "神戸"];
+const rank = (name: string) => PRIORITY.indexOf(name) + 1 || PRIORITY.length + 1;
 
 /** 札の向き (無ければ上)。大阪と神戸、東京と千葉は近いので左右に分ける */
 const SIDE: Record<string, "up" | "down" | "left" | "right"> = { 神戸: "left", 大阪: "right", 東京: "left", 千葉: "right", 高知: "down" };
