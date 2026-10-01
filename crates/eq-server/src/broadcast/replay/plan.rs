@@ -92,11 +92,7 @@ impl Series {
                 start_ms,
                 hindsight: hindsight_of(&events),
                 name: place_name(&events),
-                max_scale: events
-                    .iter()
-                    .filter_map(Event::max_scale)
-                    .max()
-                    .unwrap_or(Scale::UNKNOWN),
+                max_scale: observed_scale(&events),
             });
         }
         if members.is_empty() {
@@ -112,6 +108,21 @@ impl Series {
         events.sort_by_key(|e| e.received_at_ms);
         Some(Series { events, members })
     }
+}
+
+/// 地震の最大震度。地震情報があればその観測、無ければ緊急地震速報の予測 (予測は観測より大きく出ることがある。検知 worker/detect.rs と同じ規則)
+fn observed_scale(events: &[Event]) -> Scale {
+    let max = |quake: bool| {
+        events
+            .iter()
+            .filter(|e| matches!(e.body, EventBody::Quake(_)) == quake)
+            .filter_map(Event::max_scale)
+            .max()
+    };
+    max(true)
+        .filter(|s| s.is_known())
+        .or(max(false))
+        .unwrap_or(Scale::UNKNOWN)
 }
 
 /// 後ろの報ほど確かな震源の名前 (無ければ空)
@@ -435,6 +446,22 @@ mod tests {
             lon: None,
         };
         assert!(Series::of(&events, &[other]).is_none());
+    }
+
+    #[test]
+    fn a_member_has_the_observed_scale_and_falls_back_to_the_forecast() {
+        let forecast = eew("E", 1, T + 5_000, T0, false, Scale::S5_LOWER, TOKYO);
+        let observed = quake(T + 90_000, QuakeInfoType::DetailScale, T0, Scale::S3, Some(TOKYO));
+        let scale =
+            |events: &[Event]| Series::of(events, &[pick_target(events).unwrap()]).unwrap().members[0].max_scale;
+        assert_eq!(scale(&[forecast.clone(), observed]), Scale::S3);
+        assert_eq!(scale(&[forecast]), Scale::S5_LOWER);
+        // 震源だけの地震情報 (震度が無い) なら、予測で補う
+        let unknown = quake(T + 90_000, QuakeInfoType::Destination, T0, Scale::UNKNOWN, Some(TOKYO));
+        assert_eq!(
+            scale(&[eew("E", 1, T + 5_000, T0, false, Scale::S4, TOKYO), unknown]),
+            Scale::S4
+        );
     }
 
     #[test]
