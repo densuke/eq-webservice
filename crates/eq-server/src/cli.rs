@@ -7,6 +7,8 @@ use anyhow::Context;
 pub const USAGE: &str = "\
 usage: eq-server [options]
        eq-server convert <samples/scenarios> <web/public/demo>   (デモモード用の JSON を作る)
+       eq-server replay-video --from <ms> --to <ms> --out <x.mp4> (--events <jsonl> | --archive <URL>)
+                                                          (記録から音入りの動画を描き直す。詳しくは replay-video --help)
        eq-server bgm-send <MP3 のディレクトリ> <http://127.0.0.1:8010/bgm.mp3>
                                                           (平時の BGM を Icecast へ送る。パスワードは ICECAST_SOURCE_PASSWORD)
 

@@ -11,9 +11,10 @@ use super::data::{CityWeather, Warnings};
 use super::eew::{forecast_tag, EewSummary, Wave};
 use super::frame::{Frame, OKINAWA};
 use super::geo::{Shape, View};
+use super::hindsight::Hindsight;
 use super::icon::Icons;
 use super::model::{scale_color, scale_text_color, QuakeSummary};
-use super::paint::{epicenter, rect, rrect, LAND, LAND_EDGE, MUTED, NEIGHBOR, NEIGHBOR_EDGE, SEA};
+use super::paint::{epicenter, ghost_epicenter, rect, rrect, LAND, LAND_EDGE, MUTED, NEIGHBOR, NEIGHBOR_EDGE, SEA};
 use super::panel;
 use super::test_mark;
 use super::text::Text;
@@ -49,6 +50,10 @@ pub struct Scene<'a> {
     pub label: &'a str,
     /// テスト配信 (赤い帯・TEST の透かし・[テスト] を必ず描く)
     pub test: bool,
+    /// 記録から描き直すとき、のちの報で分かった震源 (まだ本物の震源が届いていない間だけ。薄い印で出す)。ライブは None
+    pub hindsight: Option<&'a Hindsight>,
+    /// 記録から描き直すとき、時計を飛ばした直後 (時計の枠に「早送り」を出す)。ライブは false
+    pub fast_forward: bool,
 }
 
 pub struct Renderer {
@@ -115,6 +120,9 @@ impl Renderer {
                 Some(s) => draw_shake(&mut pm, &mut self.text, &self.prefs, f, &s),
                 None => calm::draw(&mut pm, &mut self.text, &self.areas, f, scene),
             }
+            if let Some(h) = scene.hindsight {
+                draw_hindsight(&mut pm, &mut self.text, f, h);
+            }
         }
         panel::draw_dynamic(&mut pm, &mut self.text, scene);
         // 警報以上の帯は平時だけ。テスト配信の赤い帯の下に置く
@@ -141,6 +149,17 @@ impl Renderer {
                 }
             }
         }
+    }
+}
+
+/// のちの報で分かった震源の薄い印 (札は本図だけ)。本物の震源が届くまでの間に出す
+fn draw_hindsight(pm: &mut Pixmap, text: &mut Text, frame: &Frame, h: &Hindsight) {
+    let Some((x, y)) = frame.marker(h.lon, h.lat) else {
+        return;
+    };
+    ghost_epicenter(pm, x, y);
+    if text.enabled() && !frame.is_inset() {
+        text.draw(pm, "のちに判明する震源", x + 14.0, y + 4.0, 12.0, MUTED);
     }
 }
 

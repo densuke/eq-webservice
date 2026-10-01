@@ -75,7 +75,23 @@ fn place_of(q: &Quake) -> Place {
     }
 }
 
-/// まとまりの場所: 後から来た情報を優先し、欠けた項目は前の情報で補う
+/// 地震情報・緊急地震速報 1 件の場所 (ほかの種類は None)。動画に入れる報を、同じ地震に絞るのに使う
+pub fn event_place(e: &Event) -> Option<Place> {
+    match &e.body {
+        EventBody::Quake(q) => Some(place_of(q)),
+        EventBody::Eew(x) => {
+            let h = x.hypocenter.as_ref();
+            Some(Place {
+                origin_ms: x.origin_time_ms,
+                lat: h.and_then(|h| h.latitude),
+                lon: h.and_then(|h| h.longitude),
+            })
+        }
+        _ => None,
+    }
+}
+
+/// まとまりの場所:後から来た情報を優先し、欠けた項目は前の情報で補う
 fn merged_place(g: &[(u64, &Quake)]) -> Place {
     let last = |f: &dyn Fn(&Place) -> Option<f64>| g.iter().rev().find_map(|(_, q)| f(&place_of(q)));
     Place {

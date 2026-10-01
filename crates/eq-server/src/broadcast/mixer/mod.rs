@@ -15,7 +15,7 @@ use tokio::net::unix::pipe;
 use tokio::sync::mpsc;
 
 use bgm::{BgmStream, PcmSource};
-use synth::AlertLevel;
+pub use synth::AlertLevel;
 
 /// 音の形式: 44.1kHz・ステレオ・i16 (L R の交互)
 pub const RATE: u32 = 44_100;

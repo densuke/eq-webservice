@@ -317,6 +317,30 @@ journalctl --user -u eq-broadcast -f
 
 `eq-server` の入れ替えは、ファイルを置き換えてから `systemctl --user restart eq-broadcast` です。
 
+#### 記録から地震の動画を作る (replay-video)
+
+記録 (jsonl) から当時の画面を描き直して、音入りの mp4 を 1 本作ります (仕様は [docs/replay-video.md](docs/replay-video.md) の 4 章)。
+範囲の報のうち、最大震度が一番大きい地震の報だけを使います。Chrome は使わず、native の描画と mixer の音で作ります (YouTube には送りません)。
+
+```sh
+# e2: 記録 (jsonl の sink のファイル) を直接読む。範囲は received_at_ms (epoch ミリ秒)
+eq-server replay-video --from 1790744400000 --to 1790745300000 --out x.mp4 \
+  --events data/events.jsonl --map-dir map --font /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc
+# Mac など: 公開している /api/archive から取る (範囲は 1 時間まで)
+eq-server replay-video --from 1790744400000 --to 1790745300000 --out x.mp4 --archive https://eq.fuga.jp
+```
+
+- 5fps の固定のコマで描きます (`--fps`)。何も届かない間は早送りで詰めます。音は先に AAC にしてから映像と合わせます。
+- `--events` は samples/scenarios の形 (上流の JSON のまま) も読めます。そのときは発表時刻を届いた時刻とします。
+- e2 では、配信 (Nice=19) より後回しになるように、CPU とメモリに上限を付けて起動します (nice だけでは配信と五分五分になります)。
+
+```sh
+systemd-run --user --wait -p CPUQuota=10% -p CPUWeight=1 -p MemoryMax=200M -p MemorySwapMax=0 \
+  eq-server replay-video --from ... --to ... --out x.mp4 --events data/events.jsonl --map-dir map
+```
+
+- Linux では `/proc/pressure/{io,memory}` の full の 60 秒平均を 30 秒ごとに見て、20% を超えている間は描くのも ffmpeg への書き込みも止めて待ちます。10 分待っても下がらなければ、作りかけを消して失敗で終わります (Mac では見ません)。
+
 ## プラグイン（配信先）
 
 `config.toml` の `[[sinks]]` に並べます。共通のキー:

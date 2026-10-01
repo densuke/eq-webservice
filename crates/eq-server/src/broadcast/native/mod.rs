@@ -10,10 +10,12 @@ mod draw;
 mod eew;
 mod frame;
 mod geo;
+mod hindsight;
 mod icon;
 mod model;
 mod paint;
 mod panel;
+mod step;
 mod telops;
 mod test_mark;
 mod text;
@@ -33,8 +35,14 @@ use super::record::Shown;
 use super::BroadcastConfig;
 use crate::quake::Event;
 use data::{CityWeather, ServerMessage, Warnings};
-use draw::{Renderer, Scene};
-use icon::Icons;
+use draw::Renderer;
+
+// 記録から描き直す動画 (broadcast/replay) が使う
+pub(super) use eew::{eew_place, latest_eews, quake_place, EEW_ACTIVE_MS};
+pub(super) use hindsight::{hindsight_of, Hindsight};
+pub(super) use icon::Icons;
+pub(super) use model::{event_place, group_quakes, same_quake};
+pub(super) use step::{look, Input, Output, Stepper};
 
 const RECONNECT_AFTER: Duration = Duration::from_secs(5);
 /// 警報・天気を取り直す間隔 (取れなかったときは短く)
@@ -165,7 +173,7 @@ pub fn start(cfg: &BroadcastConfig, notices: Option<UnboundedSender<String>>) ->
     })
 }
 
-fn load_renderer(cfg: &BroadcastConfig) -> anyhow::Result<Renderer> {
+pub(super) fn load_renderer(cfg: &BroadcastConfig) -> anyhow::Result<Renderer> {
     let view = geo::View::fit_home(draw::MAP_RECT);
     let dir = std::path::Path::new(&cfg.map_dir);
     // 周辺国の陸地は背景なので、無くても続ける
@@ -200,81 +208,39 @@ struct Out {
     flip_s: u64,
 }
 
-async fn render_loop(mut renderer: Renderer, st: Shared, out: Out, notices: Option<UnboundedSender<String>>) {
-    let mut last_key = None;
-    let mut still = None;
+async fn render_loop(renderer: Renderer, st: Shared, out: Out, notices: Option<UnboundedSender<String>>) {
+    let mut stepper = Stepper::new(renderer);
     let mut last_calm = None;
     let mut tick = tokio::time::interval(Duration::from_millis(out.check_ms));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         tick.tick().await;
-        let s = st.lock().unwrap_or_else(|e| e.into_inner());
-        let now = model::server_now(local_now_ms(), s.offset);
-        let groups = model::group_quakes(&s.events);
-        let eews = eew::latest_eews(&s.events);
-        let current = eew::current(&groups, &eews, now);
-        let (quake, shown_eew) = match current {
-            Some(eew::Current::Quake(q)) => (Some(q), None),
-            Some(eew::Current::Eew(e)) => (None, Some(e)),
-            None => (None, None),
-        };
-        // 地震波は地震の画面のときだけ描く
-        let waves = if current.is_some() {
-            eew::waves(&groups, &eews, now)
-        } else {
-            Vec::new()
-        };
-        // 地震波以外を描き直すのは、データが変わったとき・平時と地震が切り替わったとき・秒が進んだときだけ。
-        // 地震波が動いている間は、その上にコマごとに波だけを重ねる
-        let still_key = (
-            s.rev,
-            quake.map(|q| (q.updated_ms, q.max_scale.0)),
-            shown_eew.map(|e| e.received_ms),
-            now / 1000,
-        );
-        let key = (still_key, if waves.is_empty() { 0 } else { now / out.check_ms });
-        if last_key == Some(key) {
-            continue;
-        }
-        last_key = Some(key);
-        if still.as_ref().is_none_or(|(k, _)| *k != still_key) {
-            let scene = Scene {
-                quake,
-                eew: shown_eew,
-                history: &groups[..groups.len().min(HISTORY)],
+        let o = {
+            let s = st.lock().unwrap_or_else(|e| e.into_inner());
+            stepper.step(&Input {
+                events: &s.events,
+                now: model::server_now(local_now_ms(), s.offset),
+                rev: s.rev,
                 warnings: s.warnings.as_ref(),
                 weather: s.weather.as_ref(),
                 icons: &s.icons,
-                flip_s: out.flip_s,
-                now_ms: now,
-                connected: s.connected,
                 bgm_title: &s.bgm_title,
+                connected: s.connected,
                 label: &out.label,
                 test: out.test,
-            };
-            still = Some((still_key, renderer.render(&scene)));
-        }
-        let Some((_, base)) = &still else { continue };
-        let with_waves;
-        let pm = if waves.is_empty() {
-            base
-        } else {
-            let mut pm = base.clone();
-            renderer.draw_waves(&mut pm, &waves);
-            with_waves = pm;
-            &with_waves
+                check_ms: out.check_ms,
+                flip_s: out.flip_s,
+                hindsight: None,
+                fast_forward: false,
+            })
         };
-        let calm = current.is_none();
-        let shown = eew::shown(current);
-        drop(s);
+        let Some(Output { i420, calm, shown }) = o else {
+            continue;
+        };
         // calm より先に送る (record は calm が変わったときに読む)
         let _ = out.shown.send_if_modified(|c| std::mem::replace(c, shown) != shown);
         let _ = out.calm.send_if_modified(|c| std::mem::replace(c, calm) != calm);
-        let _ = out.frames.send(Arc::new(yuv::rgba_to_i420(
-            pm.data(),
-            draw::W as usize,
-            draw::H as usize,
-        )));
+        let _ = out.frames.send(Arc::new(i420));
         if last_calm != Some(calm) {
             last_calm = Some(calm);
             if let Some(n) = &notices {
