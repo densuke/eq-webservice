@@ -4,7 +4,7 @@ import type { PrefScale, TsunamiArea } from "./types.ts";
 import { scaleColor, scaleLabel, scaleTextColor } from "./scale.ts";
 import { interiorPoint, labelPx, mainRing, pickLabels } from "./labels.ts";
 import { geoCircle } from "./waves.ts";
-import { union, type Box } from "./camera.ts";
+import { ringsBox, union, type Box } from "./camera.ts";
 import mapCss from "./map.css";
 import { esc } from "./html.ts";
 import { thinCityLayer } from "./thin.ts";
@@ -112,6 +112,8 @@ export class JapanMap {
   private centers = new Map<string, [number, number]>();
   /** 都道府県の本土の外接矩形 (カメラ用。東京都の伊豆・小笠原などの離島まで映さないように) */
   private mainBoxes = new Map<string, Box>();
+  /** 地震情報細分区域ごとの外接矩形 (全ての輪。島の多い区域も全体を囲む) */
+  private areaBoxes = new Map<string, Box>();
   private labelEls = new Map<string, SVGGElement>();
   private labelSig = "";
   /** 予測 (緊急地震速報) で塗っている都道府県・細分区域 */
@@ -267,6 +269,10 @@ export class JapanMap {
       if (cls !== "neighbor") {
         const rings = f.geometry.coordinates.flatMap((poly) => poly.map((ring) => ring.map(([lon, lat]) => project(lon, lat))));
         this.centers.set(f.properties.name, interiorPoint(rings));
+        if (cls === "area") {
+          const b = ringsBox(rings);
+          if (b) this.areaBoxes.set(f.properties.name, b);
+        }
         if (cls === "pref") {
           const r = mainRing(rings);
           const xs = r.map((p) => p[0]);
@@ -632,6 +638,11 @@ export class JapanMap {
   /** 都道府県の本土の外接矩形 (地図座標)。離島の地震は震央の点と合わせて映す */
   prefBox(names: string[]): Box | null {
     return names.reduce<Box | null>((box, n) => union(box, this.mainBoxes.get(n) ?? null), null);
+  }
+
+  /** 揺れた地震情報細分区域の外接矩形の和 (地図座標)。区域が読めていない・名前が引けないときは null */
+  areaBox(names: string[]): Box | null {
+    return names.reduce<Box | null>((box, n) => union(box, this.areaBoxes.get(n) ?? null), null);
   }
 
   /** 目標へ指数的に近づける (目標が毎フレーム動いても滑らかに追う) */

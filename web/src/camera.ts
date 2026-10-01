@@ -19,6 +19,15 @@ export function pointBox(x: number, y: number, rKm: number): Box {
   return { x0: x - r, y0: y - r, x1: x + r, y1: y + r };
 }
 
+/** 輪 (点の列) すべてを囲む箱。輪が無ければ null */
+export function ringsBox(rings: [number, number][][]): Box | null {
+  const pts = rings.flat();
+  if (!pts.length) return null;
+  const xs = pts.map((p) => p[0]);
+  const ys = pts.map((p) => p[1]);
+  return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
+}
+
 export function union(a: Box | null, b: Box | null): Box | null {
   if (!a) return b;
   if (!b) return a;

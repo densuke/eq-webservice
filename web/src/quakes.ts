@@ -1,5 +1,6 @@
 // 地震の選び方: 優先度・一時的な番号・P波/S波を描く対象・直近の地震 (DOM には触らない)。
 
+import { quakeDetail } from "./detail.ts";
 import { FULL_MS } from "./fade.ts";
 import type { Hindsight } from "./history.ts";
 import { type Group, latestEew, summarizeQuake } from "./groups.ts";
@@ -113,21 +114,24 @@ export interface Center {
   depth: number;
 }
 
-/** 地震 (地震情報・EEW) のグループから震源・発生時刻・揺れた都道府県を取り出す */
-export function geoOf(g: Group): { center: Center | null; origin: number | null; prefs: string[] } | null {
+/** 地震 (地震情報・EEW) のグループから震源・発生時刻・揺れた都道府県・揺れた地震情報細分区域を取り出す */
+export function geoOf(g: Group): { center: Center | null; origin: number | null; prefs: string[]; areas: string[] } | null {
   let h: Hypocenter | null;
   let origin: number | null;
   let prefs: string[];
+  let areas: string[];
   if (g.kind === "eew") {
     const e = latestEew(g);
     if (e.cancelled) return null;
     [h, origin, prefs] = [e.hypocenter, e.origin_time_ms, e.pref_max.map((p) => p.pref)];
+    areas = e.areas.map((a) => a.name);
   } else if (g.kind === "quake") {
     const q = summarizeQuake(g);
     [h, origin, prefs] = [q.hypocenter, q.originTimeMs, q.prefMax.map((p) => p.pref)];
+    areas = quakeDetail(q.points, app.stations).areas.map((a) => a.name);
   } else return null;
   const center = h?.latitude != null && h.longitude != null ? { lat: h.latitude, lon: h.longitude, depth: h.depth_km ?? 10 } : null;
-  return { center, origin, prefs };
+  return { center, origin, prefs, areas };
 }
 
 /** group は本物の報から描く地震。後の報で分かった震源 (再生の始まり) から描くものは無い */

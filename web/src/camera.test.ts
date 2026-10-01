@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { DEFAULT_STOP_KM, followRadiusKm, KM_TO_UNITS, MIN_RADIUS_KM, pad, pointBox, stopRadiusKm, union } from "./camera.ts";
+import { DEFAULT_STOP_KM, followRadiusKm, KM_TO_UNITS, MIN_RADIUS_KM, pad, pointBox, ringsBox, stopRadiusKm, union } from "./camera.ts";
 
 test("follow radius starts at the minimum, grows with the S wave and stops", () => {
   assert.equal(followRadiusKm(null, 400), MIN_RADIUS_KM);
@@ -25,4 +25,11 @@ test("union and pad", () => {
   const p = pad({ x0: 0, y0: 0, x1: 1000, y1: 10 });
   assert.ok(p.x1 - p.x0 > 1000);
   assert.ok(Math.abs(p.y1 - p.y0 - 2 * MIN_RADIUS_KM * KM_TO_UNITS) < 1e-9);
+});
+
+test("rings box covers every ring, so an area of many islands is framed whole", () => {
+  assert.equal(ringsBox([]), null);
+  const islandA: [number, number][] = [[0, 0], [1, 0], [1, 1]];
+  const islandB: [number, number][] = [[10, -5], [12, -4]];
+  assert.deepEqual(ringsBox([islandA, islandB]), { x0: 0, y0: -5, x1: 12, y1: 1 });
 });
