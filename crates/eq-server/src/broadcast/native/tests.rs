@@ -60,6 +60,7 @@ fn quake(max: Scale, prefs: &[(&str, Scale)], at: Option<(f64, f64)>) -> QuakeSu
         max_scale: max,
         tsunami: "None".into(),
         pref_scales: prefs.iter().map(|(p, s)| (p.to_string(), *s)).collect(),
+        points: Vec::new(),
     }
 }
 
@@ -84,7 +85,7 @@ fn eew(warning: bool, prefs: &[(&str, Scale)], at: Option<(f64, f64)>) -> EewSum
         }),
         max_scale: prefs.iter().map(|p| p.1).max().unwrap_or(Scale::UNKNOWN),
         pref_scales: prefs.iter().map(|(p, s)| (p.to_string(), *s)).collect(),
-        has_areas: false,
+        area_scales: Vec::new(),
     }
 }
 

@@ -67,22 +67,6 @@ export function keepForecast(active: boolean, observed: boolean, sinceLastReport
   return active || (!observed && sinceLastReportMs <= FORECAST_KEEP_MS);
 }
 
-/** 続報で外された予測の地域を、外されてからこの時間は薄れながら残す (いきなり消えると不自然なので) */
-const DROPPED_MS = 8000;
-
-/**
- * 続報で外された予測の地域のうち、外されてから ms 以内のもの (最後に予測されたときの震度)。
- * reports は同じ地震の各報 (届いた順)。最後の報にある地域は含めない
- */
-export function droppedForecast(reports: { at: number; items: AreaScale[] }[], now: number, ms = DROPPED_MS): AreaScale[] {
-  const last = new Map<string, { scale: Scale; i: number }>();
-  reports.forEach((r, i) => r.items.forEach(({ name, scale }) => last.set(name, { scale, i })));
-  const latest = reports.length - 1;
-  return [...last]
-    .filter(([, v]) => v.i < latest && now - reports[v.i + 1].at <= ms)
-    .map(([name, v]) => ({ name, scale: v.scale }));
-}
-
 /** 緊急地震速報の区域。予測の上限 (「〜程度以上」なら下限) で塗る */
 export function eewAreaScales(areas: EewArea[]): AreaScale[] {
   return maxByArea(areas.map((a) => ({ name: a.name, scale: a.scale_to ?? a.scale_from })));

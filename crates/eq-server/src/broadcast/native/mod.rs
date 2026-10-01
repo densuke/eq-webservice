@@ -5,16 +5,19 @@
 
 mod banner;
 mod calm;
+mod camera;
 mod data;
 mod draw;
 mod eew;
 mod frame;
 mod geo;
+mod held;
 mod hindsight;
 mod icon;
 mod model;
 mod paint;
 mod panel;
+mod shaken;
 mod step;
 mod telops;
 mod test_mark;
@@ -187,7 +190,21 @@ pub(super) fn load_renderer(cfg: &BroadcastConfig) -> anyhow::Result<Renderer> {
         tracing::warn!("broadcast: font {} を読めないので、文字は描きません: {e:#}", cfg.font);
         text::Text::none()
     });
-    Ok(Renderer::new(view, neighbors, prefs, areas, text))
+    let mut renderer = Renderer::new(view, neighbors, prefs, areas, text);
+    if cfg.zoom {
+        // 地震情報細分区域は寄りの範囲の計算だけに使う。読めなければ、県の本土の範囲で寄る
+        let zones = geo::load(&dir.join("areas.geojson"), "name", &view).unwrap_or_else(|e| {
+            tracing::warn!("broadcast: 地震情報細分区域を読めないので、県の範囲で寄ります: {e:#}");
+            Vec::new()
+        });
+        // 観測点の表は、各地の震度の観測点から区域を引くのに使う。読めなければ区域で届いた分だけで寄る
+        let stations = shaken::load_stations(&dir.join("stations.json")).unwrap_or_else(|e| {
+            tracing::warn!("broadcast: 観測点の表を読めないので、観測点では寄りません: {e:#}");
+            Default::default()
+        });
+        renderer.enable_zoom(zones, stations);
+    }
+    Ok(renderer)
 }
 
 /// https://host → wss://host/ws
@@ -379,3 +396,5 @@ async fn bgm_title_loop(url: String, st: Shared) {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod zoom_tests;

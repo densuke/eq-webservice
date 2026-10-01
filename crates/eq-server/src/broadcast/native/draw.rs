@@ -7,15 +7,17 @@ use tiny_skia::{Path, Pixmap};
 
 use super::banner;
 use super::calm;
+use super::camera::Fit;
 use super::data::{CityWeather, Warnings};
 use super::eew::{forecast_tag, EewSummary, Wave};
-use super::frame::{Frame, OKINAWA};
+use super::frame::{Clip, Frame, OKINAWA};
 use super::geo::{Shape, View};
 use super::hindsight::Hindsight;
 use super::icon::Icons;
 use super::model::{scale_color, scale_text_color, QuakeSummary};
 use super::paint::{epicenter, ghost_epicenter, rect, rrect, LAND, LAND_EDGE, MUTED, NEIGHBOR, NEIGHBOR_EDGE, SEA};
 use super::panel;
+use super::shaken::{Stations, Zones};
 use super::test_mark;
 use super::text::Text;
 use crate::quake::{Hypocenter, Scale};
@@ -58,9 +60,15 @@ pub struct Scene<'a> {
 
 pub struct Renderer {
     pub(super) text: Text,
+    /// 日本全体の本図 (path はこの座標で作ってある)
     main: Frame,
     /// 離島の別枠
     insets: Vec<Frame>,
+    /// 寄った本図 (set_view で入れる)。あれば、本図と別枠の代わりにこれを描く
+    zoomed: Option<Frame>,
+    /// 寄りの設定が有効なとき: 地図の枠の型と、地震情報細分区域の外接矩形 (名前 -> 地図の座標)
+    clip: Option<Clip>,
+    zones: Zones,
     /// 周辺国の陸地 (都道府県より下に描く。無ければ空)
     neighbors: Vec<Shape>,
     prefs: Vec<Shape>,
@@ -77,6 +85,9 @@ impl Renderer {
             text,
             insets: Frame::inset(&view, &OKINAWA).into_iter().collect(),
             main: Frame::main(view),
+            zoomed: None,
+            clip: None,
+            zones: Zones::default(),
             neighbors,
             prefs,
             areas: areas.into_iter().map(|s| (s.key.clone(), s)).collect(),
@@ -84,6 +95,28 @@ impl Renderer {
         };
         r.base = r.draw_base();
         r
+    }
+
+    /// 寄りを有効にする。zones は地震情報細分区域 (寄りの範囲の計算にだけ使い、塗りは描かない)
+    pub fn enable_zoom(&mut self, areas: Vec<Shape>, stations: Stations) {
+        self.clip = Frame::map_clip();
+        self.zones = Zones::new(areas, &self.prefs, stations);
+    }
+
+    pub fn zoom_enabled(&self) -> bool {
+        self.clip.is_some()
+    }
+
+    /// 寄りの範囲を求める表 (細分区域・観測点・県)
+    pub fn zones(&self) -> &Zones {
+        &self.zones
+    }
+
+    /// 次に描く地図の表示範囲 (地図の座標)。None なら日本全体 (別枠も出す)。寄りが有効でなければ何もしない
+    pub fn set_view(&mut self, fit: Option<Fit>) {
+        self.zoomed = fit
+            .zip(self.clip.as_ref())
+            .map(|(f, clip)| Frame::zoomed(&self.main.view, super::geo::View::from_fit(&f, MAP_RECT), clip));
     }
 
     /// 動かない部分: 海・陸・県境、別枠、パネルの枠
@@ -95,14 +128,7 @@ impl Renderer {
                 rrect(&mut pm, x - 1.0, y - 1.0, w + 2.0, h + 2.0, 4.0, INSET_LINE, 1.0);
                 rect(&mut pm, x, y, w, h, SEA, 1.0);
             }
-            for s in &self.neighbors {
-                f.fill(&mut pm, &s.path, NEIGHBOR, 1.0);
-                f.stroke(&mut pm, &s.path, NEIGHBOR_EDGE, 1.0, 0.6);
-            }
-            for s in &self.prefs {
-                f.fill(&mut pm, &s.path, LAND, 1.0);
-                f.stroke(&mut pm, &s.path, LAND_EDGE, 1.0, 0.8);
-            }
+            draw_land(&mut pm, f, &self.neighbors, &self.prefs);
             if let Some(((x, y, _, _), title)) = f.inset_box() {
                 self.text.draw(&mut pm, title, x + 4.0, y + 12.0, 10.0, MUTED);
             }
@@ -115,7 +141,13 @@ impl Renderer {
     /// 文字や塗りは重いので、波が動く間も 1 秒ごとにここで描き、コマごとには draw_waves だけを重ねる
     pub fn render(&mut self, scene: &Scene) -> Pixmap {
         let mut pm = self.base.clone();
-        for f in std::iter::once(&self.main).chain(&self.insets) {
+        if let Some(z) = &self.zoomed {
+            // 日本全体の地図 (と別枠) を海で隠し、寄った地図を描き直す
+            rect(&mut pm, 0.0, BAR_H, MAP_W, H as f32 - BAR_H, SEA, 1.0);
+            draw_land(&mut pm, z, &self.neighbors, &self.prefs);
+            panel::draw_legend(&mut pm, &mut self.text);
+        }
+        for f in frames(&self.main, &self.insets, &self.zoomed) {
             match Shake::of(scene) {
                 Some(s) => draw_shake(&mut pm, &mut self.text, &self.prefs, f, &s),
                 None => calm::draw(&mut pm, &mut self.text, &self.areas, f, scene),
@@ -138,8 +170,9 @@ impl Renderer {
 
     /// 地震波の円 (P 波は青、S 波は赤で、内側をうっすら塗る) を重ねる
     pub fn draw_waves(&self, pm: &mut Pixmap, waves: &[Wave]) {
+        // 円の path は日本全体の本図の座標で作り、寄った本図・別枠は変換して映す
         for (p, s) in wave_paths(&self.main.view, waves) {
-            for f in std::iter::once(&self.main).chain(&self.insets) {
+            for f in frames(&self.main, &self.insets, &self.zoomed) {
                 if let Some(path) = &s {
                     f.fill(pm, path, S_WAVE, 0.05);
                     f.stroke(pm, path, S_WAVE, 1.0, WAVE_WIDTH);
@@ -149,6 +182,26 @@ impl Renderer {
                 }
             }
         }
+    }
+}
+
+/// 描く面: 寄っていれば寄った本図だけ、そうでなければ本図と別枠
+fn frames<'a>(main: &'a Frame, insets: &'a [Frame], zoomed: &'a Option<Frame>) -> Vec<&'a Frame> {
+    match zoomed {
+        Some(z) => vec![z],
+        None => std::iter::once(main).chain(insets).collect(),
+    }
+}
+
+/// 周辺国の陸地と都道府県をその面に描く
+fn draw_land(pm: &mut Pixmap, f: &Frame, neighbors: &[Shape], prefs: &[Shape]) {
+    for s in neighbors {
+        f.fill(pm, &s.path, NEIGHBOR, 1.0);
+        f.stroke(pm, &s.path, NEIGHBOR_EDGE, 1.0, 0.6);
+    }
+    for s in prefs {
+        f.fill(pm, &s.path, LAND, 1.0);
+        f.stroke(pm, &s.path, LAND_EDGE, 1.0, 0.8);
     }
 }
 
@@ -230,7 +283,9 @@ fn draw_shake(pm: &mut Pixmap, text: &mut Text, prefs: &[Shape], frame: &Frame, 
         for (s, sc) in &hit {
             let label = sc.label();
             let w = 12.0 + 9.0 * label.chars().count() as f32;
-            let (x, y) = s.center;
+            let Some((x, y)) = frame.point(s.center) else {
+                continue;
+            };
             rrect(pm, x - w / 2.0, y - 9.0, w, 18.0, 4.0, edge, 0.85);
             rrect(
                 pm,

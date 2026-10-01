@@ -5,6 +5,7 @@ use crate::quake::{Event, EventBody, Hypocenter, Scale};
 
 use crate::broadcast::record::Shown;
 
+use super::held::hold;
 use super::model::{current_quake, same_quake, Place, QuakeSummary};
 
 /// 緊急地震速報を表示し続ける時間 (web の EEW_BANNER_MS)
@@ -18,7 +19,7 @@ pub const VS_KM_S: f64 = 3.75;
 /// 深さが分からないときの深さ (web の geoOf)
 pub const DEFAULT_DEPTH_KM: f64 = 10.0;
 
-/// 同じ地震 (event_id) の最新の報
+/// 同じ地震 (event_id) の最新の報 (予想は報をまたいだ最大)
 #[derive(Debug, Clone, PartialEq)]
 pub struct EewSummary {
     pub event_id: String,
@@ -34,37 +35,45 @@ pub struct EewSummary {
     pub max_scale: Scale,
     /// 県ごとの予測震度
     pub pref_scales: Vec<(String, Scale)>,
-    /// 地域ごとの予測があるか (札を出すかの判断にだけ使う。地域の塗りは細かすぎて描かない)
-    pub has_areas: bool,
+    /// 地域ごとの予測震度 (札を出すかの判断と、寄りの範囲に使う。地域の塗りは細かすぎて描かない)
+    pub area_scales: Vec<(String, Scale)>,
 }
 
-/// 緊急地震速報を同じ地震ごとにまとめる。最新の報 (serial が最大) が取り消しのものは外す
+/// 緊急地震速報を同じ地震ごとにまとめる。予想は報をまたいで最大で持ち続け (held.rs)、震源などは最新の報 (serial が最大)。
+/// 最新の報が取り消しのものは外す
 pub fn latest_eews(events: &[Event]) -> Vec<EewSummary> {
-    let mut latest: Vec<(&Event, &crate::quake::Eew)> = Vec::new();
+    let serial = |x: &crate::quake::Eew| x.serial.parse::<u64>().unwrap_or(0);
+    let mut by_event: Vec<Vec<(&Event, &crate::quake::Eew)>> = Vec::new();
     for ev in events {
         let EventBody::Eew(e) = &ev.body else { continue };
-        let serial = |x: &crate::quake::Eew| x.serial.parse::<u64>().unwrap_or(0);
-        match latest.iter_mut().find(|(_, o)| o.event_id == e.event_id) {
-            Some(slot) if serial(e) >= serial(slot.1) => *slot = (ev, e),
-            Some(_) => {}
-            None => latest.push((ev, e)),
+        match by_event.iter_mut().find(|g| g[0].1.event_id == e.event_id) {
+            Some(g) => g.push((ev, e)),
+            None => by_event.push(vec![(ev, e)]),
         }
     }
-    latest
+    by_event
         .into_iter()
-        .filter(|(_, e)| !e.cancelled)
-        .map(|(ev, e)| EewSummary {
-            event_id: e.event_id.clone(),
-            serial: e.serial.clone(),
-            received_ms: ev.received_at_ms,
-            warning: e.warning,
-            test: e.test,
-            origin_time: e.origin_time.clone().unwrap_or_else(|| e.issued_at.clone()),
-            origin_ms: e.origin_time_ms,
-            hypocenter: e.hypocenter.clone(),
-            max_scale: e.max_scale,
-            pref_scales: e.pref_max.iter().map(|p| (p.pref.clone(), p.scale)).collect(),
-            has_areas: !e.areas.is_empty(),
+        .filter_map(|g| {
+            // 同じ serial なら後から届いた方 (max_by_key は最後の最大を返す)
+            let (ev, e) = *g.iter().max_by_key(|(_, e)| serial(e))?;
+            if e.cancelled {
+                return None;
+            }
+            let live: Vec<_> = g.iter().filter(|(_, x)| !x.cancelled).map(|(_, x)| *x).collect();
+            let held = hold(&live);
+            Some(EewSummary {
+                event_id: e.event_id.clone(),
+                serial: e.serial.clone(),
+                received_ms: ev.received_at_ms,
+                warning: held.warning,
+                test: e.test,
+                origin_time: e.origin_time.clone().unwrap_or_else(|| e.issued_at.clone()),
+                origin_ms: e.origin_time_ms,
+                hypocenter: e.hypocenter.clone(),
+                max_scale: held.max_scale,
+                pref_scales: held.pref_scales,
+                area_scales: held.area_scales,
+            })
         })
         .collect()
 }
@@ -210,7 +219,7 @@ pub fn waves(quakes: &[QuakeSummary], eews: &[EewSummary], now_ms: u64) -> Vec<W
 
 /// 震源の印の近くに出す札。地域も県ごとの予測も空で、塗るものが無く、最大予測震度が分かるときだけ
 pub fn forecast_tag(e: &EewSummary) -> Option<String> {
-    (e.max_scale.is_known() && !e.has_areas && e.pref_scales.is_empty())
+    (e.max_scale.is_known() && e.area_scales.is_empty() && e.pref_scales.is_empty())
         .then(|| format!("予測最大震度{}", e.max_scale.label()))
 }
 
@@ -294,6 +303,7 @@ mod tests {
             max_scale: scale,
             tsunami: "None".into(),
             pref_scales: vec![],
+            points: vec![],
         }
     }
 
@@ -314,6 +324,31 @@ mod tests {
         assert_eq!(l.len(), 1);
         assert_eq!((l[0].event_id.as_str(), l[0].serial.as_str()), ("a", "2"));
         assert_eq!((l[0].max_scale, l[0].received_ms), (Scale::S4, t + 2_000));
+    }
+
+    #[test]
+    fn the_forecast_is_held_at_its_maximum_while_the_hypocenter_follows_the_latest_serial() {
+        let t = T0 as u64;
+        let events = [
+            eew_event("a", 1, t + 1_000, |e| e.max_scale = Scale::S4),
+            eew_event("a", 2, t + 2_000, |e| {
+                e.max_scale = Scale::S3;
+                e.warning = false;
+                e.pref_max.clear();
+                e.hypocenter = Some(hypo((36.0, 140.0), 20));
+            }),
+        ];
+        let l = latest_eews(&events);
+        assert_eq!(
+            (l[0].serial.as_str(), l[0].max_scale, l[0].received_ms),
+            ("2", Scale::S4, t + 2_000)
+        );
+        assert!(l[0].warning, "警報は持ち続ける");
+        assert_eq!(l[0].pref_scales, [("東京都".to_string(), Scale::S5_LOWER)]);
+        assert_eq!(l[0].hypocenter.as_ref().and_then(|h| h.latitude), Some(36.0));
+        // 取り消しが最新なら、前の報の予想も持ち越さずに消える
+        let cancelled = [events[0].clone(), eew_event("a", 3, t + 3_000, |e| e.cancelled = true)];
+        assert!(latest_eews(&cancelled).is_empty());
     }
 
     #[test]

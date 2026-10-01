@@ -10,12 +10,13 @@ use super::super::BroadcastConfig;
 pub const USAGE: &str = "\
 usage: eq-server replay-video --from <ms> --to <ms> --out <x.mp4> (--events <jsonl> | --archive <URL>)
            [--quake <origin_ms>[,<lat>,<lon>]]... [--chapters <x.json>]
-           [--fps 5] [--label \"記録から再現\"] [--map-dir web/public] [--font <ttf/ttc>] [--ffmpeg ffmpeg]
+           [--fps 5] [--no-zoom] [--label \"記録から再現\"] [--map-dir web/public] [--font <ttf/ttc>] [--ffmpeg ffmpeg]
   --from/--to   報を集める範囲 (received_at_ms。epoch ミリ秒)。--archive のときは 1 時間まで
   --events      eq-server の jsonl の記録 (sink が書いたもの) を直接読む。samples/scenarios の形も読める
   --archive     /api/archive から取る (例: https://eq.fuga.jp)
   --quake       動画に入れる地震 (発生時刻と、分かれば震源の緯度・経度)。何度でも書ける (連続地震)。省けば範囲で最大震度の 1 つ
-  --chapters    各地震の始まりの、動画の中の時刻を JSON で書き出す";
+  --chapters    各地震の始まりの、動画の中の時刻を JSON で書き出す
+  --no-zoom     震源へ寄らず、常に日本全体を映す (既定は web と同じく震源へ寄る)";
 
 /// 報の取り方
 #[derive(Debug, Clone, PartialEq)]
@@ -34,6 +35,8 @@ pub struct Options {
     pub quakes: Vec<Place>,
     pub chapters: Option<PathBuf>,
     pub fps: u32,
+    /// 地震のとき震源へ寄る
+    pub zoom: bool,
     pub label: String,
     pub map_dir: String,
     pub font: String,
@@ -52,6 +55,7 @@ pub fn parse(args: &[String]) -> anyhow::Result<Options> {
         quakes: Vec::new(),
         chapters: None,
         fps: 5,
+        zoom: true,
         label: "記録から再現".into(),
         map_dir: d.map_dir,
         font: d.font,
@@ -73,6 +77,7 @@ pub fn parse(args: &[String]) -> anyhow::Result<Options> {
             "--quake" => o.quakes.push(quake(&value("--quake")?)?),
             "--chapters" => o.chapters = Some(PathBuf::from(value("--chapters")?)),
             "--fps" => o.fps = value("--fps")?.parse().context("--fps")?,
+            "--no-zoom" => o.zoom = false,
             "--label" => o.label = value("--label")?,
             "--map-dir" => o.map_dir = value("--map-dir")?,
             "--font" => o.font = value("--font")?,
@@ -147,6 +152,13 @@ mod tests {
         ])
         .unwrap();
         assert_eq!((o.source, o.fps), (Source::Events("e.jsonl".into()), 10));
+    }
+
+    #[test]
+    fn the_view_zooms_in_on_the_epicenter_unless_told_not_to() {
+        let base = ["--from", "1", "--to", "9", "--out", "x", "--events", "e"];
+        assert!(parse_strs(&base).unwrap().zoom);
+        assert!(!parse_strs(&[&base[..], &["--no-zoom"]].concat()).unwrap().zoom);
     }
 
     #[test]

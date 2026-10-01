@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { droppedForecast, eewAreaScales, forecastTag, keepForecast, overlayForecast, quakeDetail, type Station } from "./detail.ts";
+import { eewAreaScales, forecastTag, keepForecast, overlayForecast, quakeDetail, type Station } from "./detail.ts";
 import type { EewArea, EewEvent, ObservationPoint } from "./types.ts";
 
 const stations = new Map<string, Station>([
@@ -56,23 +56,6 @@ test("observed intensities overlay the forecast: forecast stays only where nothi
     { name: "富山県西部", scale: 50, forecast: true },
   ]);
   assert.deepEqual(overlayForecast(observed, []), [{ name: "石川県能登", scale: 60, forecast: false }]);
-});
-
-test("areas dropped by a later report stay for a while with their last forecast, then go", () => {
-  const reports = [
-    { at: 0, items: [{ name: "石川県能登", scale: 50 }, { name: "新潟県上越", scale: 40 }] },
-    { at: 1000, items: [{ name: "石川県能登", scale: 55 }, { name: "新潟県上越", scale: 45 }, { name: "富山県西部", scale: 40 }] },
-    { at: 2000, items: [{ name: "石川県能登", scale: 55 }] },
-  ];
-  // 2 報目の後、3 報目で外された地域 (最後の予測の震度で)
-  assert.deepEqual(droppedForecast(reports, 5000, 8000), [
-    { name: "新潟県上越", scale: 45 },
-    { name: "富山県西部", scale: 40 },
-  ]);
-  // 外されてから 8 秒を過ぎたら出さない
-  assert.deepEqual(droppedForecast(reports, 10_001, 8000), []);
-  // 最後の報にある地域・報が 1 つだけのときは無い
-  assert.deepEqual(droppedForecast(reports.slice(0, 1), 0, 8000), []);
 });
 
 test("the forecast stays until observed intensities arrive, even after the warning ends", () => {

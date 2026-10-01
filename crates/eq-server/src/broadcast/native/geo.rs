@@ -5,12 +5,21 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use tiny_skia::{Path, PathBuilder, Transform};
 
+use super::camera::{Fit, MapBox};
+
 const LON0: f64 = 137.0;
 const LAT0: f64 = 37.0;
 const KY: f64 = 100.0;
 
 /// 日本全体が収まる表示範囲 (web/src/map.ts の HOME)
 const HOME: (f64, f64, f64, f64) = (128.0, 146.2, 30.0, 45.8);
+
+/// 日本全体の表示範囲 (地図の座標 x0, y0, x1, y1)
+pub fn home_bounds() -> (f64, f64, f64, f64) {
+    let (x0, y0) = project(HOME.0, HOME.3);
+    let (x1, y1) = project(HOME.1, HOME.2);
+    (x0, y0, x1, y1)
+}
 
 /// 地図の座標 (経度・緯度 → x, y。137°E 37°N が原点、北が上)
 pub fn project(lon: f64, lat: f64) -> (f64, f64) {
@@ -42,6 +51,16 @@ impl View {
             scale,
             ox: rx + (rw - (x1 - x0) * scale) / 2.0 - x0 * scale,
             oy: ry + (rh - (y1 - y0) * scale) / 2.0 - y0 * scale,
+        }
+    }
+
+    /// 地図の座標の表示範囲 fit (縦横比は rect に合っている) が rect いっぱいに映るようにする
+    pub fn from_fit(fit: &Fit, rect: (f64, f64, f64, f64)) -> View {
+        let scale = rect.2 / fit.w;
+        View {
+            scale,
+            ox: rect.0 - fit.x * scale,
+            oy: rect.1 - fit.y * scale,
         }
     }
 
@@ -86,6 +105,22 @@ pub struct Shape {
     pub path: Path,
     /// 印を置く場所 (いちばん大きい島の外接矩形の中心)
     pub center: (f32, f32),
+    /// 外接矩形 (地図の座標。寄りに使う)。bounds は離島も含み、main は一番大きい島だけ
+    pub bounds: MapBox,
+    pub main: MapBox,
+}
+
+/// 点列の外接矩形 (地図の座標)
+fn box_of(pts: &[[f64; 2]]) -> Option<MapBox> {
+    pts.iter()
+        .map(|p| project(p[0], p[1]))
+        .map(|(x, y)| MapBox {
+            x0: x,
+            y0: y,
+            x1: x,
+            y1: y,
+        })
+        .reduce(|a, b| MapBox::union(Some(a), Some(b)).unwrap_or(a))
 }
 
 #[derive(Deserialize)]
@@ -119,6 +154,7 @@ pub fn parse(json: &str, key: &str, view: &View) -> anyhow::Result<Vec<Shape>> {
             .to_string();
         let mut pb = PathBuilder::new();
         let mut biggest = (0.0f32, (0.0f32, 0.0f32));
+        let (mut bounds, mut main): (Option<MapBox>, Option<(f64, MapBox)>) = (None, None);
         for poly in &f.geometry.coordinates {
             for (ri, ring) in poly.iter().enumerate() {
                 let pts: Vec<(f32, f32)> = ring.iter().map(|p| view.px(p[0], p[1])).collect();
@@ -128,6 +164,14 @@ pub fn parse(json: &str, key: &str, view: &View) -> anyhow::Result<Vec<Shape>> {
                     pb.line_to(x, y);
                 }
                 pb.close();
+                let ring_box = box_of(ring);
+                bounds = MapBox::union(bounds, ring_box);
+                if let (0, Some(b)) = (ri, ring_box) {
+                    let area = (b.x1 - b.x0) * (b.y1 - b.y0);
+                    if main.is_none_or(|(a, _)| area >= a) {
+                        main = Some((area, b));
+                    }
+                }
                 if ri == 0 {
                     let (mut lo, mut hi) = ((f32::MAX, f32::MAX), (f32::MIN, f32::MIN));
                     for &(x, y) in &pts {
@@ -141,11 +185,13 @@ pub fn parse(json: &str, key: &str, view: &View) -> anyhow::Result<Vec<Shape>> {
                 }
             }
         }
-        if let Some(path) = pb.finish() {
+        if let (Some(path), Some(bounds), Some((_, main))) = (pb.finish(), bounds, main) {
             out.push(Shape {
                 key: name,
                 path,
                 center: biggest.1,
+                bounds,
+                main,
             });
         }
     }
@@ -235,6 +281,15 @@ mod tests {
         assert_eq!(shapes[0].key, "A");
         let (cx, cy) = v.px(137.5, 36.5);
         assert!((shapes[0].center.0 - cx).abs() < 0.01 && (shapes[0].center.1 - cy).abs() < 0.01);
+        // 寄りに使う外接矩形 (地図の座標): bounds は離島も含み、main は一番大きい島だけ
+        let (x0, y0) = project(130.0, 37.0);
+        let (x1, y1) = project(138.0, 30.0);
+        let b = shapes[0].bounds;
+        assert_eq!((b.x0, b.y0, b.x1, b.y1), (x0, y0, x1, y1));
+        let (mx0, my0) = project(137.0, 37.0);
+        let (mx1, my1) = project(138.0, 36.0);
+        let m = shapes[0].main;
+        assert_eq!((m.x0, m.y0, m.x1, m.y1), (mx0, my0, mx1, my1));
         assert!(parse("{}", "name", &v).is_err());
     }
 }

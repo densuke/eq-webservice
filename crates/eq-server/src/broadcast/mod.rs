@@ -66,6 +66,9 @@ pub struct BroadcastConfig {
     pub fps: u32,
     /// native: 平時のコマ数。指定すると、ffmpeg にはコマが届いた時刻で渡し、平時と地震でコマの間隔を変える。省けば fps で一定
     pub fps_calm: Option<u32>,
+    /// native: 地震のとき震源へ寄る (S 波の広がりに合わせて引き、揺れた範囲が収まったら止まる。web と同じ)。
+    /// 描き直しが増える (e2-micro では測ってから)。既定は寄らない
+    pub zoom: bool,
     /// native: 上部バーの右に出す配信元の名前 (例 "配信元: e2")。空なら出さない
     pub label: String,
     /// native: 平時の天気の札を「今」と「明日」で切り替える間隔 (秒)。0 なら今だけ
@@ -140,6 +143,7 @@ impl Default for BroadcastConfig {
             height: 720,
             fps: 30,
             fps_calm: None,
+            zoom: false,
             label: String::new(),
             weather_flip_secs: 20,
             test: false,

@@ -103,6 +103,7 @@ fn renderer_config(o: &Options) -> BroadcastConfig {
     BroadcastConfig {
         map_dir: o.map_dir.clone(),
         font: o.font.clone(),
+        zoom: o.zoom,
         ..BroadcastConfig::default()
     }
 }

@@ -1,6 +1,6 @@
 // 同じ地震に関する複数の情報 (震度速報 → 震源情報 → 各地の震度 / EEW の続報) を 1 つにまとめる。
 
-import type { EewEvent, EqEvent, Hypocenter, ObservationPoint, PrefScale, QuakeEvent, Scale } from "./types.ts";
+import type { EewArea, EewEvent, EqEvent, Hypocenter, ObservationPoint, PrefScale, QuakeEvent, Scale } from "./types.ts";
 
 export interface QuakeGroup {
   key: string;
@@ -147,4 +147,40 @@ export function summarizeQuake(g: QuakeGroup): QuakeSummary {
 /** EEW は最新の報 (serial が最大のもの) */
 export function latestEew(g: EewGroup): EewEvent {
   return g.events.reduce((a, b) => (Number(b.serial) >= Number(a.serial) ? b : a));
+}
+
+/** 同じ地震の予想を、報が変わっても最大で持ち続けた EEW (表示用。通知や音など、報ごとに反応するものは latestEew の方) */
+export function heldEew(g: EewGroup): EewEvent {
+  return heldForecast(g.events);
+}
+
+const maxOf = (xs: number[]): number => xs.reduce((a, b) => Math.max(a, b));
+
+/**
+ * 同じ地震 (同じ event_id) の報から、予想を最大で持ち続けた 1 件を作る。
+ * 地域・県・最大震度は全報の最大、警報は一度でも出ていれば警報のまま。震源などは最新の報。
+ * 最新の報が取り消しなら、その報のまま (取り消しは消す)
+ */
+export function heldForecast(events: EewEvent[]): EewEvent {
+  const ordered = [...events].sort((a, b) => Number(a.serial) - Number(b.serial));
+  const latest = ordered[ordered.length - 1];
+  if (latest.cancelled) return latest;
+  const live = ordered.filter((e) => !e.cancelled);
+  const areas = new Map<string, EewArea[]>();
+  const prefs = new Map<string, number>();
+  for (const e of live) {
+    for (const a of e.areas) areas.set(a.name, [...(areas.get(a.name) ?? []), a]);
+    for (const p of e.pref_max) prefs.set(p.pref, Math.max(prefs.get(p.pref) ?? p.scale, p.scale));
+  }
+  return {
+    ...latest,
+    warning: live.some((e) => e.warning),
+    max_scale: maxOf(live.map((e) => e.max_scale)),
+    pref_max: [...prefs].map(([pref, scale]) => ({ pref, scale })),
+    areas: [...areas.values()].map((xs) => ({
+      ...xs[xs.length - 1],
+      scale_from: maxOf(xs.map((a) => a.scale_from)),
+      scale_to: xs.every((a) => a.scale_to == null) ? null : maxOf(xs.map((a) => a.scale_to ?? a.scale_from)),
+    })),
+  };
 }

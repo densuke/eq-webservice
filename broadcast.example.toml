@@ -40,6 +40,7 @@ audio_command = ["sox", "-q", "-t", "coreaudio", "BlackHole 2ch", "-t", "raw", "
 # state_file = ""                    # 地震の画面か平時かを書くファイル (再現動画を作る係が読む)。省けば $XDG_STATE_HOME/eq-broadcast/state.json (native のとき)
 # label = "配信元: e2"               # 上部バーの右に出す (BGM の曲名はその左)。省けば出さない
 # fps = 10                           # 地震の画面のコマ数
+# zoom = false                       # 地震のとき震源へ寄る (web と同じ。S 波に合わせて引く)。コマごとに地図を描き直すので、測ってから (docs/eew-hold-and-native-zoom.md)。既定 false
 # fps_calm = 2                       # 平時のコマ数。省けば fps で一定。指定すると平時と地震でコマの間隔が変わる
 # weather_flip_secs = 20               # 平時の天気の札を「今」と「明日」で切り替える間隔 (秒)。0 なら今だけ。既定 20
 # encoder = "builtin"                # ffmpeg を使わず eq-server が圧縮して送る (実験。native・無音のみ。output の最初の要素に送る)。

@@ -38,6 +38,17 @@ const WARN_LEGEND: [(&str, [u8; 3]); 4] = [
     ("特別警報", [0xff, 0xff, 0xff]),
 ];
 
+/// 震度の凡例 (左下。1 が下)。寄った地図は海から描き直すので、その上に描き直す
+pub fn draw_legend(pm: &mut Pixmap, text: &mut Text) {
+    let (x, y0) = (10.0, H as f32 - 10.0 - 147.0);
+    rrect(pm, x, y0, 34.0, 147.0, 6.0, BG, 0.8);
+    for (i, (label, color)) in GAUGE.iter().rev().enumerate() {
+        let y = y0 + 6.0 + i as f32 * 15.0;
+        rect(pm, x + 7.0, y, 7.0, 15.0, *color, 1.0);
+        text.draw(pm, label, x + 18.0, y + 12.0, 10.0, MUTED);
+    }
+}
+
 /// 動かない部分: バーと右パネルの地、題、震度の凡例、出典
 pub fn draw_frame(pm: &mut Pixmap, text: &mut Text) {
     rect(pm, 0.0, 0.0, W as f32, BAR_H, PANEL, 1.0);
@@ -53,14 +64,7 @@ pub fn draw_frame(pm: &mut Pixmap, text: &mut Text) {
         12.0,
         MUTED,
     );
-    // 震度の凡例 (左下)。1 が下
-    let (x, y0) = (10.0, H as f32 - 10.0 - 147.0);
-    rrect(pm, x, y0, 34.0, 147.0, 6.0, BG, 0.8);
-    for (i, (label, color)) in GAUGE.iter().rev().enumerate() {
-        let y = y0 + 6.0 + i as f32 * 15.0;
-        rect(pm, x + 7.0, y, 7.0, 15.0, *color, 1.0);
-        text.draw(pm, label, x + 18.0, y + 12.0, 10.0, MUTED);
-    }
+    draw_legend(pm, text);
     for (i, line) in CREDIT.iter().enumerate() {
         text.draw(
             pm,

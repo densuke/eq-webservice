@@ -1,7 +1,7 @@
 // 画面の文字情報: 一覧・詳細・緊急地震速報と津波予報のバナー・表示モード、地図の塗り分け。
 
-import { type AreaScale, droppedForecast, eewAreaScales, keepForecast, overlayForecast, quakeDetail } from "./detail.ts";
-import { type EewGroup, type Group, latestEew, summarizeQuake } from "./groups.ts";
+import { type AreaScale, eewAreaScales, keepForecast, overlayForecast, quakeDetail } from "./detail.ts";
+import { type EewGroup, type Group, heldEew, latestEew, summarizeQuake } from "./groups.ts";
 import { esc } from "./html.ts";
 import { byPriority, sameQuake } from "./priority.ts";
 import { activeEews, currentGroup, groupPlace, groupScale, relatedQuake } from "./quakes.ts";
@@ -10,7 +10,7 @@ import { $, map } from "./dom.ts";
 import { listOpen, shownInList } from "./personal.ts";
 import { app, now } from "./state.ts";
 import { activeAreas } from "./tsunami.ts";
-import type { EewEvent, Hypocenter, PrefScale, Scale, TsunamiEvent } from "./types.ts";
+import type { Hypocenter, PrefScale, Scale, TsunamiEvent } from "./types.ts";
 
 /** EEW バナーに並べる件数 (残りは「ほか N 件」) */
 const EEW_BANNER_MAX = 3;
@@ -59,7 +59,7 @@ function groupRow(g: Group): string {
       )}</div><div class="row-sub">${esc(q.originTime.slice(5, 16))} ${q.hypocenter?.magnitude != null ? "M" + q.hypocenter.magnitude.toFixed(1) : ""} ・${q.infoLabel}</div></div>`;
     }
     case "eew": {
-      const e = latestEew(g);
+      const e = heldEew(g);
       return `${badge(e.max_scale)}<div class="row-main"><div class="row-title eew-title">${numTag(g.key)}${e.test ? "[テスト] " : ""}緊急地震速報${e.warning ? "" : " (予報)"} ${
         e.cancelled ? "(取消)" : esc(e.hypocenter?.name ?? "")
       }</div><div class="row-sub">${esc((e.origin_time ?? e.issued_at).slice(5, 16))} ・第${esc(e.serial)}報</div></div>`;
@@ -110,16 +110,11 @@ export function renderMode(): void {
 
 const byName = (xs: PrefScale[]): AreaScale[] => xs.map(({ pref, scale }) => ({ name: pref, scale }));
 
-/** 緊急地震速報の予測 (最新の報) と、続報で外されて薄れながら消える地域 (dropped) */
-function forecastLayers(g: EewGroup): { prefs: (AreaScale & { dropped?: boolean })[]; areas: (AreaScale & { dropped?: boolean })[] } {
-  const e = latestEew(g);
+/** 緊急地震速報の予測 (同じ地震の報の最大。報ごとに地域が出たり消えたりしても点滅させない) */
+function forecastLayers(g: EewGroup): { prefs: AreaScale[]; areas: AreaScale[] } {
+  const e = heldEew(g);
   if (e.cancelled) return { prefs: [], areas: [] };
-  const reports = [...g.events].sort((a, b) => Number(a.serial) - Number(b.serial));
-  const layer = (items: (x: EewEvent) => AreaScale[]) => [
-    ...items(e),
-    ...droppedForecast(reports.map((r) => ({ at: r.received_at_ms, items: items(r) })), now()).map((x) => ({ ...x, dropped: true })),
-  ];
-  return { prefs: layer((x) => byName(x.pref_max)), areas: layer((x) => eewAreaScales(x.areas)) };
+  return { prefs: byName(e.pref_max), areas: eewAreaScales(e.areas) };
 }
 
 /** 地図の塗り分けと震央 */
@@ -128,7 +123,7 @@ function paintMap(g: Group | undefined): void {
     const q = summarizeQuake(g);
     const d = quakeDetail(q.points, app.stations);
     // 同じ地震の緊急地震速報の予測を重ねて残す (観測の無い地域は予測のまま)。観測の震度が届くまでは速報が終わっても残す
-    const active = new Set(activeEews(now()));
+    const active = new Set(activeEews(now()).map((e) => e.event_id));
     const observed = q.points.length > 0;
     const eg = app.world.store
       .list()
@@ -137,7 +132,7 @@ function paintMap(g: Group | undefined): void {
           x.kind === "eew" &&
           !latestEew(x).cancelled &&
           sameQuake(groupPlace(x), groupPlace(g)) &&
-          keepForecast(active.has(latestEew(x)), observed, now() - latestEew(x).received_at_ms),
+          keepForecast(active.has(latestEew(x).event_id), observed, now() - latestEew(x).received_at_ms),
       );
     const f = eg ? forecastLayers(eg) : { prefs: [], areas: [] };
     const prefs = overlayForecast(byName(q.prefMax), f.prefs);
@@ -212,7 +207,7 @@ export function renderDetail(): void {
         )
         .join("")}</div>${scales.length ? "</details>" : ""}`;
   } else if (g.kind === "eew") {
-    const e = latestEew(g);
+    const e = heldEew(g);
     box.innerHTML = `
       <div class="detail-head">${badge(e.max_scale, true)}
         <div><div class="detail-kind eew-title">緊急地震速報 (${e.warning ? "警報" : "予報"})${e.test ? " [テスト]" : ""} 第${esc(e.serial)}報</div>
