@@ -1,11 +1,20 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { rainColor, rangeLabel, showTomorrow, tempLabel, weatherIcon } from "./weather.ts";
+import { rainColor, rangeLabel, tempLabel, weatherCaption, weatherIcon, weatherView } from "./weather.ts";
 
-test("札は flipSec ごとに今と明日を交互に出す (0 は今だけ)", () => {
-  const at = (s: number) => showTomorrow(s * 1000, 20);
-  assert.deepEqual([0, 19, 20, 39, 40, 60].map(at), [false, false, true, true, false, true]);
-  assert.equal(showTomorrow(25_000, 0), false);
+test("種類は flipSec ごとに並び (今, 明日) を順に回す (0 は先頭のまま)", () => {
+  const at = (s: number) => weatherView(s * 1000, 20);
+  assert.deepEqual([0, 19, 20, 39, 40, 60].map(at), ["now", "now", "tomorrow", "tomorrow", "now", "tomorrow"]);
+  assert.equal(weatherView(25_000, 0), "now");
+});
+
+test("案内の文は種類から決め、明日は日本時間の明日の日付と曜日を添える", () => {
+  const jst = (s: string) => Date.parse(`${s}+09:00`);
+  assert.equal(weatherCaption("now", 0), "現在の天気");
+  assert.equal(weatherCaption("tomorrow", jst("2026-10-01T09:38:00")), "明日 10/2 (金) の天気");
+  // 日本時間では翌日の 0 時を過ぎている (UTC ではまだ 10/1)
+  assert.equal(weatherCaption("tomorrow", jst("2026-10-02T01:00:00")), "明日 10/3 (土) の天気");
+  assert.equal(weatherCaption("tomorrow", jst("2026-12-31T23:59:00")), "明日 1/1 (金) の天気");
 });
 
 test("最高/最低気温の表示", () => {

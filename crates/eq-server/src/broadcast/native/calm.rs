@@ -6,14 +6,14 @@ use std::collections::HashMap;
 use tiny_skia::{Pixmap, PixmapPaint, Transform};
 
 use super::data::{
-    city_side, city_side_tomorrow, rain_color, range_label, showing_tomorrow, temp_label, top_level, warning_fill,
-    weather_char, City, Side, Tomorrow,
+    city_side, city_side_tomorrow, rain_color, range_label, temp_label, top_level, warning_fill, weather_caption,
+    weather_char, City, Side, Tomorrow, WeatherView,
 };
 use super::draw::Scene;
-use super::frame::Frame;
+use super::frame::{Frame, OKINAWA};
 use super::geo::Shape;
 use super::icon;
-use super::paint::{circle, rrect, LAND_EDGE};
+use super::paint::{circle, rrect, BG, LAND_EDGE, TEXT};
 use super::text::Text;
 
 pub fn draw(pm: &mut Pixmap, text: &mut Text, areas: &HashMap<String, Shape>, frame: &Frame, scene: &Scene) {
@@ -35,9 +35,28 @@ pub fn draw(pm: &mut Pixmap, text: &mut Text, areas: &HashMap<String, Shape>, fr
         let (x, y) = frame.view.px(lon, lat);
         circle(pm, x, y, 2.5, rain_color(mm), 1.0);
     }
+    let view = w.view(scene.now_ms, scene.flip_s);
     for c in w.cities.iter().filter(|c| frame.contains(c.lon, c.lat)) {
-        draw_city(pm, text, frame, scene, c);
+        draw_city(pm, text, frame, scene, c, view);
     }
+    if !frame.is_inset() {
+        draw_caption(pm, text, &weather_caption(view, scene.now_ms));
+    }
+}
+
+/// 案内の左上。地図の左、南西諸島の別枠のすぐ下の日本海の上 (警報の帯・時計・凡例とは重ならない。
+/// 上の端は、警報の帯が重なる位置なので使わない)
+pub(super) const CAPTION_AT: (f32, f32) = (OKINAWA.x, OKINAWA.y + OKINAWA.h + 8.0);
+pub(super) const CAPTION_H: f32 = 24.0;
+
+/// 札が今何を出しているか (今の天気 / 明日の天気) の案内。文字が描けないときは出さない
+fn draw_caption(pm: &mut Pixmap, text: &mut Text, caption: &str) {
+    if !text.enabled() {
+        return;
+    }
+    let (x, y) = CAPTION_AT;
+    rrect(pm, x, y, text.width(caption, 12.0) + 16.0, CAPTION_H, 6.0, BG, 0.8);
+    text.draw(pm, caption, x + 8.0, y + 16.0, 12.0, TEXT);
 }
 
 /// 札の左上 (点 (x, y) からの向き side と、札の幅・高さで決める)
@@ -52,15 +71,11 @@ fn card_origin(side: Side, x: f32, y: f32, bw: f32, bh: f32) -> (f32, f32) {
 }
 
 /// 都市の点と、天気のアイコン (取れていなければ漢字 1 文字) と気温の札。
-/// 明日の番 (scene.flip_s ごとに交互) で、明日の予報があれば明日の札にする
-fn draw_city(pm: &mut Pixmap, text: &mut Text, frame: &Frame, scene: &Scene, c: &City) {
+/// 明日の番 (view) で、明日の予報があれば明日の札にする
+fn draw_city(pm: &mut Pixmap, text: &mut Text, frame: &Frame, scene: &Scene, c: &City, view: WeatherView) {
     let (x, y) = frame.view.px(c.lon, c.lat);
     circle(pm, x, y, 3.0, [255, 255, 255], 1.0);
-    if let Some(t) = c
-        .tomorrow
-        .as_ref()
-        .filter(|_| showing_tomorrow(scene.now_ms, scene.flip_s))
-    {
+    if let Some(t) = c.tomorrow.as_ref().filter(|_| view == WeatherView::Tomorrow) {
         return draw_tomorrow(pm, text, scene, c, t, (x, y));
     }
     let temp = temp_label(c.temp);
@@ -99,23 +114,30 @@ fn draw_city(pm: &mut Pixmap, text: &mut Text, frame: &Frame, scene: &Scene, c: 
     }
 }
 
-/// 明日の札 (2 段にして幅を抑える): 上に天気のアイコン (無ければ漢字 1 文字) と最高/最低気温、
-/// 下に小さい「明日」と降水確率。明日は昼の予報なので昼のアイコンを使う
+/// 明日の札 (幅を抑えるため 2 段): 上に天気のアイコン (無ければ漢字 1 文字) と最高/最低気温、
+/// 下に小さい降水確率 (無ければ 1 段)。明日は昼の予報なので昼のアイコンを使う
 fn draw_tomorrow(pm: &mut Pixmap, text: &mut Text, scene: &Scene, c: &City, t: &Tomorrow, (x, y): (f32, f32)) {
-    const H: f32 = 32.0;
-    let label = "明日";
     let icon = icon::names(&t.code).and_then(|(day, _)| scene.icons.get(day));
     let kanji: String = weather_char(&t.code).into_iter().collect();
     let range = range_label(t.temp_max, t.temp_min);
     let pop = t.pop.map(|p| format!("{p}%")).unwrap_or_default();
-    let (label_w, pop_w) = (text.width(label, 9.0), text.width(&pop, 11.0));
+    let h = if pop.is_empty() { 22.0 } else { 32.0 };
     let (icon_w, range_w) = (
         icon.map_or(text.width(&kanji, 13.0), |ic| ic.width() as f32),
         text.width(&range, 12.0),
     );
-    let bw = (10.0 + icon_w + 3.0 + range_w).max(10.0 + label_w + 6.0 + pop_w);
-    let (left, top) = card_origin(city_side_tomorrow(&c.name), x, y, bw, H);
-    rrect(pm, left, top, bw, H, 10.0, [240, 244, 248], 0.92);
+    let bw = 10.0 + icon_w + 3.0 + range_w;
+    let (left, top) = card_origin(city_side_tomorrow(&c.name), x, y, bw, h);
+    rrect(
+        pm,
+        left,
+        top,
+        bw,
+        h,
+        if pop.is_empty() { 11.0 } else { 10.0 },
+        [240, 244, 248],
+        0.92,
+    );
     let mut at = left + 5.0;
     match icon {
         Some(ic) => {
@@ -133,6 +155,5 @@ fn draw_tomorrow(pm: &mut Pixmap, text: &mut Text, scene: &Scene, c: &City, t: &
         None => at += text.draw(pm, &kanji, at, top + 15.0, 13.0, LAND_EDGE) + 3.0,
     }
     text.draw(pm, &range, at, top + 15.0, 12.0, LAND_EDGE);
-    text.draw(pm, label, left + 5.0, top + 28.0, 9.0, [90, 100, 112]);
-    text.draw_right(pm, &pop, left + bw - 5.0, top + 28.0, 11.0, [30, 90, 170]);
+    text.draw_center(pm, &pop, left + bw / 2.0, top + 28.0, 11.0, [30, 90, 170]);
 }

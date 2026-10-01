@@ -6,6 +6,7 @@ use tiny_skia::Pixmap;
 use super::data::{City, CityWeather, Kind, Tomorrow, Warnings};
 use super::draw::{Renderer, Scene, MAP_RECT};
 use super::eew::{EewSummary, Wave};
+use super::frame::{Frame, OKINAWA};
 use super::geo::{self, View};
 use super::model::{scale_color, QuakeSummary};
 use super::paint::SEA;
@@ -409,6 +410,69 @@ fn the_card_shows_tomorrow_every_other_interval_and_only_when_asked() {
     sc.flip_s = 0;
     sc.now_ms = noon + 25_000;
     assert_eq!(orange(&r.render(&sc)), 0);
+}
+
+/// 案内の枠 (x, y, 幅, 高さ) の中で、2 つの画面の画素が違うところの数
+fn caption_diff(a: &Pixmap, b: &Pixmap) -> usize {
+    let (x, y) = super::calm::CAPTION_AT;
+    (y as u32..(y + super::calm::CAPTION_H) as u32)
+        .flat_map(|py| (x as u32..x as u32 + 150).map(move |px| (px, py)))
+        .filter(|&p| rgb(a, p) != rgb(b, p))
+        .count()
+}
+
+#[test]
+fn the_caption_sits_below_the_inset_and_clear_of_the_legend_and_banner() {
+    let (x, y) = super::calm::CAPTION_AT;
+    let inset = Frame::inset(&View::fit_home(MAP_RECT), &OKINAWA).unwrap();
+    let ((_, iy, _, ih), _) = inset.inset_box().unwrap();
+    assert!(y > iy + ih); // 南西諸島の別枠の下
+    assert!(y + super::calm::CAPTION_H < 720.0 - 10.0 - 147.0 - 6.0 - 78.0); // 左下の警報の凡例より上
+    assert!(y > 36.0 + 50.0 + 20.0); // 上部バーと警報の帯 (2 行) とテスト配信の帯の下
+    assert_eq!(x, 10.0);
+}
+
+#[test]
+fn the_caption_names_what_the_cards_show_in_the_same_frame() {
+    // 文字 (フォント) が読める環境でだけ。読めなければ案内は出さないので、その確認だけ
+    let weather = CityWeather {
+        cities: vec![City {
+            name: "東京".into(),
+            lat: 35.69,
+            lon: 139.69,
+            code: "100".into(),
+            temp: Some(24.0),
+            tomorrow: Some(Tomorrow {
+                code: "101".into(),
+                temp_min: Some(17.0),
+                temp_max: Some(24.0),
+                pop: Some(30),
+            }),
+        }],
+        rain: vec![],
+    };
+    let noon = NOW - NOW % 86_400_000 + 3 * 3_600_000; // 12 時 JST (20 秒の区切りの頭)
+    let frame = |r: &mut Renderer, weather: Option<&CityWeather>, at: u64| {
+        let mut sc = scene(None, &[], None, weather);
+        sc.flip_s = 20;
+        sc.now_ms = at;
+        r.render(&sc)
+    };
+    let font = BroadcastConfig::default().font;
+    let mut r = renderer(Text::load(&font, 0).unwrap_or_else(|_| Text::none()));
+    let enabled = r.text.enabled();
+    let plain = frame(&mut r, None, noon + 5_000);
+    let now = frame(&mut r, Some(&weather), noon + 5_000);
+    let tomorrow = frame(&mut r, Some(&weather), noon + 25_000);
+    // 天気が無い (地震の画面など) ときは出さない
+    assert_eq!(caption_diff(&plain, &frame(&mut r, None, noon + 25_000)), 0);
+    if enabled {
+        assert!(caption_diff(&plain, &now) > 100, "今の案内");
+        assert!(caption_diff(&plain, &tomorrow) > 100, "明日の案内");
+        assert!(caption_diff(&now, &tomorrow) > 100, "案内の文が変わる");
+    } else {
+        assert_eq!(caption_diff(&plain, &now), 0);
+    }
 }
 
 #[test]
