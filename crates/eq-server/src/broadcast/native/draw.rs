@@ -64,7 +64,7 @@ pub struct Renderer {
 }
 
 /// 別枠の枠線の色 (web/public/style.css の .inset)
-const INSET_LINE: [u8; 3] = [0x3a, 0x44, 0x52];
+pub(super) const INSET_LINE: [u8; 3] = [0x3a, 0x44, 0x52];
 
 impl Renderer {
     pub fn new(view: View, neighbors: Vec<Shape>, prefs: Vec<Shape>, areas: Vec<Shape>, text: Text) -> Renderer {
