@@ -54,7 +54,7 @@ pub struct WorkerConfig {
     pub tick_secs: u64,
     /// 最後の地震の画面から、この時間 (分) たつまで、作り始めない
     pub calm_min: u64,
-    /// 作り始める時間帯 (日本時間の時。"1-5" は 1:00 から 5:00 まで)。作りかけは終わりを過ぎても続ける
+    /// 作り始める時間帯 (日本時間。"1-5" は 1:00 から 5:00 まで、"10-15,21:30-23" のように複数・分も書ける)。作りかけは終わりを過ぎても続ける
     pub hours: String,
     /// 作り始めるのに必要な、e2 のメモリの空き (MemAvailable。MB)。読めない (Mac) ときは見ない
     pub min_mem_mb: u64,
@@ -109,7 +109,7 @@ impl Default for WorkerConfig {
             scan_secs: 300,
             tick_secs: 5,
             calm_min: 30,
-            hours: "1-5".into(),
+            hours: "10-15,21:30-23".into(),
             min_mem_mb: 250,
             psi_limit: 20.0,
             on_busy: OnBusy::Kill,
@@ -213,7 +213,10 @@ mod tests {
             (30, 20.0, 10, 5)
         );
         assert_eq!(c.cpu_quota, "5%");
-        assert_eq!((c.hours.as_str(), c.min_mem_mb, c.on_busy), ("1-5", 250, OnBusy::Kill));
+        assert_eq!(
+            (c.hours.as_str(), c.min_mem_mb, c.on_busy),
+            ("10-15,21:30-23", 250, OnBusy::Kill)
+        );
         let f: File = toml::from_str("[replay]\nmin_scale = 40\ncpu_quota = \"10%\"").unwrap();
         assert_eq!((f.replay.min_scale, f.replay.cpu_quota.as_str()), (40, "10%"));
         assert!(toml::from_str::<File>("[replay]\nnope = 1").is_err());
