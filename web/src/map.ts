@@ -7,6 +7,7 @@ import { geoCircle } from "./waves.ts";
 import { union, type Box } from "./camera.ts";
 import mapCss from "./map.css";
 import { esc } from "./html.ts";
+import { thinCityLayer } from "./thin.ts";
 import { INSET_MARGIN_DEG, INSET_PAD_PX, insetMarkerPos } from "./inset.ts";
 import { clusterMarkers, edgePoint, labelSize, type Cluster, type Marker } from "./cluster.ts";
 
@@ -392,6 +393,7 @@ export class JapanMap {
         })
         .map((c) => {
           const g = c.cloneNode(true) as SVGGElement;
+          g.classList.remove("thin"); // 本図で間引かれていても、別枠の中では出す
           g.setAttribute("transform", `translate(${g.dataset.x} ${g.dataset.y}) scale(${k})`);
           return g;
         }),
@@ -689,6 +691,7 @@ export class JapanMap {
     this.updateInsets();
     this.renderMarkers();
     this.updateMarkerScale();
+    this.thinCities();
   }
 
   /** 1 画面ピクセルあたりの地図座標 */
@@ -745,6 +748,13 @@ export class JapanMap {
   refreshCities(): void {
     this.updateInsets();
     this.updateMarkerScale();
+    this.thinCities();
+  }
+
+  /** 札が凡例・別枠・案内・時計や、優先の高い札と重なるときは出さない (地図の大きさや範囲、凡例の行が変わるたびに置き直す) */
+  thinCities(): void {
+    const blockers = document.querySelectorAll(".legend, .clock-panel, .weather-caption:not([hidden]), .inset:not([hidden])");
+    thinCityLayer(this.cityLayer, [...blockers]);
   }
 
   private updateMarkerScale(): void {

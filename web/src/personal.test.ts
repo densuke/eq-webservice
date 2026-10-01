@@ -105,3 +105,9 @@ test("the history can be narrowed to quakes of a given intensity; warnings and t
   assert.equal(shownInList("eew", 10, 45), true);
   assert.equal(shownInList("tsunami", -1, 45), true);
 });
+
+test("the weather badge setting keeps 'off' (-1) and falls back to the default for unknown values", () => {
+  assert.equal(normalizeSettings({ weatherFlipSec: -1 }).weatherFlipSec, -1);
+  assert.equal(normalizeSettings({ weatherFlipSec: 0 }).weatherFlipSec, 0);
+  assert.equal(normalizeSettings({ weatherFlipSec: 7 }).weatherFlipSec, DEFAULTS.weatherFlipSec);
+});
