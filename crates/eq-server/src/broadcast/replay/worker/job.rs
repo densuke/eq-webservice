@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::config::WorkerConfig;
+use super::config::{expand, WorkerConfig};
 use super::detect::Quake;
 use super::queue::Job;
 
@@ -66,7 +66,7 @@ pub fn systemd_run_args(
         s("--out"),
         p(out),
         s("--events"),
-        cfg.events.clone(),
+        p(&cfg.events_path()),
         s("--chapters"),
         p(chapters),
         s("--fps"),
@@ -74,9 +74,9 @@ pub fn systemd_run_args(
         s("--label"),
         cfg.label.clone(),
         s("--map-dir"),
-        cfg.map_dir.clone(),
+        p(&expand(&cfg.map_dir)),
         s("--font"),
-        cfg.font.clone(),
+        p(&expand(&cfg.font)),
         s("--ffmpeg"),
         cfg.ffmpeg.clone(),
     ];

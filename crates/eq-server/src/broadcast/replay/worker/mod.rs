@@ -143,7 +143,14 @@ impl Worker {
             std::fs::create_dir_all(&d).with_context(|| format!("creating {}", d.display()))?;
         }
         // 残っている作りかけの単位と、作りかけのファイル
-        self.systemctl(&["stop", "eq-replay-job-*"]).await;
+        // (該当する単位が無いと失敗するので、結果は見ない)
+        let _ = Command::new(&self.cfg.systemctl)
+            .args(["--user", "stop", "eq-replay-job-*"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await;
         if let Ok(entries) = std::fs::read_dir(self.cfg.work_dir()) {
             entries.flatten().for_each(|e| {
                 let _ = std::fs::remove_file(e.path());
@@ -213,8 +220,7 @@ impl Worker {
     async fn scan(&self) {
         let now = now_ms();
         let from = now.saturating_sub(self.cfg.lookback_hours * 3_600_000);
-        let events = match archive::read_range_upto(&PathBuf::from(&self.cfg.events), from, now, FILE_MAX_EVENTS).await
-        {
+        let events = match archive::read_range_upto(&self.cfg.events_path(), from, now, FILE_MAX_EVENTS).await {
             Ok(e) => e,
             Err(e) => return tracing::warn!("replay-worker: 記録を読めません: {e:#}"),
         };

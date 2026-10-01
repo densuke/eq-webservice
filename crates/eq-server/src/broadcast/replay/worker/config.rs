@@ -143,6 +143,11 @@ impl WorkerConfig {
         Ok(self)
     }
 
+    /// eq-server の記録 (`~/` はホームディレクトリ)
+    pub fn events_path(&self) -> PathBuf {
+        expand(&self.events)
+    }
+
     pub fn queue_dir(&self) -> PathBuf {
         expand(&self.dir).join("queue")
     }
@@ -217,6 +222,11 @@ mod tests {
         assert_eq!(expand("/a/b"), PathBuf::from("/a/b"));
         if let Some(home) = std::env::var_os("HOME") {
             assert_eq!(expand("~/x"), Path::new(&home).join("x"));
+            let c = WorkerConfig {
+                events: "~/data/e.jsonl".into(),
+                ..Default::default()
+            };
+            assert_eq!(c.events_path(), Path::new(&home).join("data/e.jsonl"));
         }
         let c = WorkerConfig {
             dir: "/srv/r".into(),
