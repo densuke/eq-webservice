@@ -4,7 +4,7 @@
 
 use crate::broadcast::mixer::AlertLevel;
 use crate::broadcast::native::{eew_place, event_place, latest_eews, same_quake, EEW_ACTIVE_MS};
-use crate::quake::{Event, EventBody, QuakeInfoType, Scale};
+use crate::quake::{Event, EventBody, Scale};
 
 /// 揺れの始まりの音を鳴らす範囲: 発生からこの時間以内 (web の WAVE_MAX_SEC)
 const START_WITHIN_MS: i64 = 180_000;
@@ -158,14 +158,26 @@ fn alert_level(events: &[Event], now_ms: u64) -> Option<AlertLevel> {
                         .iter()
                         .filter(same)
                         .any(|p| matches!(&p.body, EventBody::Eew(y) if y.warning)));
-            if !first || x.cancelled || x.test {
+            if x.cancelled || x.test {
                 return None;
             }
-            if x.warning {
-                Some(AlertLevel::Strong)
-            } else {
-                by_scale(x.max_scale)
+            if first {
+                return if x.warning {
+                    Some(AlertLevel::Strong)
+                } else {
+                    by_scale(x.max_scale)
+                };
             }
+            // 最初でない報は、同じ地震のそれまでの最大震度を超えたときだけ、新しい震度で鳴らす (震度不明は最小)
+            let prev_max = prior
+                .iter()
+                .filter(same)
+                .filter_map(|p| match &p.body {
+                    EventBody::Eew(y) => Some(y.max_scale),
+                    _ => None,
+                })
+                .max()?;
+            (x.max_scale > prev_max).then(|| by_scale(x.max_scale)).flatten()
         }
         EventBody::Quake(q) => {
             // 地震情報の最初の報は、その地震で最初に届いた地震情報 (連続地震では、地震ごと)
@@ -177,14 +189,14 @@ fn alert_level(events: &[Event], now_ms: u64) -> Option<AlertLevel> {
                     })
             };
             if prior.iter().any(|p| earlier(&p)) {
-                return (q.info_type == QuakeInfoType::DetailScale).then_some(AlertLevel::Info);
+                return Some(AlertLevel::Info);
             }
-            // その地震の緊急地震速報で既に鳴らしていれば、地震情報では鳴らさない
+            // その地震の緊急地震速報で既に鳴らしていれば、地震情報の最初の報は案内音にする
             let eew_active = latest_eews(events)
                 .iter()
                 .any(|a| now_ms.saturating_sub(a.received_ms) < EEW_ACTIVE_MS && same_quake(&eew_place(a), &place));
             if eew_active {
-                None
+                Some(AlertLevel::Info)
             } else {
                 by_scale(q.max_scale)
             }
@@ -229,13 +241,18 @@ mod tests {
     }
 
     #[test]
-    fn the_first_report_rings_by_scale_and_later_ones_are_silent() {
+    fn the_first_report_rings_by_scale_and_later_ones_ring_only_when_the_scale_rises() {
         let ev = [
             eew("E", 1, T, T0, false, Scale::S2, TOKYO),
             eew("E", 2, T + 1_000, T0, false, Scale::S4, TOKYO),
+            eew("E", 3, T + 2_000, T0, false, Scale::S4, TOKYO),
+            eew("E", 4, T + 3_000, T0, false, Scale::S3, TOKYO),
         ];
         assert_eq!(alert_level(&ev[..1], T), Some(AlertLevel::Low));
-        assert_eq!(alert_level(&ev, T + 1_000), None);
+        // 震度が上がった報は、新しい震度で鳴らす。同じ・下がった報は鳴らさない
+        assert_eq!(alert_level(&ev[..2], T + 1_000), Some(AlertLevel::Medium));
+        assert_eq!(alert_level(&ev[..3], T + 2_000), None);
+        assert_eq!(alert_level(&ev, T + 3_000), None);
         let big = [eew("E", 1, T, T0, false, Scale::S3, TOKYO)];
         assert_eq!(alert_level(&big, T), Some(AlertLevel::Medium));
         // 震度が分からない予報は鳴らさない
@@ -266,28 +283,57 @@ mod tests {
     }
 
     #[test]
-    fn the_first_quake_report_rings_unless_an_active_eew_already_did() {
+    fn the_first_quake_report_rings_by_scale_and_an_active_eew_makes_it_the_info_sound() {
         let q = |recv, info| quake(recv, info, T0 - 20_000, Scale::S4, Some(TOKYO));
-        // 緊急地震速報なし: 最初の地震情報で鳴り、各地の震度は案内音、ほかは鳴らさない
+        // 緊急地震速報なし: 最初の地震情報は震度で鳴り、続く報は案内音
         let ev = [
             q(T, QuakeInfoType::ScalePrompt),
             q(T + 1_000, QuakeInfoType::Destination),
             q(T + 2_000, QuakeInfoType::DetailScale),
         ];
         assert_eq!(alert_level(&ev[..1], T), Some(AlertLevel::Medium));
-        assert_eq!(alert_level(&ev[..2], T + 1_000), None);
+        assert_eq!(alert_level(&ev[..2], T + 1_000), Some(AlertLevel::Info));
         assert_eq!(alert_level(&ev, T + 2_000), Some(AlertLevel::Info));
-        // 3 分以内の緊急地震速報があれば、地震情報の最初の報は鳴らさない。3 分を過ぎていれば鳴らす
+        // 3 分以内の緊急地震速報があれば、地震情報の最初の報は案内音。3 分を過ぎていれば震度で鳴らす
         let with_eew = [
             eew("E", 1, T, T0, false, Scale::S3, TOKYO),
             q(T + 60_000, QuakeInfoType::ScalePrompt),
         ];
-        assert_eq!(alert_level(&with_eew, T + 60_000), None);
+        assert_eq!(alert_level(&with_eew, T + 60_000), Some(AlertLevel::Info));
         let late = [
             eew("E", 1, T, T0, false, Scale::S3, TOKYO),
             q(T + 200_000, QuakeInfoType::ScalePrompt),
         ];
         assert_eq!(alert_level(&late, T + 200_000), Some(AlertLevel::Medium));
+    }
+
+    #[test]
+    fn every_report_that_changes_the_screen_rings_in_the_tokara_sequence() {
+        // 2026-10-02 04:05 トカラ列島近海: 緊急地震速報 6 報 (震度不明 → 3)、震度速報・震源・各地の震度
+        let mut ev = vec![eew("E", 1, T, T0, false, Scale::UNKNOWN, TOKYO)];
+        for n in 2..=6 {
+            ev.push(eew("E", n, T + n as u64 * 1_000, T0, false, Scale::S3, TOKYO));
+        }
+        ev.push(quake(T + 10_000, QuakeInfoType::ScalePrompt, T0, Scale::S3, None));
+        ev.push(quake(
+            T + 20_000,
+            QuakeInfoType::Destination,
+            T0,
+            Scale::UNKNOWN,
+            Some(TOKYO),
+        ));
+        ev.push(quake(
+            T + 30_000,
+            QuakeInfoType::DetailScale,
+            T0,
+            Scale::S3,
+            Some(TOKYO),
+        ));
+        let got: Vec<_> = (0..ev.len())
+            .map(|i| alert_level(&ev[..=i], ev[i].received_at_ms))
+            .collect();
+        let (m, i) = (Some(AlertLevel::Medium), Some(AlertLevel::Info));
+        assert_eq!(got, [None, m, None, None, None, None, i, i, i]);
     }
 
     #[test]

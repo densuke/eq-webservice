@@ -21,7 +21,7 @@ pub struct Seen {
 }
 
 /// 作り始める条件の設定
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct StartRules {
     pub calm_ms: u64,
     pub hours: Hours,

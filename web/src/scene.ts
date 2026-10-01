@@ -50,13 +50,18 @@ interface Scene {
   forecast?: boolean;
 }
 
+/** 揺れた範囲の箱: 揺れた細分区域の和。区域が読めていない・引けないときは県の本土の箱 (離島の地震では本土が映る) */
+function shakenBox(geo: { prefs: string[]; areas: string[] }): Box | null {
+  return map.areaBox(geo.areas) ?? map.prefBox(geo.prefs);
+}
+
 /** いま地図で見せる地震。null なら日本全体 */
 export function scene(now: number): Scene | null {
   if (app.selectedKey) {
     const g = app.world.store.get(app.selectedKey);
     const geo = g && relatedQuake(g) && geoOf(relatedQuake(g)!);
     if (!geo) return null;
-    return { center: geo.center, others: [], t: ((now - app.selectedAt) / 1000) * REPLAY_SPEED, shaken: map.prefBox(geo.prefs), replay: true };
+    return { center: geo.center, others: [], t: ((now - app.selectedAt) / 1000) * REPLAY_SPEED, shaken: shakenBox(geo), replay: true };
   }
   // 巡回中はその地震に合わせる (ほかの地震の波も描く)
   if (app.tourKey) {
@@ -69,7 +74,7 @@ export function scene(now: number): Scene | null {
         center: mine ?? geo.center,
         others: sources.filter((s) => s !== mine),
         t: mine ? (now - mine.origin) / 1000 : null,
-        shaken: map.prefBox(geo.prefs),
+        shaken: shakenBox(geo),
         replay: false,
         forecast: g.kind === "eew",
       };
@@ -91,7 +96,7 @@ export function scene(now: number): Scene | null {
     center: src ?? geo?.center ?? null,
     others,
     t: src ? (now - src.origin) / 1000 : null,
-    shaken: geo ? map.prefBox(geo.prefs) : null,
+    shaken: geo ? shakenBox(geo) : null,
     replay: false,
     forecast: g?.kind === "eew",
   };

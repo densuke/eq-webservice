@@ -104,6 +104,9 @@ pub fn tomorrow_date(now_ms: i64) -> String {
 /// - [1] 降水確率: 6 時間ごと (06・12・18・00 時) の pops。明日の日付のものの最大を使う
 /// - [2] 気温: 最初の地点の temps。明日 00:00 が朝の最低、明日 09:00 が日中の最高。
 ///   発表によっては片方が無いことがあるので、無ければ null にする。今日の 00:00・09:00 と混ざらないよう日付でも見る
+///
+/// 0 時から 5 時ごろは前日 17 時発表が最新で、「明日」は発表から見るとあさってにあたり、[0] の気温・降水確率が届かない。
+/// 値ごとに、[0] に無ければ同じ JSON の [1] (週間予報。1 日ごとの pops・tempsMin・tempsMax) で補う
 pub fn parse_forecast(v: &Value, date: &str) -> Option<Forecast> {
     let series = v.get(0)?.get("timeSeries")?;
     let weather = series.get(0)?;
@@ -111,13 +114,15 @@ pub fn parse_forecast(v: &Value, date: &str) -> Option<Forecast> {
     let codes = area.get("weatherCodes")?;
     let texts = area.get("weathers")?;
     let clean = |i: usize| Some(texts.get(i)?.as_str()?.replace(['　', ' '], ""));
+    let weekly = v.get(1).and_then(|p| p.get("timeSeries"));
+    let daily = |i: usize, key: &str| weekly_value(weekly?.get(i), key, date);
     let tomorrow = times(weather).position(|t| at(t, date, "00")).and_then(|i| {
         Some(Tomorrow {
             code: codes.get(i)?.as_str()?.to_string(),
             text: clean(i)?,
-            temp_min: temp_at(series.get(2), date, "00"),
-            temp_max: temp_at(series.get(2), date, "09"),
-            pop: max_pop(series.get(1), date),
+            temp_min: temp_at(series.get(2), date, "00").or_else(|| daily(1, "tempsMin")),
+            temp_max: temp_at(series.get(2), date, "09").or_else(|| daily(1, "tempsMax")),
+            pop: max_pop(series.get(1), date).or_else(|| daily(0, "pops").map(|p| p as u8)),
         })
     });
     Some(Forecast {
@@ -139,6 +144,13 @@ fn times(series: &Value) -> impl Iterator<Item = &str> {
 /// timeDefines の時刻 ("2026-10-02T09:00:00+09:00") が、date の hour 時 ("09") か
 fn at(t: &str, date: &str, hour: &str) -> bool {
     t.starts_with(date) && t.get(11..13) == Some(hour)
+}
+
+/// 週間予報 ([1]) の系列の、date の日付の値 (1 日ごと。空文字 "" は取れていない)
+fn weekly_value(series: Option<&Value>, key: &str, date: &str) -> Option<f64> {
+    let series = series?;
+    let i = times(series).position(|t| t.starts_with(date))?;
+    series.get("areas")?.get(0)?.get(key)?.get(i)?.as_str()?.parse().ok()
 }
 
 /// 気温の系列の、date の hour 時の値
@@ -366,6 +378,57 @@ mod tests {
             (t.code.as_str(), t.temp_min, t.temp_max, t.pop),
             ("200", None, None, None)
         );
+    }
+
+    /// 2026-10-01 17 時発表 (0 時から 5 時の間の最新) の東京都の予報。[0] は発表の明日 (10-02) までで、
+    /// 「明日」(10-03) の天気はあるが気温・降水確率は無い。[1] の週間予報が 10-02 から 10-08
+    fn tokyo_evening() -> Value {
+        let days: Vec<String> = (2..=8).map(|d| format!("2026-10-{d:02}T00:00:00+09:00")).collect();
+        json!([{"timeSeries": [
+            {"timeDefines": ["2026-10-01T17:00:00+09:00", "2026-10-02T00:00:00+09:00", "2026-10-03T00:00:00+09:00"], "areas": [
+                {"area": {"name": "東京地方"}, "weatherCodes": ["200", "201", "101"], "weathers": ["くもり", "くもり　時々　晴れ", "晴れ　時々　くもり"]}
+            ]},
+            {"timeDefines": ["2026-10-01T18:00:00+09:00", "2026-10-02T00:00:00+09:00", "2026-10-02T06:00:00+09:00",
+                             "2026-10-02T12:00:00+09:00", "2026-10-02T18:00:00+09:00"],
+             "areas": [{"area": {"name": "東京地方"}, "pops": ["10", "10", "20", "30", "20"]}]},
+            {"timeDefines": ["2026-10-02T00:00:00+09:00", "2026-10-02T09:00:00+09:00"],
+             "areas": [{"area": {"name": "東京"}, "temps": ["20", "24"]}]}
+        ]}, {"timeSeries": [
+            {"timeDefines": days, "areas": [{"area": {"name": "東京地方"}, "pops": ["", "20", "30", "40", "40", "40", "30"]}]},
+            {"timeDefines": days, "areas": [{"area": {"name": "東京"},
+                "tempsMin": ["", "17", "16", "15", "15", "16", "17"], "tempsMax": ["", "24", "23", "22", "22", "23", "24"]}]}
+        ]}])
+    }
+
+    #[test]
+    fn falls_back_to_the_weekly_forecast_when_the_short_term_one_stops_before_tomorrow() {
+        // 10-03 は [0] に気温・降水確率が無いので、[1] の 10-03 (2 番目。先頭の 10-02 は "") の値
+        let t = parse_forecast(&tokyo_evening(), "2026-10-03")
+            .unwrap()
+            .tomorrow
+            .unwrap();
+        assert_eq!(t.code, "101");
+        assert_eq!((t.temp_min, t.temp_max, t.pop), (Some(17.0), Some(24.0), Some(20)));
+        // [1] の値が "" (取れていない) なら無しのまま
+        let mut v = tokyo_evening();
+        v[1]["timeSeries"][0]["areas"][0]["pops"] = json!(["", "", "", "", "", "", ""]);
+        v[1]["timeSeries"][1]["areas"][0]["tempsMax"] = json!(["", "", "", "", "", "", ""]);
+        let t = parse_forecast(&v, "2026-10-03").unwrap().tomorrow.unwrap();
+        assert_eq!((t.temp_min, t.temp_max, t.pop), (Some(17.0), None, None));
+    }
+
+    #[test]
+    fn short_term_values_win_over_the_weekly_forecast_per_field() {
+        // 10-02 は [0] に全部ある。[1] の 10-02 の値 (最高気温 25) があっても [0] を使う
+        let mut v = tokyo_evening();
+        v[1]["timeSeries"][1]["areas"][0]["tempsMax"][0] = json!("25");
+        let t = parse_forecast(&v, "2026-10-02").unwrap().tomorrow.unwrap();
+        assert_eq!((t.temp_min, t.temp_max, t.pop), (Some(20.0), Some(24.0), Some(30)));
+        // [0] で最高気温だけ無ければ、その分だけ [1] で補う
+        v[0]["timeSeries"][2]["timeDefines"] = json!(["2026-10-02T00:00:00+09:00"]);
+        v[0]["timeSeries"][2]["areas"][0]["temps"] = json!(["20"]);
+        let t = parse_forecast(&v, "2026-10-02").unwrap().tomorrow.unwrap();
+        assert_eq!((t.temp_min, t.temp_max), (Some(20.0), Some(25.0)));
     }
 
     #[test]
