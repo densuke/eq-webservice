@@ -37,6 +37,23 @@ pub fn congested_now(limit: f64) -> bool {
     )
 }
 
+/// /proc/meminfo の文から、MemAvailable (MB) を読む
+pub fn mem_available_mb(text: &str) -> Option<u64> {
+    let kb: u64 = text
+        .lines()
+        .find_map(|l| l.strip_prefix("MemAvailable:"))?
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()?;
+    Some(kb / 1024)
+}
+
+/// 今のメモリの空き (MB)。/proc が無い (Mac) ときは None
+pub fn mem_available_now() -> Option<u64> {
+    mem_available_mb(&std::fs::read_to_string("/proc/meminfo").ok()?)
+}
+
 #[derive(Debug, PartialEq)]
 pub enum Verdict {
     Go,
@@ -122,6 +139,15 @@ mod tests {
             None,
             LIMIT
         ));
+    }
+
+    #[test]
+    fn reads_mem_available_in_megabytes() {
+        let text =
+            "MemTotal:        1006872 kB\nMemFree:           50000 kB\nMemAvailable:     256000 kB\nBuffers: 1 kB\n";
+        assert_eq!(mem_available_mb(text), Some(250));
+        assert_eq!(mem_available_mb("MemFree: 1 kB\n"), None);
+        assert_eq!(mem_available_mb(""), None);
     }
 
     #[test]

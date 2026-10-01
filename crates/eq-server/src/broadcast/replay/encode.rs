@@ -52,7 +52,8 @@ pub fn audio_args(audio: &Path) -> Vec<String> {
 }
 
 /// 映像 (rawvideo の I420 を標準入力から受ける) と音のファイルを合わせて mp4 にする ffmpeg の引数。
-/// コマは固定の fps で、時刻はコマの順番で付く。キーフレームは 2 秒ごと。`-threads 1` はメモリのため (e2 は 1GB)
+/// コマは固定の fps で、時刻はコマの順番で付く。キーフレームは 2 秒ごと。
+/// `-threads 1` と `-tune zerolatency` (先読みと B フレームをやめる) はメモリのため (e2 は 1GB。先読みありは約 130MB、なしで配信の ffmpeg と同じ程度)
 pub fn video_args(fps: u32, audio: &Path, out: &Path) -> Vec<String> {
     let mut a = strings(&[
         "-hide_banner",
@@ -75,8 +76,22 @@ pub fn video_args(fps: u32, audio: &Path, out: &Path) -> Vec<String> {
     ]);
     a.push(audio.display().to_string());
     a.extend(strings(&[
-        "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-threads", "1",
-        "-pix_fmt", "yuv420p",
+        "-map",
+        "0:v",
+        "-map",
+        "1:a",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-tune",
+        "zerolatency",
+        "-crf",
+        "23",
+        "-threads",
+        "1",
+        "-pix_fmt",
+        "yuv420p",
     ]));
     a.extend(["-g".to_string(), (fps * 2).to_string()]);
     a.extend(strings(&["-c:a", "copy", "-shortest", "-movflags", "+faststart"]));
@@ -188,6 +203,8 @@ mod tests {
         }
         assert!(has(&a, ["-framerate", "5"]));
         assert!(has(&a, ["-threads", "1"]));
+        // 先読みをしない (e2 のメモリのため)
+        assert!(has(&a, ["-tune", "zerolatency"]));
         assert!(has(&a, ["-movflags", "+faststart"]));
         assert!(has(&a, ["-c:v", "libx264"]) && has(&a, ["-crf", "23"]) && has(&a, ["-preset", "veryfast"]));
         assert!(has(&a, ["-c:a", "copy"]));
