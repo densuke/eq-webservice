@@ -5,7 +5,7 @@ import { project } from "./map.ts";
 import { type Center, type WaveSource, currentGroup, geoOf, groupPlace, groupScale, pendingHindsight, recentQuakes, relatedQuake, unsettledGroups, waveSources } from "./quakes.ts";
 import { sameQuake } from "./priority.ts";
 import { forecastTag } from "./detail.ts";
-import { latestEew } from "./groups.ts";
+import { heldEew } from "./groups.ts";
 import { $, map } from "./dom.ts";
 import { REPLAY_SPEED, WAVE_MAX_SEC, app, now } from "./state.ts";
 import { activeAreas } from "./tsunami.ts";
@@ -29,7 +29,7 @@ export function renderMarkers(now: number): void {
       prev.primary ||= primary;
       continue;
     }
-    const note = g.kind === "eew" ? (forecastTag(latestEew(g)) ?? undefined) : undefined;
+    const note = g.kind === "eew" ? (forecastTag(heldEew(g)) ?? undefined) : undefined;
     byNum.set(id, { key: g.key, lat: c.lat, lon: c.lon, label, primary: primary || (prev?.primary ?? false), scale: groupScale(g), note, quake: g.kind === "quake" });
   }
   // 履歴の再生: 震源が届くまでは、後の報で分かった震源を薄く出す

@@ -3,7 +3,7 @@
 import { quakeDetail } from "./detail.ts";
 import { FULL_MS } from "./fade.ts";
 import type { Hindsight } from "./history.ts";
-import { type Group, latestEew, summarizeQuake } from "./groups.ts";
+import { type Group, heldEew, latestEew, summarizeQuake } from "./groups.ts";
 import { assignNumbers } from "./numbering.ts";
 import { type Place, byPriority, sameQuake, settleMs } from "./priority.ts";
 import { EEW_BANNER_MS, WAVE_MAX_SEC, app, now } from "./state.ts";
@@ -67,8 +67,11 @@ export function activeEews(now: number): EewEvent[] {
   return app.world.store
     .list()
     .filter((g) => g.kind === "eew")
-    .map((g) => latestEew(g))
-    .filter((e) => !e.cancelled && now - e.received_at_ms < EEW_BANNER_MS && e.received_at_ms > app.calmSince);
+    .filter((g) => {
+      const e = latestEew(g);
+      return !e.cancelled && now - e.received_at_ms < EEW_BANNER_MS && e.received_at_ms > app.calmSince;
+    })
+    .map((g) => heldEew(g));
 }
 
 export function placeOf(origin: number | null, h: Hypocenter | null): Place {
@@ -82,7 +85,7 @@ export function groupPlace(g: Group): Place {
 
 export function groupScale(g: Group): Scale {
   if (g.kind === "quake") return summarizeQuake(g).maxScale;
-  if (g.kind === "eew") return latestEew(g).max_scale;
+  if (g.kind === "eew") return heldEew(g).max_scale;
   return -1;
 }
 
@@ -121,7 +124,7 @@ export function geoOf(g: Group): { center: Center | null; origin: number | null;
   let prefs: string[];
   let areas: string[];
   if (g.kind === "eew") {
-    const e = latestEew(g);
+    const e = heldEew(g);
     if (e.cancelled) return null;
     [h, origin, prefs] = [e.hypocenter, e.origin_time_ms, e.pref_max.map((p) => p.pref)];
     areas = e.areas.map((a) => a.name);
