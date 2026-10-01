@@ -585,7 +585,11 @@ fn write_fixture_pngs_when_asked() {
     };
     let calm_png = r.render(&scene(None, &history[1..], Some(&warnings), Some(&weather)));
     calm_png.save_png(std::path::Path::new(&out).join("calm.png")).unwrap();
-    let test_png = r.render(&test_scene(None, &history[1..]));
+    // テスト配信の帯と警報の帯 (2 行) の下にも、情報の窓が重ならない
+    let test_png = r.render(&Scene {
+        test: true,
+        ..scene(None, &history[1..], Some(&warnings), Some(&weather))
+    });
     test_png.save_png(std::path::Path::new(&out).join("test.png")).unwrap();
 }
 
