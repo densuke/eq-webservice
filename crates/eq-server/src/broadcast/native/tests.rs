@@ -412,29 +412,35 @@ fn the_card_shows_tomorrow_every_other_interval_and_only_when_asked() {
     assert_eq!(orange(&r.render(&sc)), 0);
 }
 
-/// 案内の枠 (x, y, 幅, 高さ) の中で、2 つの画面の画素が違うところの数
-fn caption_diff(a: &Pixmap, b: &Pixmap) -> usize {
-    let (x, y) = super::calm::CAPTION_AT;
-    (y as u32..(y + super::calm::CAPTION_H) as u32)
-        .flat_map(|py| (x as u32..x as u32 + 150).map(move |px| (px, py)))
+/// 情報の窓の中で、2 つの画面の画素が違うところの数 (縁を除く)
+fn window_diff(a: &Pixmap, b: &Pixmap) -> usize {
+    let (x, y, w, h) = super::calm::INFO_WINDOW;
+    (y as u32 + 4..(y + h) as u32 - 4)
+        .flat_map(|py| (x as u32 + 4..(x + w) as u32 - 4).map(move |px| (px, py)))
         .filter(|&p| rgb(a, p) != rgb(b, p))
         .count()
 }
 
 #[test]
-fn the_caption_sits_below_the_inset_and_clear_of_the_legend_and_banner() {
-    let (x, y) = super::calm::CAPTION_AT;
+fn the_info_window_sits_in_the_sea_clear_of_land_the_inset_and_the_banners() {
+    let (x, y, w, h) = super::calm::INFO_WINDOW;
     let inset = Frame::inset(&View::fit_home(MAP_RECT), &OKINAWA).unwrap();
-    let ((_, iy, _, ih), _) = inset.inset_box().unwrap();
-    assert!(y > iy + ih); // 南西諸島の別枠の下
-    assert!(y + super::calm::CAPTION_H < 720.0 - 10.0 - 147.0 - 6.0 - 78.0); // 左下の警報の凡例より上
-    assert!(y > 36.0 + 50.0 + 20.0); // 上部バーと警報の帯 (2 行) とテスト配信の帯の下
-    assert_eq!(x, 10.0);
+    let ((ix, _, iw, _), _) = inset.inset_box().unwrap();
+    assert!(x > ix + iw); // 南西諸島の別枠の右
+    assert!(y > 36.0 + 20.0 + super::banner::banner_height(2)); // 上部バー・テスト配信の帯・警報の帯 (2 行) の下
+    assert!(x + w < 900.0 && y + h < 720.0 - 10.0 - 147.0); // 地図の中。左下の凡例より上
+                                                            // 陸 (周辺国と日本) を描いた画面で、窓とその周り 6px が全部海の色
+    let mut r = renderer(Text::none());
+    let plain = r.render(&scene(None, &[], None, None));
+    for py in (y as u32 - 6)..(y + h) as u32 + 6 {
+        for px in (x as u32 - 6)..(x + w) as u32 + 6 {
+            assert_eq!(rgb(&plain, (px, py)), SEA, "({px}, {py}) が陸にかかっている");
+        }
+    }
 }
 
 #[test]
-fn the_caption_names_what_the_cards_show_in_the_same_frame() {
-    // 文字 (フォント) が読める環境でだけ。読めなければ案内は出さないので、その確認だけ
+fn the_info_window_names_what_the_cards_show_in_the_same_frame() {
     let weather = CityWeather {
         cities: vec![City {
             name: "東京".into(),
@@ -452,26 +458,31 @@ fn the_caption_names_what_the_cards_show_in_the_same_frame() {
         rain: vec![],
     };
     let noon = NOW - NOW % 86_400_000 + 3 * 3_600_000; // 12 時 JST (20 秒の区切りの頭)
-    let frame = |r: &mut Renderer, weather: Option<&CityWeather>, at: u64| {
-        let mut sc = scene(None, &[], None, weather);
+    let frame = |r: &mut Renderer, weather: Option<&CityWeather>, quake: Option<&QuakeSummary>, at: u64| {
+        let mut sc = scene(quake, &[], None, weather);
         sc.flip_s = 20;
         sc.now_ms = at;
         r.render(&sc)
     };
     let font = BroadcastConfig::default().font;
     let mut r = renderer(Text::load(&font, 0).unwrap_or_else(|_| Text::none()));
-    let enabled = r.text.enabled();
-    let plain = frame(&mut r, None, noon + 5_000);
-    let now = frame(&mut r, Some(&weather), noon + 5_000);
-    let tomorrow = frame(&mut r, Some(&weather), noon + 25_000);
-    // 天気が無い (地震の画面など) ときは出さない
-    assert_eq!(caption_diff(&plain, &frame(&mut r, None, noon + 25_000)), 0);
-    if enabled {
-        assert!(caption_diff(&plain, &now) > 100, "今の案内");
-        assert!(caption_diff(&plain, &tomorrow) > 100, "明日の案内");
-        assert!(caption_diff(&now, &tomorrow) > 100, "案内の文が変わる");
+    let plain = frame(&mut r, None, None, noon + 5_000);
+    let now = frame(&mut r, Some(&weather), None, noon + 5_000);
+    let tomorrow = frame(&mut r, Some(&weather), None, noon + 25_000);
+    // 窓の色が、窓の中にある (窓の枠の画素が海の色でなくなる)
+    let (x, y, _, _) = super::calm::INFO_WINDOW;
+    assert_eq!(rgb(&plain, (x as u32 + 30, y as u32)), SEA);
+    assert_ne!(rgb(&now, (x as u32 + 30, y as u32)), SEA);
+    assert_ne!(rgb(&tomorrow, (x as u32 + 30, y as u32)), SEA);
+    // 地震の画面では出さない
+    let q = quake(Scale::S3, &[("東京都", Scale::S3)], None);
+    let shake = frame(&mut r, Some(&weather), Some(&q), noon + 5_000);
+    assert_eq!(rgb(&shake, (x as u32 + 30, y as u32)), SEA);
+    // 文字 (フォント) が読める環境でだけ、案内の文字が出て、切り替えで変わる。読めなければ窓の枠だけで同じ
+    if r.text.enabled() {
+        assert!(window_diff(&now, &tomorrow) > 100, "案内の文が変わる");
     } else {
-        assert_eq!(caption_diff(&plain, &now), 0);
+        assert_eq!(window_diff(&now, &tomorrow), 0);
     }
 }
 
@@ -572,7 +583,11 @@ fn write_fixture_pngs_when_asked() {
     };
     let calm_png = r.render(&scene(None, &history[1..], Some(&warnings), Some(&weather)));
     calm_png.save_png(std::path::Path::new(&out).join("calm.png")).unwrap();
-    let test_png = r.render(&test_scene(None, &history[1..]));
+    // テスト配信の帯と警報の帯 (2 行) の下にも、情報の窓が重ならない
+    let test_png = r.render(&Scene {
+        test: true,
+        ..scene(None, &history[1..], Some(&warnings), Some(&weather))
+    });
     test_png.save_png(std::path::Path::new(&out).join("test.png")).unwrap();
 }
 

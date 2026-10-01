@@ -9,11 +9,11 @@ use super::data::{
     city_side, city_side_tomorrow, rain_color, range_label, temp_label, top_level, warning_fill, weather_caption,
     weather_char, City, Side, Tomorrow, WeatherView,
 };
-use super::draw::Scene;
-use super::frame::{Frame, OKINAWA};
+use super::draw::{Scene, INSET_LINE};
+use super::frame::{BoxRect, Frame};
 use super::geo::Shape;
 use super::icon;
-use super::paint::{circle, rrect, BG, LAND_EDGE, TEXT};
+use super::paint::{circle, rrect, LAND_EDGE, PANEL, TEXT};
 use super::text::Text;
 
 pub fn draw(pm: &mut Pixmap, text: &mut Text, areas: &HashMap<String, Shape>, frame: &Frame, scene: &Scene) {
@@ -40,23 +40,30 @@ pub fn draw(pm: &mut Pixmap, text: &mut Text, areas: &HashMap<String, Shape>, fr
         draw_city(pm, text, frame, scene, c, view);
     }
     if !frame.is_inset() {
-        draw_caption(pm, text, &weather_caption(view, scene.now_ms));
+        draw_info_window(pm, text, &weather_caption(view, scene.now_ms));
     }
 }
 
-/// 案内の左上。地図の左、南西諸島の別枠のすぐ下の日本海の上 (警報の帯・時計・凡例とは重ならない。
-/// 上の端は、警報の帯が重なる位置なので使わない)
-pub(super) const CAPTION_AT: (f32, f32) = (OKINAWA.x, OKINAWA.y + OKINAWA.h + 8.0);
-pub(super) const CAPTION_H: f32 = 24.0;
+/// 情報の窓 (x, y, 幅, 高さ)。日本海の北の空いた海 (別枠の右・北海道の左・警報の帯の下)。
+/// 陸・別枠・警報の帯と重ならないことはテストで確かめる
+pub(super) const INFO_WINDOW: BoxRect = (274.0, 198.0, 242.0, 44.0);
+const INFO_PX: f32 = 22.0;
 
-/// 札が今何を出しているか (今の天気 / 明日の天気) の案内。文字が描けないときは出さない
-fn draw_caption(pm: &mut Pixmap, text: &mut Text, caption: &str) {
-    if !text.enabled() {
-        return;
-    }
-    let (x, y) = CAPTION_AT;
-    rrect(pm, x, y, text.width(caption, 12.0) + 16.0, CAPTION_H, 6.0, BG, 0.8);
-    text.draw(pm, caption, x + 8.0, y + 16.0, 12.0, TEXT);
+/// 今何を出しているか (今の天気 / 明日の天気) の案内を、情報の窓に出す。
+/// 窓は文字が描けなくても出す。中身の文 (caption) は窓とは別に決める
+fn draw_info_window(pm: &mut Pixmap, text: &mut Text, caption: &str) {
+    let (x, y, w, h) = INFO_WINDOW;
+    rrect(pm, x, y, w, h, 8.0, INSET_LINE, 1.0);
+    rrect(pm, x + 1.0, y + 1.0, w - 2.0, h - 2.0, 7.0, PANEL, 0.9);
+    text.draw_fit(
+        pm,
+        caption,
+        x + 12.0,
+        y + h / 2.0 + INFO_PX * 0.35,
+        INFO_PX,
+        TEXT,
+        w - 24.0,
+    );
 }
 
 /// 札の左上 (点 (x, y) からの向き side と、札の幅・高さで決める)
