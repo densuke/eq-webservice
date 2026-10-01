@@ -16,6 +16,13 @@ if [ ! -f "$state/ng" ]; then
   touch "$state/ng"
   exit 0
 fi
+# e2 全体が詰まっている (メモリかディスクの待ちが多い) 間は、つなぎ直しても戻らず負荷を足すだけなので見送る
+# (2026-10-01 07:00 の詰まりで、つなぎ直しの連発が悪化させた)。値は PSI の full の 60 秒平均 (%)
+busy=$(awk '/^full/{split($3,a,"="); if (a[2]+0 > 20) b=1} END{print b+0}' /proc/pressure/io /proc/pressure/memory 2>/dev/null)
+if [ "$busy" = 1 ]; then
+  echo "e2 全体が詰まっているので、つなぎ直しを見送る"
+  exit 0
+fi
 last=$(cat "$state/restarted" 2>/dev/null || echo 0)
 if [ $(( $(date +%s) - last )) -lt 900 ]; then
   echo "つなぎ直しは 15 分以内に済ませたので見送る"
