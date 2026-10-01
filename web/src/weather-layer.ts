@@ -81,7 +81,10 @@ function cityMarker(c: CityWeather["cities"][number], night: boolean, tomorrow: 
     e.textContent = s;
     return e;
   };
-  g.append(title, el("circle", { r: 3, class: "city-dot" }), el("rect", { x: bx, y: by, width: w, height: h, rx: pop ? 10 : 11, class: "city-box" }), line(11, "city-text", t ? `${icon}${range}` : `${icon}${temp}`));
-  if (pop) g.append(line(24, "city-pop", pop));
+  // 札 (箱と文字) は badge にまとめる。重なって動かすときは badge ごと動かし、点から引き出し線 (leader) でつなぐ
+  const badge = el("g", { class: "city-badge" });
+  badge.append(el("rect", { x: bx, y: by, width: w, height: h, rx: pop ? 10 : 11, class: "city-box" }), line(11, "city-text", t ? `${icon}${range}` : `${icon}${temp}`));
+  if (pop) badge.append(line(24, "city-pop", pop));
+  g.append(title, el("line", { class: "city-leader", visibility: "hidden" }), el("circle", { r: 3, class: "city-dot" }), badge);
   return g;
 }
