@@ -4,14 +4,18 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 
+use super::super::native::Place;
 use super::super::BroadcastConfig;
 
 pub const USAGE: &str = "\
 usage: eq-server replay-video --from <ms> --to <ms> --out <x.mp4> (--events <jsonl> | --archive <URL>)
+           [--quake <origin_ms>[,<lat>,<lon>]]... [--chapters <x.json>]
            [--fps 5] [--label \"記録から再現\"] [--map-dir web/public] [--font <ttf/ttc>] [--ffmpeg ffmpeg]
   --from/--to   報を集める範囲 (received_at_ms。epoch ミリ秒)。--archive のときは 1 時間まで
   --events      eq-server の jsonl の記録 (sink が書いたもの) を直接読む。samples/scenarios の形も読める
-  --archive     /api/archive から取る (例: https://eq.fuga.jp)";
+  --archive     /api/archive から取る (例: https://eq.fuga.jp)
+  --quake       動画に入れる地震 (発生時刻と、分かれば震源の緯度・経度)。何度でも書ける (連続地震)。省けば範囲で最大震度の 1 つ
+  --chapters    各地震の始まりの、動画の中の時刻を JSON で書き出す";
 
 /// 報の取り方
 #[derive(Debug, Clone, PartialEq)]
@@ -26,6 +30,9 @@ pub struct Options {
     pub to: u64,
     pub out: PathBuf,
     pub source: Source,
+    /// 動画に入れる地震。空なら範囲で最大震度の 1 つ
+    pub quakes: Vec<Place>,
+    pub chapters: Option<PathBuf>,
     pub fps: u32,
     pub label: String,
     pub map_dir: String,
@@ -42,6 +49,8 @@ pub fn parse(args: &[String]) -> anyhow::Result<Options> {
         to: 0,
         out: PathBuf::new(),
         source: Source::Events(PathBuf::new()),
+        quakes: Vec::new(),
+        chapters: None,
         fps: 5,
         label: "記録から再現".into(),
         map_dir: d.map_dir,
@@ -61,6 +70,8 @@ pub fn parse(args: &[String]) -> anyhow::Result<Options> {
             "--out" => out = Some(PathBuf::from(value("--out")?)),
             "--events" => events = Some(PathBuf::from(value("--events")?)),
             "--archive" => archive = Some(value("--archive")?.trim_end_matches('/').to_string()),
+            "--quake" => o.quakes.push(quake(&value("--quake")?)?),
+            "--chapters" => o.chapters = Some(PathBuf::from(value("--chapters")?)),
             "--fps" => o.fps = value("--fps")?.parse().context("--fps")?,
             "--label" => o.label = value("--label")?,
             "--map-dir" => o.map_dir = value("--map-dir")?,
@@ -80,6 +91,26 @@ pub fn parse(args: &[String]) -> anyhow::Result<Options> {
         _ => anyhow::bail!("give exactly one of --events and --archive\n\n{USAGE}"),
     };
     Ok(o)
+}
+
+/// `<origin_ms>` か `<origin_ms>,<lat>,<lon>`
+fn quake(s: &str) -> anyhow::Result<Place> {
+    let mut it = s.split(',');
+    let origin = it.next().and_then(|v| v.parse::<i64>().ok());
+    let place = |v: Option<&str>| {
+        v.map(|v| v.parse::<f64>().with_context(|| format!("--quake {s:?}")))
+            .transpose()
+    };
+    let (lat, lon) = (place(it.next())?, place(it.next())?);
+    anyhow::ensure!(
+        origin.is_some() && lat.is_some() == lon.is_some() && it.next().is_none(),
+        "--quake は <origin_ms> か <origin_ms>,<lat>,<lon>: {s:?}"
+    );
+    Ok(Place {
+        origin_ms: origin,
+        lat,
+        lon,
+    })
 }
 
 fn ms(s: &str) -> anyhow::Result<u64> {
@@ -116,6 +147,36 @@ mod tests {
         ])
         .unwrap();
         assert_eq!((o.source, o.fps), (Source::Events("e.jsonl".into()), 10));
+    }
+
+    #[test]
+    fn quakes_are_repeatable_and_may_omit_the_epicenter() {
+        let o = parse_strs(&[
+            "--from",
+            "1",
+            "--to",
+            "9",
+            "--out",
+            "x",
+            "--events",
+            "e",
+            "--quake",
+            "1790000000000,35.5,139.7",
+            "--quake",
+            "5",
+            "--chapters",
+            "c.json",
+        ])
+        .unwrap();
+        assert_eq!(o.quakes.len(), 2);
+        assert_eq!(
+            (o.quakes[0].origin_ms, o.quakes[0].lat, o.quakes[0].lon),
+            (Some(1_790_000_000_000), Some(35.5), Some(139.7))
+        );
+        assert_eq!((o.quakes[1].origin_ms, o.quakes[1].lat), (Some(5), None));
+        assert_eq!(o.chapters, Some("c.json".into()));
+        let bad = |q: &str| parse_strs(&["--from", "1", "--to", "9", "--out", "x", "--events", "e", "--quake", q]);
+        assert!(bad("x").is_err() && bad("1,2").is_err() && bad("1,2,3,4").is_err());
     }
 
     #[test]

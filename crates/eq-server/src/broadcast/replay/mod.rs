@@ -10,6 +10,7 @@ mod sound;
 mod source;
 #[cfg(test)]
 mod testkit;
+mod worker;
 
 use std::path::PathBuf;
 
@@ -18,6 +19,7 @@ use anyhow::Context;
 use super::native::{self, Stepper};
 use super::BroadcastConfig;
 use args::{Options, USAGE};
+pub use worker::run as run_worker;
 
 pub async fn run(args: &[String]) -> anyhow::Result<()> {
     if args.iter().any(|a| a == "-h" || a == "--help") {
@@ -43,12 +45,16 @@ fn audio_path(out: &std::path::Path) -> PathBuf {
 
 async fn make(o: &Options, audio: &std::path::Path) -> anyhow::Result<()> {
     let all = source::load(o).await?;
-    let events = plan::target_events(&all);
-    anyhow::ensure!(!events.is_empty(), "範囲に、動画にできる地震の報がありません");
-    let hindsight = native::hindsight_of(&events);
-    let plan = plan::build(&events, hindsight.as_ref(), o.fps).context("筋書きを作れません")?;
+    let places = if o.quakes.is_empty() {
+        plan::pick_target(&all).into_iter().collect()
+    } else {
+        o.quakes.clone()
+    };
+    let series = plan::Series::of(&all, &places).context("範囲に、動画にできる地震の報がありません")?;
+    let plan = plan::build(&series, o.fps).context("筋書きを作れません")?;
     tracing::info!(
-        events = events.len(),
+        quakes = series.members.len(),
+        events = series.events.len(),
         frames = plan.frames.len(),
         seconds = plan::duration_ms(plan.frames.len(), o.fps) / 1000,
         "replay-video: 筋書きができました"
@@ -70,19 +76,24 @@ async fn make(o: &Options, audio: &std::path::Path) -> anyhow::Result<()> {
             s.why
         );
     }
+    let chapters = plan::chapters(&plan.frames, &series.members, o.fps);
+    for c in &chapters {
+        tracing::info!(
+            "replay-video: 地震 {:>6.1}秒 {} {} 震度{}",
+            c.video_ms as f64 / 1000.0,
+            c.origin_ms.map_or_else(String::new, crate::quake::jst::format),
+            c.name,
+            crate::quake::Scale(c.max_scale).label()
+        );
+    }
+    if let Some(path) = &o.chapters {
+        std::fs::write(path, serde_json::to_vec_pretty(&chapters)?)
+            .with_context(|| format!("writing {}", path.display()))?;
+    }
     let mut throttle = psi::Throttle::default();
     encode::encode_audio(o, &plan, audio, &mut throttle).await?;
     let mut stepper = Stepper::new(native::load_renderer(&renderer_config(o))?);
-    encode::encode_video(
-        o,
-        &events,
-        &plan,
-        hindsight.as_ref(),
-        &mut stepper,
-        audio,
-        &mut throttle,
-    )
-    .await?;
+    encode::encode_video(o, &series.events, &plan, &mut stepper, audio, &mut throttle).await?;
     tracing::info!(out = %o.out.display(), "replay-video: できました");
     Ok(())
 }

@@ -31,7 +31,7 @@ pub struct Place {
 }
 
 /// 2 点の距離 (km。球面)
-fn distance_km(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
+pub fn distance_km(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     let (p1, p2) = (lat1.to_radians(), lat2.to_radians());
     let a = ((lat2 - lat1).to_radians() / 2.0).sin().powi(2)
         + p1.cos() * p2.cos() * ((lon2 - lon1).to_radians() / 2.0).sin().powi(2);

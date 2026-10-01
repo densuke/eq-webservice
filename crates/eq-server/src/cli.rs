@@ -9,6 +9,8 @@ usage: eq-server [options]
        eq-server convert <samples/scenarios> <web/public/demo>   (デモモード用の JSON を作る)
        eq-server replay-video --from <ms> --to <ms> --out <x.mp4> (--events <jsonl> | --archive <URL>)
                                                           (記録から音入りの動画を描き直す。詳しくは replay-video --help)
+       eq-server replay-worker [replay.toml]
+                                                          (動画にする地震を見つけて、キューに積み、空き時間に自動で作る。詳しくは replay-worker --help)
        eq-server bgm-send <MP3 のディレクトリ> <http://127.0.0.1:8010/bgm.mp3>
                                                           (平時の BGM を Icecast へ送る。パスワードは ICECAST_SOURCE_PASSWORD)
 

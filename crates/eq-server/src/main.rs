@@ -52,6 +52,10 @@ async fn main() -> anyhow::Result<()> {
     if args.first().map(String::as_str) == Some("replay-video") {
         return broadcast::replay_video(&args[1..]).await;
     }
+    // eq-server replay-worker [replay.toml]: 記録から動画にする地震を見つけて、キューに積み、空き時間に作る
+    if args.first().map(String::as_str) == Some("replay-worker") {
+        return broadcast::replay_worker(&args[1..]).await;
+    }
     let cli = Cli::parse(args)?.with_env(|k| std::env::var(k).ok())?;
     if cli.help {
         println!("{USAGE}");

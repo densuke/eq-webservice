@@ -340,6 +340,40 @@ systemd-run --user --wait -p CPUQuota=10% -p CPUWeight=1 -p MemoryMax=200M -p Me
 ```
 
 - Linux では `/proc/pressure/{io,memory}` の full の 60 秒平均を 30 秒ごとに見て、20% を超えている間は描くのも ffmpeg への書き込みも止めて待ちます。10 分待っても下がらなければ、作りかけを消して失敗で終わります (Mac では見ません)。
+- 連続して起きた地震を 1 本にするには、`--quake <発生時刻 ms>[,<緯度>,<経度>]` を地震の数だけ付けます (省けば範囲で最大震度の 1 つ)。地震と地震の間は早送りで詰め、各地震の始まりの動画の中の時刻を `--chapters x.json` に書き出します。
+- 記録のファイルは 5 万件まで読みます (`/api/archive` は今までどおり 500 件まで)。
+
+#### 動画を自動で作る (replay-worker)
+
+記録を見て、震度 3 以上 (または緊急地震速報の警報) の地震を動画にし、空き時間に 1 本ずつ作ります (仕様は [docs/replay-video.md](docs/replay-video.md) の 5 章。アップロードは次の段階)。
+**ライブの配信と本番が最優先**で、動画作りはいつでも止めて捨てます。
+
+- 検知とまとめ: 前の地震から 50km 以内・30 分以内に続いた地震は、連続地震として 1 本にします。最後の報から 60 分静かになったら閉じて、`queue/` に 1 つのまとまりごとの JSON を置きます (中身は範囲・地震の一覧・状態・やり直しの回数)。1 本は最長 3 時間で、超えたら次の 1 本です。
+- 始める条件: 配信が平時で、最後の地震の画面から 30 分以上たっていて、e2 が詰まっておらず、YouTube の受け口が bad・noData でないとき。
+- 作る: `systemd-run --user --wait` の一時的な単位 `eq-replay-job-*` で `replay-video` を動かします (CPUQuota 5%・CPUWeight 1・MemoryMax 200M・MemorySwapMax 0・Nice 19)。作りかけは `work/`、できたら `done/<id>.mp4` に置きます。
+- 見張り (5 秒ごと): 配信が地震の画面になる (または配信の状態がわからなくなる) と、すぐ `systemctl --user kill` で止めて、作りかけを消して待ちに戻します。e2 の PSI が 20% を超えるか YouTube の健全性が落ちると `freeze`、落ち着けば `thaw`。凍結が 10 分続いたら止めて待ちに戻します。失敗や凍結切れのやり直しが 5 回を超えたら `failed` にします (地震の画面で止めたものは数えません)。
+- 配信の状態は、eq-broadcast (native) が `state.json` (`{"calm":…,"since_ms":…,"updated_ms":…}`) に書きます (切り替わったときと 30 秒ごと。書けなくても配信は止めません)。`updated_ms` が 2 分より古ければ「わからない」とみなして、地震の画面と同じに扱います。
+- YouTube の健全性は、pd2 と共有する認証情報 (`~/.config/pd2/youtube-upload-token.json`。読むだけで書き戻さない) で、作っている間だけ 1 分ごとに `liveStreams.list` を呼びます。読めないときは止める理由にしません。
+
+```sh
+# 設定 (deploy/replay.e2.toml)。省いた項目は既定値
+eq-server replay-worker replay.toml
+# 検知とまとめだけを試す (何も書かない)。記録のファイルか、/api/archive の URL (さかのぼる時間は --hours)
+eq-server replay-worker --scan data/events.jsonl
+eq-server replay-worker --scan https://eq.fuga.jp --hours 72
+```
+
+e2 に置くには:
+
+```sh
+cd ~/work/eq-e2cast
+cp <リポジトリ>/deploy/replay.e2.toml replay.toml        # events と dir・map_dir・font を環境に合わせる
+cp <リポジトリ>/deploy/eq-replay-worker.service ~/.config/systemd/user/
+# eq-broadcast の設定 (cast.toml) は state_file を省けば ~/.local/state/eq-broadcast/state.json に書く。作る係も同じ場所を見る
+systemctl --user daemon-reload && systemctl --user restart eq-broadcast && systemctl --user enable --now eq-replay-worker
+journalctl --user -u eq-replay-worker -f
+ls ~/work/eq-replay/queue ~/work/eq-replay/done
+```
 
 ## プラグイン（配信先）
 

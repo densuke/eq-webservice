@@ -6,6 +6,7 @@
 
 mod audio;
 mod builtin;
+mod calm_state;
 mod chrome;
 mod encoder;
 mod ffmpeg;
@@ -15,7 +16,7 @@ mod record;
 mod replay;
 mod ring;
 
-pub use replay::run as replay_video;
+pub use replay::{run as replay_video, run_worker as replay_worker};
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -98,6 +99,8 @@ pub struct BroadcastConfig {
     /// 送り先 (ffmpeg の引数)。`$VAR` / `${VAR}` は環境変数に置き換える。
     /// `[record]` があるときは、送り出し用の ffmpeg (`-c copy`) の引数 (例: `-f flv rtmps://...`)
     pub output: Vec<String>,
+    /// native: 地震の画面か平時かを書く状態のファイル (再現動画を作る係が読む。空なら `$XDG_STATE_HOME/eq-broadcast/state.json`)
+    pub state_file: String,
     /// 地震の画面になったときの録画の切り出し (native・ffmpeg のときだけ。ring は eq-server が mpegts を受けて書く)。省けば何もしない
     pub record: Option<record::RecordConfig>,
 }
@@ -157,6 +160,7 @@ impl Default for BroadcastConfig {
             builtin_bitrate: 300_000,
             encode: default_encode(),
             output: Vec::new(),
+            state_file: String::new(),
             record: None,
         }
     }
@@ -283,6 +287,10 @@ async fn session(cfg: &BroadcastConfig, output: &[String], secrets: &[String]) -
         .filter(|_| native.is_some() && cfg.encoder == EncoderKind::Ffmpeg);
     if let (Some(rc), Some(n)) = (record, &native) {
         record::spawn(rc.clone(), cfg.ffmpeg.clone(), n.calm.clone(), n.shown.clone())?;
+    }
+    // 地震の画面か平時かを、再現動画を作る係に知らせる (書けなくても配信は続ける)
+    if let Some(n) = &native {
+        calm_state::spawn(calm_state::path_of(&cfg.state_file), n.calm.clone(), n.frames.clone());
     }
     let mut encoder = match cfg.encoder {
         EncoderKind::Ffmpeg => Encoder::Ffmpeg(Box::new(ffmpeg::FfmpegEncoder::start(

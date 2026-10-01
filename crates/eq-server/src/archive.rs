@@ -70,6 +70,11 @@ async fn handler(State(a): State<Archive>, Query(r): Query<Range>) -> Response {
 /// jsonl を 1 行ずつ読み、範囲に入る情報を時刻順に返す (最大 MAX_EVENTS 件)。壊れた行は飛ばす。
 /// ponytail: 毎回ファイルを頭から全部読む。数十 MB を超えたら、索引や日付ごとのファイルを考える
 pub async fn read_range(path: &Path, from: u64, to: u64) -> anyhow::Result<Vec<Event>> {
+    read_range_upto(path, from, to, MAX_EVENTS).await
+}
+
+/// read_range の件数の上限を指定できるもの (HTTP の応答は MAX_EVENTS で絞るが、動画を作る係は 1 つの範囲を丸ごと読む)
+pub async fn read_range_upto(path: &Path, from: u64, to: u64, max: usize) -> anyhow::Result<Vec<Event>> {
     let file = match tokio::fs::File::open(path).await {
         Ok(f) => f,
         // まだ 1 件も書かれていない
@@ -93,7 +98,7 @@ pub async fn read_range(path: &Path, from: u64, to: u64) -> anyhow::Result<Vec<E
         tracing::warn!(path = %path.display(), broken, "archive: skipped broken lines");
     }
     out.sort_by_key(|e| e.received_at_ms);
-    out.truncate(MAX_EVENTS);
+    out.truncate(max);
     Ok(out)
 }
 
