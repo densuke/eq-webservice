@@ -394,6 +394,8 @@ export class JapanMap {
         .map((c) => {
           const g = c.cloneNode(true) as SVGGElement;
           g.classList.remove("thin"); // 本図で間引かれていても、別枠の中では出す
+          g.querySelector(".city-badge")!.removeAttribute("transform"); // 動かされていても、別枠の中では元の位置
+          g.querySelector(".city-leader")!.setAttribute("visibility", "hidden");
           g.setAttribute("transform", `translate(${g.dataset.x} ${g.dataset.y}) scale(${k})`);
           return g;
         }),
@@ -751,10 +753,10 @@ export class JapanMap {
     this.thinCities();
   }
 
-  /** 札が凡例・別枠・案内・時計や、優先の高い札と重なるときは出さない (地図の大きさや範囲、凡例の行が変わるたびに置き直す) */
+  /** 札が凡例・別枠・案内・時計や、優先の高い札と重なるときは海の上へ逃がし、置けなければ出さない (地図の大きさや範囲、凡例の行が変わるたびに置き直す) */
   thinCities(): void {
     const blockers = document.querySelectorAll(".legend, .clock-panel, .weather-caption:not([hidden]), .inset:not([hidden])");
-    thinCityLayer(this.cityLayer, [...blockers]);
+    thinCityLayer(this.cityLayer, [...blockers], this.svg);
   }
 
   private updateMarkerScale(): void {

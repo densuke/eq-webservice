@@ -70,5 +70,7 @@
 .city .city-box { fill: rgba(240, 244, 248, 0.8); stroke: rgba(0, 0, 0, 0.55); stroke-width: 1; }
 .city .city-text { font-size: 13px; font-weight: 700; fill: #0d1117; }
 .city .city-pop { font-size: 11px; fill: #1e5aaa; }
-/* 狭い画面で重なるため間引いた札 (点は残す) */
-.city.thin .city-box, .city.thin .city-text, .city.thin .city-pop { display: none; }
+/* 重なって動かした札と点をつなぐ線。暗い地図に沈まないよう札の地と同じ明るい色で、細く */
+.city .city-leader { stroke: rgba(240, 244, 248, 0.85); stroke-width: 1.2; }
+/* 狭い画面で置き場がなく間引いた札 (点は残す) */
+.city.thin .city-badge, .city.thin .city-leader { display: none; }
