@@ -4,6 +4,8 @@ use std::collections::BTreeMap;
 
 use serde::Deserialize;
 
+use super::panel::weekday;
+use crate::quake::jst::civil_from_days;
 use crate::quake::Event;
 
 /// GET /api/warnings
@@ -240,9 +242,45 @@ pub fn range_label(max: Option<f64>, min: Option<f64>) -> String {
     format!("{}/{}", one(max), one(min))
 }
 
-/// 札に「明日」を出す番か (flip_s 秒ごとに今と明日を交互に。0 なら常に今)。web/src/weather.ts の showTomorrow と同じ
-pub fn showing_tomorrow(now_ms: u64, flip_s: u64) -> bool {
-    flip_s > 0 && now_ms / 1000 / flip_s % 2 == 1
+/// 天気の札が出す内容の種類
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum WeatherView {
+    Now,
+    Tomorrow,
+}
+
+/// 切り替えの並び。種類を足すときはここに足す (web/src/weather.ts の WEATHER_VIEWS と同じ)
+const WEATHER_VIEWS: [WeatherView; 2] = [WeatherView::Now, WeatherView::Tomorrow];
+
+/// 今出す種類 (flip_s 秒ごとに並びを順に回す。0 なら先頭のまま)。web/src/weather.ts の weatherView と同じ
+pub fn weather_view(now_ms: u64, flip_s: u64) -> WeatherView {
+    if flip_s == 0 {
+        return WEATHER_VIEWS[0];
+    }
+    WEATHER_VIEWS[(now_ms / 1000 / flip_s) as usize % WEATHER_VIEWS.len()]
+}
+
+/// 何を出しているかの案内。明日は日付を添える ("明日 10/2 (金) の天気")。web/src/weather.ts の weatherCaption と同じ
+pub fn weather_caption(view: WeatherView, now_ms: u64) -> String {
+    match view {
+        WeatherView::Now => "現在の天気".into(),
+        WeatherView::Tomorrow => {
+            let days = (now_ms as i64 + 9 * 3_600_000).div_euclid(86_400_000) + 1; // 日本時間の明日
+            let (_, m, d) = civil_from_days(days);
+            format!("明日 {m}/{d} ({}) の天気", weekday(days))
+        }
+    }
+}
+
+impl CityWeather {
+    /// 今出す種類。明日の予報がまだどの都市にも無いうちは、並びにかかわらず今のまま
+    pub fn view(&self, now_ms: u64, flip_s: u64) -> WeatherView {
+        if self.cities.iter().any(|c| c.tomorrow.is_some()) {
+            weather_view(now_ms, flip_s)
+        } else {
+            WeatherView::Now
+        }
+    }
 }
 
 /// 主要都市の札の向き。大阪と神戸、東京と千葉は近いので左右に分ける
@@ -357,10 +395,62 @@ mod tests {
     }
 
     #[test]
-    fn the_card_flips_between_now_and_tomorrow() {
-        let at = |s: u64| showing_tomorrow(s * 1000, 20);
-        assert!(!at(0) && !at(19) && at(20) && at(39) && !at(40) && at(60));
-        assert!(!showing_tomorrow(25_000, 0)); // 0 は切り替えない
+    fn the_view_goes_round_the_list_every_interval() {
+        use WeatherView::{Now, Tomorrow};
+        let at = |s: u64| weather_view(s * 1000, 20);
+        assert_eq!(
+            [0, 19, 20, 39, 40, 60].map(at),
+            [Now, Now, Tomorrow, Tomorrow, Now, Tomorrow]
+        );
+        assert_eq!(weather_view(25_000, 0), Now); // 0 は切り替えない
+    }
+
+    #[test]
+    fn the_caption_follows_the_view_and_names_tomorrows_date_in_japan_time() {
+        let jst = |s: &str| crate::quake::jst::parse_ms(s).unwrap() as u64;
+        assert_eq!(weather_caption(WeatherView::Now, 0), "現在の天気");
+        assert_eq!(
+            weather_caption(WeatherView::Tomorrow, jst("2026/10/01 09:38:00")),
+            "明日 10/2 (金) の天気"
+        );
+        // 日本時間では翌日の 0 時を過ぎている (UTC ではまだ 10/1)
+        assert_eq!(
+            weather_caption(WeatherView::Tomorrow, jst("2026/10/02 01:00:00")),
+            "明日 10/3 (土) の天気"
+        );
+        assert_eq!(
+            weather_caption(WeatherView::Tomorrow, jst("2026/12/31 23:59:00")),
+            "明日 1/1 (金) の天気"
+        );
+    }
+
+    #[test]
+    fn nothing_to_show_for_tomorrow_keeps_the_view_on_now() {
+        let city = |tomorrow| City {
+            name: "東京".into(),
+            lat: 35.69,
+            lon: 139.69,
+            code: "100".into(),
+            temp: None,
+            tomorrow,
+        };
+        let tm = Tomorrow {
+            code: "101".into(),
+            temp_min: None,
+            temp_max: None,
+            pop: None,
+        };
+        let at = |w: &CityWeather| w.view(25_000, 20);
+        let with = CityWeather {
+            cities: vec![city(None), city(Some(tm))],
+            rain: vec![],
+        };
+        assert_eq!(at(&with), WeatherView::Tomorrow);
+        let without = CityWeather {
+            cities: vec![city(None)],
+            rain: vec![],
+        };
+        assert_eq!(at(&without), WeatherView::Now);
     }
 
     #[test]

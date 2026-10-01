@@ -73,7 +73,18 @@ export function rangeLabel(max: number | null, min: number | null): string {
   return `${one(max)}/${one(min)}`;
 }
 
-/** 札に「明日」を出す番か (flipSec 秒ごとに今と明日を交互に。0 なら常に今)。crates/eq-server/src/broadcast/native/data.rs の showing_tomorrow と同じ */
-export function showTomorrow(now: number, flipSec: number): boolean {
-  return flipSec > 0 && Math.floor(now / 1000 / flipSec) % 2 === 1;
+/** 天気の札が出す内容の種類。切り替えの並びは WEATHER_VIEWS (crates/eq-server/src/broadcast/native/data.rs の WEATHER_VIEWS と同じ) */
+export type WeatherView = "now" | "tomorrow";
+const WEATHER_VIEWS: WeatherView[] = ["now", "tomorrow"];
+
+/** 今出す種類 (flipSec 秒ごとに並びを順に回す。0 なら先頭のまま)。native/data.rs の weather_view と同じ */
+export function weatherView(now: number, flipSec: number): WeatherView {
+  return flipSec > 0 ? WEATHER_VIEWS[Math.floor(now / 1000 / flipSec) % WEATHER_VIEWS.length] : WEATHER_VIEWS[0];
+}
+
+/** 何を出しているかの案内。明日は日付を添える ("明日 10/2 (金) の天気")。native/data.rs の weather_caption と同じ */
+export function weatherCaption(view: WeatherView, now: number): string {
+  if (view === "now") return "現在の天気";
+  const d = new Date(now + 33 * 3600_000); // 日本時間の明日 (UTC+9 に 1 日)
+  return `明日 ${d.getUTCMonth() + 1}/${d.getUTCDate()} (${"日月火水木金土"[d.getUTCDay()]}) の天気`;
 }

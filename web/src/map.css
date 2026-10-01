@@ -69,5 +69,4 @@
 /* 札は明るい地にして、絵文字 (傘など) が暗い地に沈まないように */
 .city .city-box { fill: rgba(240, 244, 248, 0.92); stroke: rgba(0, 0, 0, 0.55); stroke-width: 1; }
 .city .city-text { font-size: 13px; font-weight: 700; fill: #0d1117; }
-.city .city-sub { font-size: 9px; font-weight: 600; fill: #5a6470; }
 .city .city-pop { font-size: 11px; fill: #1e5aaa; }

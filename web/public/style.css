@@ -121,6 +121,12 @@ body {
 /* 小笠原は右下の日時表示の上 */
 .inset-ogasawara { right: 10px; bottom: 96px; height: 150px; }
 
+/* 天気の札が今何を出しているかの案内 (地図の左上、南西諸島の別枠のすぐ右の日本海の上) */
+.weather-caption {
+  position: absolute; left: 246px; top: 10px; z-index: 1; pointer-events: none; white-space: nowrap;
+  background: rgba(13, 17, 23, 0.8); padding: 4px 9px; border-radius: 6px; font-size: 12px; font-weight: 600; color: var(--text);
+}
+
 /* 画面外の地震の方向 (地図の端)。色は最大震度 */
 .offscreen-layer { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
 .offscreen {
@@ -290,6 +296,7 @@ a.banner-item:hover p { text-decoration: underline; }
   .inset-ogasawara { bottom: 70px; }
   .inset-okinawa { height: 140px; }
   .inset-ogasawara { height: 100px; }
+  .weather-caption { left: 158px; font-size: 11px; padding: 3px 7px; }
   /* 地図が細いと左下の凡例が九州に重なるので、南西諸島の別枠の下 (日本海の上) へ移して小さくする */
   .legend { bottom: auto; top: 158px; padding: 4px 5px; }
   .gauge i, .gauge-labels span { height: 11px; line-height: 11px; }
