@@ -2,7 +2,7 @@
 
 import { type Box, followRadiusKm, pad, pointBox, stopRadiusKm, union } from "./camera.ts";
 import { project } from "./map.ts";
-import { type Center, type WaveSource, currentGroup, geoOf, groupPlace, groupScale, pendingHindsight, recentQuakes, relatedQuake, unsettledGroups, waveSources } from "./quakes.ts";
+import { type Center, type WaveSource, currentGroup, geoOf, groupPlace, groupScale, pendingHindsight, recentQuakes, relatedQuake, shakenGeo, unsettledGroups, waveSources } from "./quakes.ts";
 import { sameQuake } from "./priority.ts";
 import { forecastTag } from "./detail.ts";
 import { heldEew } from "./groups.ts";
@@ -59,9 +59,10 @@ function shakenBox(geo: { prefs: string[]; areas: string[] }): Box | null {
 export function scene(now: number): Scene | null {
   if (app.selectedKey) {
     const g = app.world.store.get(app.selectedKey);
-    const geo = g && relatedQuake(g) && geoOf(relatedQuake(g)!);
+    const rq = g && relatedQuake(g);
+    const geo = rq && geoOf(rq);
     if (!geo) return null;
-    return { center: geo.center, others: [], t: ((now - app.selectedAt) / 1000) * REPLAY_SPEED, shaken: shakenBox(geo), replay: true };
+    return { center: geo.center, others: [], t: ((now - app.selectedAt) / 1000) * REPLAY_SPEED, shaken: shakenBox(shakenGeo(rq)), replay: true };
   }
   // 巡回中はその地震に合わせる (ほかの地震の波も描く)
   if (app.tourKey) {
@@ -74,7 +75,7 @@ export function scene(now: number): Scene | null {
         center: mine ?? geo.center,
         others: sources.filter((s) => s !== mine),
         t: mine ? (now - mine.origin) / 1000 : null,
-        shaken: shakenBox(geo),
+        shaken: shakenBox(shakenGeo(g)),
         replay: false,
         forecast: g.kind === "eew",
       };
@@ -96,7 +97,7 @@ export function scene(now: number): Scene | null {
     center: src ?? geo?.center ?? null,
     others,
     t: src ? (now - src.origin) / 1000 : null,
-    shaken: geo ? shakenBox(geo) : null,
+    shaken: g && geo ? shakenBox(shakenGeo(g)) : null,
     replay: false,
     forecast: g?.kind === "eew",
   };

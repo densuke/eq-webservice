@@ -251,6 +251,113 @@ fn an_observed_quake_zooms_on_the_shaken_area_not_on_the_prefecture_mainland() {
     assert!((f.x..=f.x + f.w).contains(&tx) && (f.y..=f.y + f.h).contains(&ty));
 }
 
+/// 2026-10-02 17:39 熊本県熊本地方: 緊急地震速報 (震度 3 の予想は区域を持たない) の第 1〜5 報のあと、
+/// 発生から 145 秒で震度速報 (熊本県熊本が震度 3) が届く。波が続いている 180 秒より前でも、震度速報が届いたら熊本の区域へ寄る
+fn kumamoto_events(eew_areas: &[EewArea]) -> Vec<Event> {
+    use crate::quake::{ObservationPoint, Quake, QuakeInfoType};
+    let hypo = || Hypocenter {
+        name: "熊本県熊本地方".into(),
+        latitude: Some(32.8),
+        longitude: Some(130.7),
+        depth_km: Some(10),
+        magnitude: Some(3.5),
+    };
+    let mut ev: Vec<Event> = [8u64, 9, 11, 31, 36]
+        .iter()
+        .enumerate()
+        .map(|(i, s)| Event {
+            id: format!("e-{}", i + 1),
+            source: "test".into(),
+            received_at_ms: T0 as u64 + s * 1000,
+            body: EventBody::Eew(Eew {
+                event_id: "k".into(),
+                serial: (i + 1).to_string(),
+                cancelled: false,
+                test: false,
+                warning: false,
+                issued_at: "2026/10/02 17:39:30".into(),
+                origin_time: Some("2026/10/02 17:39:22".into()),
+                origin_time_ms: Some(T0),
+                hypocenter: Some(hypo()),
+                areas: eew_areas.to_vec(),
+                pref_max: vec![],
+                max_scale: Scale::S3,
+            }),
+        })
+        .collect();
+    ev.push(Event {
+        id: "q".into(),
+        source: "test".into(),
+        received_at_ms: T0 as u64 + 145_000,
+        body: EventBody::Quake(Quake {
+            info_type: QuakeInfoType::ScalePrompt,
+            origin_time: "2026/10/02 17:39:00".into(),
+            origin_time_ms: Some(T0),
+            issued_at: "2026/10/02 17:41:30".into(),
+            hypocenter: Some(hypo()),
+            max_scale: Scale::S3,
+            domestic_tsunami: "None".into(),
+            points: vec![ObservationPoint {
+                pref: "熊本県".into(),
+                addr: "熊本県熊本".into(),
+                is_area: true,
+                scale: Scale::S3,
+                station: None,
+            }],
+            pref_max: vec![PrefScale {
+                pref: "熊本県".into(),
+                scale: Scale::S3,
+            }],
+            comment: String::new(),
+        }),
+    });
+    ev
+}
+
+fn at(s: u64) -> u64 {
+    T0 as u64 + s * 1000
+}
+
+/// 発生から s 秒までに届いた報だけで、a 秒から n コマ進めて、寄った表示の幅を返す
+fn width_after(ev: &[Event], st: &mut Stepper, s: u64, from: u64, n: u64) -> f64 {
+    let seen: Vec<Event> = ev.iter().filter(|e| e.received_at_ms <= at(s)).cloned().collect();
+    run(st, &seen, at(from), n);
+    st.zoom_fit().w
+}
+
+#[test]
+fn a_scale_prompt_zooms_in_on_its_area_while_the_waves_are_still_drawn() {
+    let ev = kumamoto_events(&[]);
+    let mut st = Stepper::new(load_renderer(&config(true)).unwrap());
+    let before = width_after(&ev, &mut st, 140, 132, 40);
+    let after = width_after(&ev, &mut st, 150, 146, 60);
+    assert!(after < before / 2.0, "{before} -> {after}");
+}
+
+/// 緊急地震速報の予想の区域 (阿蘇・球磨) も、震度速報が届いたあとの寄りに収める
+#[test]
+fn the_forecast_areas_of_the_eew_stay_in_the_view_after_the_scale_prompt() {
+    let wide = [
+        area("熊本県阿蘇", Scale::S3, Scale::S3),
+        area("熊本県球磨", Scale::S3, Scale::S3),
+    ];
+    let narrow = width_after(
+        &kumamoto_events(&[]),
+        &mut Stepper::new(load_renderer(&config(true)).unwrap()),
+        150,
+        146,
+        60,
+    );
+    let with_eew = width_after(
+        &kumamoto_events(&wide),
+        &mut Stepper::new(load_renderer(&config(true)).unwrap()),
+        150,
+        146,
+        60,
+    );
+    assert!(with_eew > narrow * 1.1, "{narrow} vs {with_eew}");
+}
+
 /// 再現動画: 本物の震源が届くまでは、のちに分かった震源 (薄い印) へ寄る
 #[test]
 fn the_pending_hindsight_epicenter_is_zoomed_to_until_the_real_one_arrives() {

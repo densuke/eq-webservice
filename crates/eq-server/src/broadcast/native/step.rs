@@ -6,8 +6,10 @@ use tiny_skia::Pixmap;
 use super::camera::{fit_box, map_aspect, target_box, Aim, Camera, Epicenter};
 use super::data::{CityWeather, Warnings};
 use super::draw::{self, Renderer, Scene};
+use super::eew::{eew_place, quake_place};
 use super::hindsight::{self, Hindsight};
 use super::icon::Icons;
+use super::model::same_quake;
 use super::shaken::Point;
 use super::{eew, model, yuv, HISTORY};
 use crate::broadcast::record::Shown;
@@ -86,7 +88,12 @@ type ViewKey = Option<(u64, u64, u64)>;
 type StillKey = (u64, Option<(u64, i32)>, Option<u64>, u64, bool, ViewKey);
 
 /// 地震の画面の地震から、寄りの目標の材料を作る。平時は None (日本全体)
-fn aim_of(renderer: &Renderer, current: Option<eew::Current>, hindsight: Option<&Hindsight>) -> Option<Aim> {
+fn aim_of(
+    renderer: &Renderer,
+    current: Option<eew::Current>,
+    eews: &[eew::EewSummary],
+    hindsight: Option<&Hindsight>,
+) -> Option<Aim> {
     let make = |h: Option<&Hypocenter>, origin_ms, areas: &[&str], points: &[Point], prefs: &[&str], forecast| Aim {
         epicenter: h.and_then(|h| {
             Some(Epicenter {
@@ -114,8 +121,30 @@ fn aim_of(renderer: &Renderer, current: Option<eew::Current>, hindsight: Option<
     };
     match current {
         eew::Current::Quake(q) => {
-            let prefs: Vec<&str> = q.pref_scales.iter().map(|(p, _)| p.as_str()).collect();
-            Some(make(q.hypocenter.as_ref(), q.origin_ms, &[], &q.points, &prefs, false))
+            // 同じ地震の緊急地震速報の予想の区域・県も揺れた範囲に入れる (web の shakenGeo)
+            let same: Vec<_> = eews
+                .iter()
+                .filter(|e| same_quake(&eew_place(e), &quake_place(q)))
+                .collect();
+            let areas: Vec<&str> = same
+                .iter()
+                .flat_map(|e| &e.area_scales)
+                .map(|(a, _)| a.as_str())
+                .collect();
+            let prefs: Vec<&str> = q
+                .pref_scales
+                .iter()
+                .chain(same.iter().flat_map(|e| &e.pref_scales))
+                .map(|(p, _)| p.as_str())
+                .collect();
+            Some(make(
+                q.hypocenter.as_ref(),
+                q.origin_ms,
+                &areas,
+                &q.points,
+                &prefs,
+                false,
+            ))
         }
         eew::Current::Eew(e) => {
             let areas: Vec<&str> = e.area_scales.iter().map(|(a, _)| a.as_str()).collect();
@@ -159,6 +188,7 @@ impl Stepper {
     fn aim_camera(
         &mut self,
         current: Option<eew::Current>,
+        eews: &[eew::EewSummary],
         hindsight: Option<&Hindsight>,
         now: u64,
         snap: bool,
@@ -166,7 +196,7 @@ impl Stepper {
         if !self.renderer.zoom_enabled() {
             return None;
         }
-        let target = aim_of(&self.renderer, current, hindsight)
+        let target = aim_of(&self.renderer, current, eews, hindsight)
             .and_then(|a| target_box(&a, now))
             .map(|b| fit_box(b, map_aspect()));
         self.camera.advance(target, now, snap);
@@ -187,7 +217,7 @@ impl Stepper {
             None => (None, None),
         };
         let pending = hindsight::pending(i.hindsight, &groups, &eews);
-        let view = self.aim_camera(current, pending, now, i.fast_forward);
+        let view = self.aim_camera(current, &eews, pending, now, i.fast_forward);
         // 地震波は地震の画面のときだけ描く (のちに分かった震源の波は、平時の画面でも描く)
         let waves = frame_waves(&groups, &eews, current.is_some(), i.hindsight, now);
         // 地震波以外を描き直すのは、データが変わったとき・平時と地震が切り替わったとき・秒が進んだときだけ。
