@@ -8,9 +8,10 @@ use tiny_skia::{Path, Pixmap};
 use super::banner;
 use super::calm;
 use super::camera::Fit;
+use super::cards::CardCache;
 use super::data::{CityWeather, Warnings};
 use super::eew::{forecast_tag, EewSummary, Wave};
-use super::frame::{Clip, Frame, OKINAWA};
+use super::frame::{BoxRect, Clip, Frame, OKINAWA};
 use super::geo::{Shape, View};
 use super::hindsight::Hindsight;
 use super::icon::Icons;
@@ -74,6 +75,8 @@ pub struct Renderer {
     prefs: Vec<Shape>,
     areas: HashMap<String, Shape>,
     base: Pixmap,
+    /// 天気の札の置き場所 (警報を避けた位置) を面ごとに覚える
+    cards: CardCache,
 }
 
 /// 別枠の枠線の色 (web/public/style.css の .inset)
@@ -92,6 +95,7 @@ impl Renderer {
             prefs,
             areas: areas.into_iter().map(|s| (s.key.clone(), s)).collect(),
             base: Pixmap::new(W, H).expect("size"),
+            cards: CardCache::default(),
         };
         r.base = r.draw_base();
         r
@@ -147,10 +151,19 @@ impl Renderer {
             draw_land(&mut pm, z, &self.neighbors, &self.prefs);
             panel::draw_legend(&mut pm, &mut self.text);
         }
-        for f in frames(&self.main, &self.insets, &self.zoomed) {
+        for (slot, f) in frames(&self.main, &self.insets, &self.zoomed).into_iter().enumerate() {
             match Shake::of(scene) {
                 Some(s) => draw_shake(&mut pm, &mut self.text, &self.prefs, f, &s),
-                None => calm::draw(&mut pm, &mut self.text, &self.areas, f, scene),
+                None => {
+                    let (fixed, bounds) = card_room(f, &self.insets, self.zoomed.is_some(), scene.test);
+                    let env = calm::CardEnv {
+                        slot,
+                        prefs: &self.prefs,
+                        fixed: &fixed,
+                        bounds,
+                    };
+                    calm::draw(&mut pm, &mut self.text, &self.areas, f, scene, &env, &mut self.cards)
+                }
             }
             if let Some(h) = scene.hindsight {
                 draw_hindsight(&mut pm, &mut self.text, f, h);
@@ -186,6 +199,18 @@ impl Renderer {
 }
 
 /// 描く面: 寄っていれば寄った本図だけ、そうでなければ本図と別枠
+/// 札を置かない所と、置いてよい範囲。別枠は枠の中だけ。本図は左下の凡例・情報の窓・別枠 (寄っていないとき) を避ける
+fn card_room(f: &Frame, insets: &[Frame], zoomed: bool, test: bool) -> (Vec<BoxRect>, BoxRect) {
+    if let Some((rect, _)) = f.inset_box() {
+        return (Vec::new(), rect);
+    }
+    let mut fixed = vec![panel::LEGEND_RECT, calm::INFO_WINDOW];
+    if !zoomed {
+        fixed.extend(insets.iter().filter_map(|i| i.inset_box().map(|(r, _)| r)));
+    }
+    (fixed, calm::main_bounds(test))
+}
+
 fn frames<'a>(main: &'a Frame, insets: &'a [Frame], zoomed: &'a Option<Frame>) -> Vec<&'a Frame> {
     match zoomed {
         Some(z) => vec![z],

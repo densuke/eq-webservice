@@ -586,6 +586,16 @@ fn write_fixture_pngs_when_asked() {
     };
     let calm_png = r.render(&scene(None, &history[1..], Some(&warnings), Some(&weather)));
     calm_png.save_png(std::path::Path::new(&out).join("calm.png")).unwrap();
+    // 石狩市に警報: 札幌の札が石狩の塗りを隠さず、引き出し線で海へ逃げる
+    let ishikari = Warnings {
+        areas: [("0123500".to_string(), kind("レベル３大雨警報"))]
+            .into_iter()
+            .collect(),
+        ..Default::default()
+    };
+    r.render(&scene(None, &[], Some(&ishikari), Some(&weather)))
+        .save_png(std::path::Path::new(&out).join("ishikari.png"))
+        .unwrap();
     // テスト配信の帯と警報の帯 (2 行) の下にも、情報の窓が重ならない
     let test_png = r.render(&Scene {
         test: true,
@@ -800,4 +810,60 @@ fn the_stepper_skips_an_unchanged_frame_and_redraws_when_the_wave_moves() {
     assert!(plain.step(&input(&[], t, None)).is_some());
     assert!(plain.step(&input(&[], t + 200, None)).is_none());
     assert!(plain.step(&input(&[], t + 1_000, None)).is_some());
+}
+
+/// 石狩市の区域の内側にある、札の色 (明るい) の画素の数
+fn card_pixels_over_ishikari(pm: &Pixmap) -> usize {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/public");
+    let view = View::fit_home(MAP_RECT);
+    let areas = geo::load(&dir.join("warning-areas.geojson"), "code", &view).unwrap();
+    let path = &areas.iter().find(|s| s.key == "0123500").unwrap().path;
+    let frame = Frame::main(view);
+    let (x, y, w, h) = frame.screen_bounds(path).unwrap();
+    let mut n = 0;
+    for py in y as u32..(y + h) as u32 + 1 {
+        for px in x as u32..(x + w) as u32 + 1 {
+            let [r, g, b] = rgb(pm, (px, py));
+            if r > 215 && g > 220 && b > 225 && frame.path_contains(path, (px as f32 + 0.5, py as f32 + 0.5)) {
+                n += 1;
+            }
+        }
+    }
+    n
+}
+
+fn sapporo_weather() -> CityWeather {
+    CityWeather {
+        cities: vec![City {
+            name: "札幌".into(),
+            lat: 43.06,
+            lon: 141.35,
+            code: "300".into(),
+            temp: Some(15.0),
+            tomorrow: None,
+        }],
+        rain: Vec::new(),
+    }
+}
+
+#[test]
+fn a_warning_on_ishikari_is_not_hidden_by_the_sapporo_card() {
+    let mut r = renderer(Text::none());
+    let weather = sapporo_weather();
+    let kind = |n: &str| vec![Kind { name: n.into() }];
+    let warned = |name: &str| Warnings {
+        areas: [("0123500".to_string(), kind(name))].into_iter().collect(),
+        ..Default::default()
+    };
+    let none = r.render(&scene(None, &[], None, Some(&weather)));
+    let covered = card_pixels_over_ishikari(&none);
+    assert!(covered > 100, "札幌の札は石狩の上にかかっているはず: {covered}");
+    // 警報なら札は石狩を避ける (線の分だけは残る)
+    let w = warned("レベル３大雨警報");
+    let moved = r.render(&scene(None, &[], Some(&w), Some(&weather)));
+    assert!(card_pixels_over_ishikari(&moved) < covered / 10);
+    // 注意報なら今までどおり (札は動かない)
+    let adv = warned("レベル２大雨注意報");
+    let stay = r.render(&scene(None, &[], Some(&adv), Some(&weather)));
+    assert!(card_pixels_over_ishikari(&stay) > covered / 2);
 }

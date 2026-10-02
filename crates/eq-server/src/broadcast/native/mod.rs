@@ -6,6 +6,7 @@
 mod banner;
 mod calm;
 mod camera;
+mod cards;
 mod data;
 mod draw;
 mod eew;
