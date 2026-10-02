@@ -39,9 +39,11 @@ const WARN_LEGEND: [(&str, [u8; 3]); 4] = [
 ];
 
 /// 震度の凡例 (左下。1 が下)。寄った地図は海から描き直すので、その上に描き直す
+pub const LEGEND_RECT: (f32, f32, f32, f32) = (10.0, H as f32 - 10.0 - 147.0, 34.0, 147.0);
+
 pub fn draw_legend(pm: &mut Pixmap, text: &mut Text) {
-    let (x, y0) = (10.0, H as f32 - 10.0 - 147.0);
-    rrect(pm, x, y0, 34.0, 147.0, 6.0, BG, 0.8);
+    let (x, y0, w, h) = LEGEND_RECT;
+    rrect(pm, x, y0, w, h, 6.0, BG, 0.8);
     for (i, (label, color)) in GAUGE.iter().rev().enumerate() {
         let y = y0 + 6.0 + i as f32 * 15.0;
         rect(pm, x + 7.0, y, 7.0, 15.0, *color, 1.0);

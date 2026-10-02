@@ -252,6 +252,8 @@ export class JapanMap {
       p.dataset.level = level;
       this.warnText.set(code, `${p.dataset.wname}: ${text}`);
     }
+    // 札は警報以上の塗りを避けるので、警報が変わったら置き直す
+    this.thinCities();
   }
 
   /** 地震情報細分区域 (寄ったときに使う) */

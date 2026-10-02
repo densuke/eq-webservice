@@ -67,3 +67,24 @@ test("candidates keep the box size and stay clear of the dot", () => {
     assert.ok(!(c.x0 < 20 && 20 < c.x1 && c.y0 < 10 && 10 < c.y1));
   }
 });
+
+// 警報以上の区域 (札で隠さない)
+const inWarn = (z: ReturnType<typeof r>) => (b: ReturnType<typeof r>) => touches(b, z);
+
+test("without warnings nothing changes (warned is never true)", () => {
+  const boxes = [r(0, 0, 10, 10), r(10, 0, 20, 10)];
+  assert.deepEqual(placeBadges(boxes, [[5, 5], [15, 5]], [], WIDE, sea, () => false), [stay, stay]);
+});
+
+test("a box over a warning area moves off it and gets a leader line", () => {
+  const zone = r(0, 0, 60, 40);
+  const [p] = placeBadges([A], [[20, 10]], [], WIDE, sea, inWarn(zone));
+  assert.ok(p && p.line);
+  const m = r(A.x0 + p.dx, A.y0 + p.dy, A.x1 + p.dx, A.y1 + p.dy);
+  assert.ok(!touches(m, zone));
+});
+
+test("the box stays where it is when every spot is blocked by the warning", () => {
+  const [p] = placeBadges([A], [[20, 10]], [], WIDE, sea, () => true);
+  assert.deepEqual(p, stay);
+});

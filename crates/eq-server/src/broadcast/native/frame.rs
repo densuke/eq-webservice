@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use tiny_skia::{FillRule, Mask, Path, PathBuilder, Pixmap, Rect, Stroke, Transform};
+use tiny_skia::{FillRule, Mask, Path, PathBuilder, PathSegment, Pixmap, Point, Rect, Stroke, Transform};
 
 use super::draw::MAP_RECT;
 use super::geo::{project, View};
@@ -190,6 +190,45 @@ impl Frame {
         })
     }
 
+    /// この path の外接矩形 (画面の座標)
+    pub fn screen_bounds(&self, path: &Path) -> Option<BoxRect> {
+        let b = path.bounds().transform(self.ts)?;
+        Some((b.left(), b.top(), b.width(), b.height()))
+    }
+
+    /// 画面の点 p が path (偶奇の塗り) の内側か。path は本図の座標なので、点を戻してから数える
+    pub fn path_contains(&self, path: &Path, p: (f32, f32)) -> bool {
+        let (x, y) = ((p.0 - self.ts.tx) / self.ts.sx, (p.1 - self.ts.ty) / self.ts.sy);
+        let mut inside = false;
+        let mut cross = |a: Point, b: Point| {
+            if (a.y > y) != (b.y > y) && x < (b.x - a.x) * (y - a.y) / (b.y - a.y) + a.x {
+                inside = !inside;
+            }
+        };
+        let (mut start, mut prev) = (None::<Point>, None::<Point>);
+        for seg in path.segments() {
+            match seg {
+                PathSegment::MoveTo(p) => {
+                    if let (Some(a), Some(s)) = (prev, start) {
+                        cross(a, s);
+                    }
+                    (start, prev) = (Some(p), Some(p));
+                }
+                PathSegment::LineTo(p) | PathSegment::QuadTo(_, p) | PathSegment::CubicTo(_, _, p) => {
+                    if let Some(a) = prev {
+                        cross(a, p);
+                    }
+                    prev = Some(p);
+                }
+                PathSegment::Close => {}
+            }
+        }
+        if let (Some(a), Some(s)) = (prev, start) {
+            cross(a, s);
+        }
+        inside
+    }
+
     pub fn fill(&self, pm: &mut Pixmap, path: &Path, c: [u8; 3], a: f32) {
         if self.sees(path) {
             let mask = self.clip.as_ref().map(|c| &*c.mask);
@@ -294,6 +333,20 @@ mod tests {
         assert_eq!(z.point((sx, sy)), None);
         assert!(z.marker(140.8, 35.7).is_some());
         assert_eq!(z.marker(141.35, 43.06), None); // 右パネルや上部バーの上には置かない
+    }
+
+    #[test]
+    fn a_point_is_inside_a_path_in_screen_pixels_even_in_the_inset() {
+        let (main, ins) = frames();
+        let mut b = PathBuilder::new();
+        b.push_rect(Rect::from_xywh(100.0, 100.0, 50.0, 40.0).unwrap());
+        let path = b.finish().unwrap();
+        assert!(main.path_contains(&path, (120.0, 120.0)) && !main.path_contains(&path, (160.0, 120.0)));
+        assert_eq!(main.screen_bounds(&path), Some((100.0, 100.0, 50.0, 40.0)));
+        // 別枠は path を縮めて映す: 本図の (100,100)-(150,140) は別枠では別の画面の位置になる
+        let (x, y, w, h) = ins.screen_bounds(&path).unwrap();
+        assert!(ins.path_contains(&path, (x + w / 2.0, y + h / 2.0)));
+        assert!(!ins.path_contains(&path, (x + w + 1.0, y + h / 2.0)));
     }
 
     #[test]
