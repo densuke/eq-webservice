@@ -137,6 +137,18 @@ export function geoOf(g: Group): { center: Center | null; origin: number | null;
   return { center, origin, prefs, areas };
 }
 
+/**
+ * 同じ地震のすべての報 (EEW の予想の区域・県と、地震情報の観測の区域・県) の和。カメラが揺れた範囲を収めるのに使う。
+ * EEW だけを見ると、震度 3 の予想のように区域の無い報で、地震情報が届いても寄らない
+ */
+export function shakenGeo(g: Group): { prefs: string[]; areas: string[] } {
+  const p = groupPlace(g);
+  const same = app.world.store.list().filter((x) => x !== g && (x.kind === "eew" || x.kind === "quake") && sameQuake(groupPlace(x), p));
+  const geos = [g, ...same].map(geoOf).filter((x) => x != null);
+  const uniq = (xs: string[]) => [...new Set(xs)];
+  return { prefs: uniq(geos.flatMap((x) => x.prefs)), areas: uniq(geos.flatMap((x) => x.areas)) };
+}
+
 /** group は本物の報から描く地震。後の報で分かった震源 (再生の始まり) から描くものは無い */
 export type WaveSource = Center & { origin: number; group?: Group };
 

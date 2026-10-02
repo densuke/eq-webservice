@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { GroupStore } from "./groups.ts";
-import { currentGroup, pendingHindsight, priorityGroups, updateNumbers, waveSources } from "./quakes.ts";
+import { currentGroup, pendingHindsight, priorityGroups, shakenGeo, updateNumbers, waveSources } from "./quakes.ts";
+import { DEFAULT_STOP_KM, stopRadiusKm } from "./camera.ts";
 import { app } from "./state.ts";
 import type { EewEvent, EqEvent, QuakeEvent } from "./types.ts";
 
@@ -140,4 +141,29 @@ test("a hindsight epicenter draws waves from its origin, and not before the orig
   } finally {
     app.demo = null;
   }
+});
+
+// 2026-10-02 熊本県熊本地方: EEW (震度 3 の予想) は区域を持たず、のちの地震情報 (震度速報) が熊本の区域を持つ。
+// 波を描いている間 (180 秒まで) のカメラの目標は EEW 側だが、揺れた範囲は同じ地震の報すべての和で見る
+test("the shaken area of an eew without areas comes from the quake report of the same earthquake", () => {
+  const e = { ...eew("kumamoto", "熊本県熊本地方", 32.8, 130.7, 30, 10_000), received_at_ms: t0 };
+  world([e]);
+  const g = app.world.store.list()[0];
+  // 震度速報が届く前: 揺れた範囲は分からず、止める半径は既定のまま
+  assert.deepEqual(shakenGeo(g), { prefs: [], areas: [] });
+  assert.equal(stopRadiusKm(0, 0, null), DEFAULT_STOP_KM);
+  // 震度速報 (熊本県熊本の区域) が届くと、EEW の群からも熊本の区域が見える
+  const q: QuakeEvent = {
+    ...quake("q1", "熊本県熊本地方", 32.8, 130.7, 30),
+    info_type: "scale_prompt",
+    origin_time_ms: e.origin_time_ms,
+    points: [{ pref: "熊本県", addr: "熊本県熊本", is_area: true, scale: 30 }],
+    pref_max: [{ pref: "熊本県", scale: 30 }],
+  };
+  app.world.store.add(q);
+  const eewGroup = app.world.store.list().find((x) => x.kind === "eew")!;
+  assert.deepEqual(shakenGeo(eewGroup), { prefs: ["熊本県"], areas: ["熊本県熊本"] });
+  // 別の地震の報は混ぜない
+  app.world.store.add({ ...quake("q2", "北海道", 43, 143, 40), origin_time_ms: t0 - 3_600_000, points: [{ pref: "北海道", addr: "北海道十勝", is_area: true, scale: 40 }] });
+  assert.deepEqual(shakenGeo(eewGroup).areas, ["熊本県熊本"]);
 });
