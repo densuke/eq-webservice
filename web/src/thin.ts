@@ -38,21 +38,34 @@ export function candidates(box: Box, dot: Pt): Box[] {
 /**
  * 札の四角 (優先の高い順) の置き場所。
  * まず元の位置、だめなら点の周りの海 (isLand でない所)、それでもだめなら陸の上の空き。
+ * warned は警報以上の区域に重なる所で、札で隠さないよう blockers と同じく避ける (どこも空かなければ元の位置のまま)。
  * blockers (凡例・別枠・案内・時計) や先に置いた札と重なる所、地図の外 (bounds) にはみ出す所には置かない。どこにも置けなければ null。
  */
-export function placeBadges(boxes: Box[], dots: Pt[], blockers: Box[], bounds: Box, isLand: (b: Box) => boolean): (Placement | null)[] {
+export function placeBadges(
+  boxes: Box[],
+  dots: Pt[],
+  blockers: Box[],
+  bounds: Box,
+  isLand: (b: Box) => boolean,
+  warned: (b: Box) => boolean = () => false,
+): (Placement | null)[] {
   const placed: Box[] = [...blockers];
   const free = (b: Box) => !placed.some((p) => overlap(b, p));
   return boxes.map((box, i) => {
-    if (free(box)) {
+    if (free(box) && !warned(box)) {
       placed.push(box);
       return { dx: 0, dy: 0, line: null };
     }
     const dot = dots[i];
     const others = dots.filter((_, j) => j !== i).map(([x, y]): Box => ({ x0: x - DOT_R, y0: y - DOT_R, x1: x + DOT_R, y1: y + DOT_R }));
-    const spots = candidates(box, dot).filter((c) => inside(c, bounds) && free(c) && !others.some((o) => overlap(c, o)));
+    const spots = candidates(box, dot).filter((c) => inside(c, bounds) && free(c) && !warned(c) && !others.some((o) => overlap(c, o)));
     const spot = spots.find((c) => !isLand(c)) ?? spots[0];
-    if (!spot) return null;
+    if (!spot) {
+      // 警報の区域だけに塞がれているときは、札を隠さず元の位置に残す (警報は見えにくいまま)
+      if (!free(box)) return null;
+      placed.push(box);
+      return { dx: 0, dy: 0, line: null };
+    }
     placed.push(spot);
     const line: Pt = [clamp(dot[0], spot.x0, spot.x1) - dot[0], clamp(dot[1], spot.y0, spot.y1) - dot[1]];
     return { dx: spot.x0 - box.x0, dy: spot.y0 - box.y0, line };
@@ -69,6 +82,17 @@ const onLand = (b: Box): boolean =>
   [[(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2], [b.x0, b.y0], [b.x1, b.y0], [b.x0, b.y1], [b.x1, b.y1]].some(([x, y]) =>
     document.elementsFromPoint(x, y).some((e) => e.classList.contains("pref")),
   );
+
+/** 札の四角を横 5 x 縦 3 の点で調べ、警報以上 (注意報は除く) の塗りが 1 点でもあれば真。警報が無ければ呼ばない */
+const onWarning = (b: Box): boolean => {
+  for (let i = 0; i < 5; i++) {
+    for (let j = 0; j < 3; j++) {
+      const [x, y] = [b.x0 + ((b.x1 - b.x0) * i) / 4, b.y0 + ((b.y1 - b.y0) * j) / 2];
+      if (document.elementsFromPoint(x, y).some((e) => e.matches(".warn[data-level]:not([data-level=advisory])"))) return true;
+    }
+  }
+  return false;
+};
 
 /**
  * 札の層 (子は優先の高い順) の札を置き直す。
@@ -91,6 +115,8 @@ export function thinCityLayer(layer: Element, blockers: Element[], bounds: Eleme
     blockers.map(box),
     box(bounds),
     onLand,
+    // 警報以上が出ていないときは調べない (札の位置は今までと同じ)
+    document.querySelector(".warn[data-level]:not([data-level=advisory])") ? onWarning : undefined,
   );
   cities.forEach((g, i) => {
     const p = places[i];
