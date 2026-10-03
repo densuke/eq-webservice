@@ -201,7 +201,7 @@ eq-server replay-video --from <ms> --to <ms> --out x.mp4
 
 1. **配信の状態の知らせ** (eq-broadcast の native に足す)
    - 地震の画面か平時かを、小さな状態のファイルに書く。例: `$XDG_STATE_HOME/eq-broadcast/state.json` に `{"calm": bool, "since_ms": …, "updated_ms": …}`。
-   - 切り替わったときと、30 秒ごとに書き直す。書けなくても配信は止めない。
+   - 切り替わったときと、10 秒ごとに書き直す (最後のコマの時刻 last_frame_ms も載せる。docs/broadcast-status.md)。書けなくても配信は止めない。
    - 作る係は、`updated_ms` が 2 分より古ければ「配信の状態がわからない」とみなし、慎重な側 (地震の画面と同じ扱い) に倒す。
 2. **作る係** (`eq-server replay-worker`、systemd のユーザー単位で常駐)
    - **検知**: 記録 (jsonl) を見て、動画にする地震を見つける。
