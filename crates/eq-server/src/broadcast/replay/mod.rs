@@ -1,11 +1,10 @@
 //! 記録から音入りの動画を描き直す (`eq-server replay-video`。docs/replay-video.md の 4 章)。
 //! 範囲の記録から最大震度の地震の報だけを選び、仮の時計で native の描画を回して 1 本の mp4 にする。
-//! 音は mixer で作り、先に AAC にしてから映像と合わせる。e2 の詰まりを見て、詰まっていれば待つ (psi.rs)。
+//! 音は mixer で作り、先に AAC にしてから映像と合わせる。e2 の詰まりを見て、詰まっていれば待つ (broadcast/psi.rs)。
 
 mod args;
 mod encode;
 mod plan;
-mod psi;
 mod sound;
 mod source;
 #[cfg(test)]
@@ -90,7 +89,7 @@ async fn make(o: &Options, audio: &std::path::Path) -> anyhow::Result<()> {
         std::fs::write(path, serde_json::to_vec_pretty(&chapters)?)
             .with_context(|| format!("writing {}", path.display()))?;
     }
-    let mut throttle = psi::Throttle::default();
+    let mut throttle = crate::broadcast::psi::Throttle::default();
     encode::encode_audio(o, &plan, audio, &mut throttle).await?;
     let mut stepper = Stepper::new(native::load_renderer(&renderer_config(o))?);
     encode::encode_video(o, &series.events, &plan, &mut stepper, audio, &mut throttle).await?;

@@ -12,6 +12,7 @@ use super::model::{scale_color, QuakeSummary};
 use super::paint::SEA;
 use super::text::Text;
 use super::*;
+use crate::broadcast::status::{Notice, Outage};
 use crate::quake::{Hypocenter, Scale};
 
 const NOW: u64 = 1_790_000_000_000;
@@ -110,6 +111,7 @@ fn scene<'a>(
         test: false,
         hindsight: None,
         fast_forward: false,
+        status: None,
     }
 }
 
@@ -523,6 +525,50 @@ fn server_url_becomes_a_websocket_url() {
     assert_eq!(ws_url("http://localhost:8080"), "ws://localhost:8080/ws");
 }
 
+/// 札の右端 (文字の無いテストでは、曲名の幅 0 + 余白 16 のぶん、配信元の名前が無い右端 1264 から左)
+const CHIP_X: u32 = 1264 - 16 - 4;
+
+#[test]
+fn the_status_chip_is_drawn_in_the_top_bar_only_when_asked() {
+    let mut r = renderer(Text::none());
+    let plain = r.render(&scene(None, &[], None, None));
+    let mut with = |n| {
+        r.render(&Scene {
+            status: n,
+            ..scene(None, &[], None, None)
+        })
+    };
+    let busy = with(Some(Notice::Busy));
+    let outage = with(Some(Notice::Outage(Outage {
+        from_ms: NOW,
+        to_ms: NOW + 60_000,
+    })));
+    let at = (CHIP_X, 20);
+    assert_ne!(rgb(&plain, at), chip::BUSY_BG);
+    assert_eq!(rgb(&busy, at), chip::BUSY_BG);
+    assert_eq!(rgb(&outage, at), chip::OUTAGE_BG);
+    // 上部バーの下 (地図・パネル・帯) は変わらない
+    let below = |pm: &Pixmap| pm.data()[(36 * 1280 * 4)..].to_vec();
+    assert_eq!(below(&busy), below(&plain));
+    assert_eq!(below(&outage), below(&plain));
+}
+
+#[test]
+fn the_stepper_redraws_when_the_status_changes() {
+    let mut s = Stepper::new(renderer(Text::none()));
+    let plain_in = input(&[], NOW, None);
+    let busy_in = Input {
+        status: Some(Notice::Busy),
+        ..input(&[], NOW, None)
+    };
+    let plain = s.step(&plain_in).unwrap();
+    assert!(s.step(&plain_in).is_none());
+    let busy = s.step(&busy_in).unwrap();
+    assert_ne!(busy.i420, plain.i420);
+    assert!(s.step(&busy_in).is_none());
+    assert_eq!(s.step(&plain_in).unwrap().i420, plain.i420);
+}
+
 /// 確認用の画面を PNG に書く (EQ_NATIVE_PNG_DIR があるときだけ)
 #[test]
 fn write_fixture_pngs_when_asked() {
@@ -596,6 +642,33 @@ fn write_fixture_pngs_when_asked() {
     r.render(&scene(None, &[], Some(&ishikari), Some(&weather)))
         .save_png(std::path::Path::new(&out).join("ishikari.png"))
         .unwrap();
+    // 状態の札: 混雑中 (警報の帯が出ている平時)・途切れた (地震の画面)・曲名が長いとき
+    let busy = Some(Notice::Busy);
+    let outage = Some(Notice::Outage(Outage {
+        from_ms: NOW - 25 * 60_000,
+        to_ms: NOW,
+    }));
+    r.render(&Scene {
+        status: busy,
+        ..scene(None, &history[1..], Some(&ishikari), Some(&weather))
+    })
+    .save_png(std::path::Path::new(&out).join("status_busy.png"))
+    .unwrap();
+    r.render(&Scene {
+        status: outage,
+        ..scene(Some(&noto), &history, None, None)
+    })
+    .save_png(std::path::Path::new(&out).join("status_outage.png"))
+    .unwrap();
+    r.render(&Scene {
+        status: busy,
+        bgm_title: "とても長い曲名のBGM とても長い曲名のBGM とても長い曲名のBGM とても長い曲名のBGM",
+        label: "配信元の名前",
+        test: true,
+        ..scene(None, &history[1..], Some(&ishikari), Some(&weather))
+    })
+    .save_png(std::path::Path::new(&out).join("status_busy_long_bgm.png"))
+    .unwrap();
     // テスト配信の帯と警報の帯 (2 行) の下にも、情報の窓が重ならない
     let test_png = r.render(&Scene {
         test: true,
@@ -770,6 +843,7 @@ fn input<'a>(events: &'a [Event], now: u64, h: Option<&'a Hindsight>) -> Input<'
         flip_s: 0,
         hindsight: h,
         fast_forward: false,
+        status: None,
     }
 }
 

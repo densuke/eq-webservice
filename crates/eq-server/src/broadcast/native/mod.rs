@@ -7,6 +7,7 @@ mod banner;
 mod calm;
 mod camera;
 mod cards;
+mod chip;
 mod data;
 mod draw;
 mod eew;
@@ -36,6 +37,7 @@ use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::Message;
 
 use super::record::Shown;
+use super::status::Feed;
 use super::BroadcastConfig;
 use crate::quake::Event;
 use data::{CityWeather, ServerMessage, Warnings};
@@ -132,7 +134,7 @@ fn check_replay(kind: Option<&str>, test: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn start(cfg: &BroadcastConfig, notices: Option<UnboundedSender<String>>) -> anyhow::Result<Native> {
+pub fn start(cfg: &BroadcastConfig, notices: Option<UnboundedSender<String>>, status: Feed) -> anyhow::Result<Native> {
     let renderer = load_renderer(cfg)?;
     let server = cfg.server.trim_end_matches('/').to_string();
     let st: Shared = Arc::default();
@@ -165,6 +167,7 @@ pub fn start(cfg: &BroadcastConfig, notices: Option<UnboundedSender<String>>) ->
                 test,
                 check_ms,
                 flip_s: cfg.weather_flip_secs,
+                status,
             },
             notices,
         )),
@@ -224,6 +227,8 @@ struct Out {
     check_ms: u64,
     /// 天気の札を今と明日で切り替える間隔 (秒。0 は今だけ)
     flip_s: u64,
+    /// 状態の札の材料 (ライブだけが持つ)
+    status: Feed,
 }
 
 async fn render_loop(renderer: Renderer, st: Shared, out: Out, notices: Option<UnboundedSender<String>>) {
@@ -235,6 +240,7 @@ async fn render_loop(renderer: Renderer, st: Shared, out: Out, notices: Option<U
         tick.tick().await;
         let o = {
             let s = st.lock().unwrap_or_else(|e| e.into_inner());
+            let status = out.status.notice(local_now_ms());
             stepper.step(&Input {
                 events: &s.events,
                 now: model::server_now(local_now_ms(), s.offset),
@@ -250,6 +256,7 @@ async fn render_loop(renderer: Renderer, st: Shared, out: Out, notices: Option<U
                 flip_s: out.flip_s,
                 hindsight: None,
                 fast_forward: false,
+                status,
             })
         };
         let Some(Output { i420, calm, shown }) = o else {

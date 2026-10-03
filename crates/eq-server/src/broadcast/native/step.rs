@@ -13,6 +13,7 @@ use super::model::same_quake;
 use super::shaken::Point;
 use super::{eew, model, yuv, HISTORY};
 use crate::broadcast::record::Shown;
+use crate::broadcast::status::Notice;
 use crate::quake::{Event, Hypocenter};
 
 /// 1 コマの入力 (時刻はサーバの時計。epoch ミリ秒)
@@ -36,6 +37,8 @@ pub struct Input<'a> {
     pub hindsight: Option<&'a Hindsight>,
     /// 記録から描き直すとき、時計を飛ばした直後か (ライブは false)
     pub fast_forward: bool,
+    /// 状態の札 (ライブだけが入れる。再現動画は None)
+    pub status: Option<Notice>,
 }
 
 /// 描かずに分かる、ある時刻の画面の様子 (記録から描き直すときの、音の判断と終わりの判断に使う)
@@ -85,7 +88,7 @@ pub struct Output {
 /// 寄った表示範囲の同一判定 (日本全体は None)
 type ViewKey = Option<(u64, u64, u64)>;
 
-type StillKey = (u64, Option<(u64, i32)>, Option<u64>, u64, bool, ViewKey);
+type StillKey = (u64, Option<(u64, i32)>, Option<u64>, u64, bool, ViewKey, Option<Notice>);
 
 /// 地震の画面の地震から、寄りの目標の材料を作る。平時は None (日本全体)
 fn aim_of(
@@ -229,6 +232,7 @@ impl Stepper {
             now / 1000,
             i.fast_forward,
             view,
+            i.status,
         );
         let key = (still_key, if waves.is_empty() { 0 } else { now / i.check_ms });
         if self.last_key == Some(key) {
@@ -251,6 +255,7 @@ impl Stepper {
                 test: i.test,
                 hindsight: pending,
                 fast_forward: i.fast_forward,
+                status: i.status,
             };
             self.still = Some((still_key, self.renderer.render(&scene)));
         }

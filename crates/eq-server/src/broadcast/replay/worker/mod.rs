@@ -177,9 +177,9 @@ impl Worker {
     fn seen(&self, health: Health) -> Seen {
         Seen {
             screen: calm_state::screen(calm_state::read(&self.state_path).as_ref(), now_ms()),
-            congested: super::psi::congested_now(self.cfg.psi_limit),
+            congested: crate::broadcast::psi::congested_now(self.cfg.psi_limit),
             health,
-            mem_available_mb: super::psi::mem_available_now(),
+            mem_available_mb: crate::broadcast::psi::mem_available_now(),
         }
     }
 

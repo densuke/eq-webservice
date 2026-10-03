@@ -21,6 +21,7 @@ use super::panel;
 use super::shaken::{Stations, Zones};
 use super::test_mark;
 use super::text::Text;
+use crate::broadcast::status::Notice;
 use crate::quake::{Hypocenter, Scale};
 
 pub const W: u32 = 1280;
@@ -57,6 +58,8 @@ pub struct Scene<'a> {
     pub hindsight: Option<&'a Hindsight>,
     /// 記録から描き直すとき、時計を飛ばした直後 (時計の枠に「早送り」を出す)。ライブは false
     pub fast_forward: bool,
+    /// 上部バーの右に出す状態の札 (docs/broadcast-status.md)。ライブだけが入れる。再現動画は None
+    pub status: Option<Notice>,
 }
 
 pub struct Renderer {

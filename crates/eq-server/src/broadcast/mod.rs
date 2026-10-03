@@ -12,13 +12,16 @@ mod encoder;
 mod ffmpeg;
 mod mixer;
 mod native;
+mod psi;
 mod record;
 mod replay;
 mod ring;
+mod status;
 
 pub use replay::{run as replay_video, run_worker as replay_worker};
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -254,6 +257,10 @@ pub async fn run(args: &[String]) -> anyhow::Result<()> {
 async fn session(cfg: &BroadcastConfig, output: &[String], secrets: &[String]) -> anyhow::Result<()> {
     let (notice_tx, notice_rx) = tokio::sync::mpsc::unbounded_channel();
     let notices = cfg.mixer.then_some(notice_tx);
+    // 最後にエンコーダへ送ったコマの時刻 (状態のファイルに書く)。前の値が残っていれば、新しいコマを送るまで保つ
+    let last_frame = Arc::new(AtomicU64::new(0));
+    let load = status::Load::new();
+    let state_path = calm_state::path_of(&cfg.state_file);
     // 画面: chrome (JPEG を受け取る) か native (Rust で描いて I420 にした画面を watch で受け取る) のどちらか
     let (mut screen, mut chrome, mut native) = match cfg.source {
         Source::Chrome => {
@@ -267,7 +274,17 @@ async fn session(cfg: &BroadcastConfig, output: &[String], secrets: &[String]) -
         }
         Source::Native => {
             native::check_source(cfg).await?;
-            (None, None, Some(native::start(cfg, notices)?))
+            // 前の最後のコマから 30 秒以上あいていれば、途切れた札を出す (docs/broadcast-status.md)
+            let prev = calm_state::read(&state_path).and_then(|s| s.last_frame_ms);
+            last_frame.store(prev.unwrap_or(0), Ordering::Relaxed);
+            let outage = status::outage_of(prev, calm_state::now_ms());
+            // 見張りは、描く係 (native) が消えると終わる
+            let (busy, _) = status::spawn(load.clone());
+            (
+                None,
+                None,
+                Some(native::start(cfg, notices, status::Feed { busy, outage })?),
+            )
         }
     };
     // mixer の音 (fifo は mixer より後に捨てる。宣言の順を変えないこと)
@@ -294,7 +311,7 @@ async fn session(cfg: &BroadcastConfig, output: &[String], secrets: &[String]) -
     }
     // 地震の画面か平時かを、再現動画を作る係に知らせる (書けなくても配信は続ける)
     if let Some(n) = &native {
-        calm_state::spawn(calm_state::path_of(&cfg.state_file), n.calm.clone(), n.frames.clone());
+        calm_state::spawn(state_path, n.calm.clone(), n.frames.clone(), last_frame.clone());
     }
     let mut encoder = match cfg.encoder {
         EncoderKind::Ffmpeg => Encoder::Ffmpeg(Box::new(ffmpeg::FfmpegEncoder::start(
@@ -338,8 +355,14 @@ async fn session(cfg: &BroadcastConfig, output: &[String], secrets: &[String]) -
                 }
             }
             // 変化が無くても同じ画面を送り続ける (fps_calm を指定していなければ、ffmpeg は枚数から時刻を決める)
-            _ = tick.tick(), if !frame.is_empty() => {
-                encoder.video(&frame, started.elapsed().as_millis() as u64).await?;
+            at = tick.tick(), if !frame.is_empty() => {
+                // コマの予定の時刻からの遅れと、書き込みの長さを残す (混雑中の札の材料)
+                let lag = at.elapsed();
+                load.begin_write();
+                let sent = encoder.video(&frame, started.elapsed().as_millis() as u64).await;
+                load.end_write(lag);
+                sent?;
+                last_frame.store(calm_state::now_ms(), Ordering::Relaxed);
             }
             e = encoder.closed() => return Err(e),
             status = async { match chrome.as_mut() { Some(c) => c.wait().await, None => std::future::pending().await } } => {
