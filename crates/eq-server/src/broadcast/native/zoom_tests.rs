@@ -83,6 +83,7 @@ fn input<'a>(events: &'a [Event], now: u64, icons: &'a Icons) -> Input<'a> {
         hindsight: None,
         fast_forward: false,
         status: None,
+        notices: None,
     }
 }
 
@@ -188,6 +189,7 @@ fn the_insets_are_not_drawn_while_zoomed_and_come_back_at_home() {
         hindsight: None,
         fast_forward: false,
         status: None,
+        notices: None,
     };
     // 南西諸島の別枠の縁 (枠の 1 画素外側の線)
     let line = |pm: &tiny_skia::Pixmap| {
@@ -434,6 +436,7 @@ fn write_zoomed_png_when_asked() {
         hindsight: None,
         fast_forward: false,
         status: None,
+        notices: None,
     };
     let aim = camera::Aim {
         epicenter: Some(camera::Epicenter {

@@ -10,6 +10,7 @@ use super::eew::{eew_place, quake_place};
 use super::hindsight::{self, Hindsight};
 use super::icon::Icons;
 use super::model::same_quake;
+use super::notice::Notices;
 use super::shaken::Point;
 use super::{eew, model, yuv, HISTORY};
 use crate::broadcast::record::Shown;
@@ -39,6 +40,8 @@ pub struct Input<'a> {
     pub fast_forward: bool,
     /// 状態の札 (ライブだけが入れる。再現動画は None)
     pub status: Option<Notice>,
+    /// 平時の右パネルの下に出すお知らせ (ライブだけが入れる。再現動画は None)
+    pub notices: Option<&'a Notices>,
 }
 
 /// 描かずに分かる、ある時刻の画面の様子 (記録から描き直すときの、音の判断と終わりの判断に使う)
@@ -256,6 +259,7 @@ impl Stepper {
                 hindsight: pending,
                 fast_forward: i.fast_forward,
                 status: i.status,
+                notices: i.notices,
             };
             self.still = Some((still_key, self.renderer.render(&scene)));
         }
