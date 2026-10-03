@@ -172,7 +172,7 @@ eq-server replay-video --from <ms> --to <ms> --out x.mp4
 
 仕様から変えた点と、仕様に書かれていなかったことの決め。
 
-- 置き場: コマンドは `broadcast/replay/` (筋書き plan.rs・音の規則 sound.rs・ffmpeg encode.rs・詰まり psi.rs・報の取得 source.rs)。native 側は、描く体を `native/step.rs` の `Stepper::step` に切り出し (ライブも同じ関数。出力は変えていない)、のちに判明する震源を `native/hindsight.rs` に置いた。
+- 置き場: コマンドは `broadcast/replay/` (筋書き plan.rs・音の規則 sound.rs・ffmpeg encode.rs・詰まり ../psi.rs・報の取得 source.rs)。native 側は、描く体を `native/step.rs` の `Stepper::step` に切り出し (ライブも同じ関数。出力は変えていない)、のちに判明する震源を `native/hindsight.rs` に置いた。
 - **筋書きと描画を分けた**: コマごとの当時の時刻・届いた報の数・鳴らす音は、描かずに純粋な関数で先に決める (`plan::build`)。音を先に AAC にでき、映像はその筋書きのとおりに描く。
 - `--events` は 2 つの形を読む。最初の報の行に `received_at_ms` があれば eq-server の sink の jsonl (archive.rs の `read_range` を使い回す)。無ければ samples/scenarios の形 (上流の JSON のまま) とみなし、発表時刻を届いた時刻にする (web の履歴の再生と同じ)。`read_range` は 500 件で切るので、上限に達したら警告を出す (R3.3a でファイルを直接読むときは 5 万件に広げた)。
 - 対象の地震: 範囲の地震情報と緊急地震速報 (最新の報) を、最大震度の大きい順、同じなら先に起きた順で選び、同じ地震 (`same_quake`) の報だけを残す。震源の無い震度速報は発生時刻だけで同じ地震に入る。津波・地震感知情報は入れない。

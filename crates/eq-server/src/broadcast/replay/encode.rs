@@ -8,11 +8,11 @@ use anyhow::Context;
 use tokio::io::AsyncWriteExt;
 use tokio::process::{Child, Command};
 
-use super::plan::{duration_ms, Plan};
-use super::psi::Throttle;
+use super::plan::{duration_ms, Frame, Plan};
 use super::Options;
 use crate::broadcast::mixer::{AudioMixer, Notice, RATE};
 use crate::broadcast::native::{Icons, Input, Stepper};
+use crate::broadcast::psi::Throttle;
 use crate::quake::Event;
 
 /// 音を混ぜる 1 回の長さ (20ms)。音を鳴らす時刻はこの単位に丸まる
@@ -141,6 +141,27 @@ pub async fn encode_audio(o: &Options, plan: &Plan, audio: &Path, throttle: &mut
     finish(child, "ffmpeg (音)").await
 }
 
+/// 1 コマの描画の入力。配信の状態の札 (混雑中・途切れ) は、手元で描き直す動画には出さないので、必ず None
+fn frame_input<'a>(label: &'a str, events: &'a [Event], f: &'a Frame, icons: &'a Icons, check_ms: u64) -> Input<'a> {
+    Input {
+        events: &events[..f.applied],
+        now: f.now_ms,
+        rev: f.applied as u64,
+        warnings: None,
+        weather: None,
+        icons,
+        bgm_title: "",
+        connected: true,
+        label,
+        test: false,
+        check_ms,
+        flip_s: 0,
+        hindsight: f.hindsight.as_ref(),
+        fast_forward: f.fast_forward,
+        status: None,
+    }
+}
+
 /// 筋書きのコマを順に描いて、音のファイルと合わせて mp4 にする
 pub async fn encode_video(
     o: &Options,
@@ -157,23 +178,7 @@ pub async fn encode_video(
     let mut last: Vec<u8> = Vec::new();
     for (i, f) in plan.frames.iter().enumerate() {
         throttle.wait().await?;
-        let seen = &events[..f.applied];
-        let input = Input {
-            events: seen,
-            now: f.now_ms,
-            rev: f.applied as u64,
-            warnings: None,
-            weather: None,
-            icons: &icons,
-            bgm_title: "",
-            connected: true,
-            label: &o.label,
-            test: false,
-            check_ms,
-            flip_s: 0,
-            hindsight: f.hindsight.as_ref(),
-            fast_forward: f.fast_forward,
-        };
+        let input = frame_input(&o.label, events, f, &icons, check_ms);
         // 前のコマと同じなら、描き直さずに同じ画面を渡す
         if let Some(out) = stepper.step(&input) {
             last = out.i420;
@@ -215,6 +220,19 @@ mod tests {
             a.iter().position(|x| x == "a.m4a").unwrap(),
         );
         assert!(v < s);
+    }
+
+    #[test]
+    fn replay_frames_never_carry_a_status_chip() {
+        let f = Frame {
+            now_ms: 1,
+            applied: 0,
+            fast_forward: false,
+            hindsight: None,
+        };
+        let icons = Icons::new();
+        let input = frame_input("記録から再現", &[], &f, &icons, 200);
+        assert_eq!(input.status, None);
     }
 
     #[test]

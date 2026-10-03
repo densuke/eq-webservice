@@ -1,9 +1,11 @@
 //! 配信の「地震の画面か平時か」を小さなファイルに書く (docs/replay-video.md 5.2 の 1)。
 //! 再現動画を作る係 (replay/worker) が、地震の間は作らず、平時の長さを見るために読む。
-//! 切り替わったときと 30 秒ごとに書き直す。書けなくても配信は止めない (警告を 1 度出すだけ)。
+//! 切り替わったときと 10 秒ごとに書き直す。最後にエンコーダへ送ったコマの時刻 (last_frame_ms) も一緒に書く
+//! (次の起動が、途切れていた間を知るため。docs/broadcast-status.md)。書けなくても配信は止めない (警告を 1 度出すだけ)。
 //! 作る係は `updated_ms` が古ければ「わからない」とみなす (screen)。
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -12,7 +14,7 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 /// 書き直す間隔
-const WRITE_EVERY: Duration = Duration::from_secs(30);
+const WRITE_EVERY: Duration = Duration::from_secs(10);
 /// これより古い書き込みは、配信の状態がわからないものとして扱う
 pub const STALE_MS: u64 = 120_000;
 
@@ -24,6 +26,9 @@ pub struct Snapshot {
     pub since_ms: u64,
     /// 書いた時刻 (epoch ミリ秒)
     pub updated_ms: u64,
+    /// 最後にエンコーダへ送ったコマの時刻 (epoch ミリ秒)。古いファイルには無い
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_frame_ms: Option<u64>,
 }
 
 /// 作る係から見た配信の画面
@@ -98,7 +103,12 @@ async fn write(path: &Path, snapshot: &Snapshot) -> std::io::Result<()> {
 /// calm の変化を見て、状態のファイルを書く。最初の画面が描けるまでは書かない
 /// (calm の初期値は、データを受ける前の仮の値なので、平時と書かないため)。
 /// calm の送り手が消えたら (配信のやり直し) 終わる。古くなったファイルは、作る係が「わからない」とみなす
-pub fn spawn(path: PathBuf, mut calm: watch::Receiver<bool>, frames: watch::Receiver<Arc<Vec<u8>>>) -> JoinHandle<()> {
+pub fn spawn(
+    path: PathBuf,
+    mut calm: watch::Receiver<bool>,
+    frames: watch::Receiver<Arc<Vec<u8>>>,
+    last_frame: Arc<AtomicU64>,
+) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut current = *calm.borrow_and_update();
         let mut since_ms = now_ms();
@@ -126,6 +136,8 @@ pub fn spawn(path: PathBuf, mut calm: watch::Receiver<bool>, frames: watch::Rece
                 calm: current,
                 since_ms,
                 updated_ms: now_ms(),
+                // 0 は、まだ 1 コマも送っていない (前の値が入れてあれば、それを保つ)
+                last_frame_ms: Some(last_frame.load(Ordering::Relaxed)).filter(|&v| v != 0),
             };
             match write(&path, &snapshot).await {
                 Ok(()) => warned = false,
@@ -148,6 +160,7 @@ mod tests {
             calm,
             since_ms: since,
             updated_ms: updated,
+            last_frame_ms: None,
         }
     }
 
@@ -184,6 +197,27 @@ mod tests {
         assert_eq!(read(&dir.path().join("none.json")), None);
     }
 
+    #[tokio::test]
+    async fn last_frame_ms_round_trips_and_an_old_file_without_it_still_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let s = Snapshot {
+            last_frame_ms: Some(1_234),
+            ..snap(true, 1, 2)
+        };
+        write(&path, &s).await.unwrap();
+        assert_eq!(read(&path), Some(s));
+        // 項目が足される前の版が書いたファイル
+        std::fs::write(&path, r#"{"calm":false,"since_ms":5,"updated_ms":6}"#).unwrap();
+        assert_eq!(read(&path), Some(snap(false, 5, 6)));
+        // 無いときは書かない (古い版が読んでも、今までと同じ中身)
+        write(&path, &snap(true, 1, 2)).await.unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            r#"{"calm":true,"since_ms":1,"updated_ms":2}"#
+        );
+    }
+
     #[test]
     fn the_configured_path_wins_and_empty_means_the_default() {
         assert_eq!(path_of("/x/y.json"), PathBuf::from("/x/y.json"));
@@ -196,14 +230,23 @@ mod tests {
         let path = dir.path().join("state.json");
         let (calm_tx, calm) = watch::channel(true);
         let (frames_tx, frames) = watch::channel(Arc::new(Vec::new()));
-        let task = spawn(path.clone(), calm, frames);
+        let last_frame = Arc::new(AtomicU64::new(0));
+        let task = spawn(path.clone(), calm, frames, last_frame.clone());
         // 最初の画面の前は書かない (最初の tick は、すぐ来る)
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(read(&path), None);
         frames_tx.send(Arc::new(vec![1])).unwrap();
         calm_tx.send(false).unwrap();
         tokio::time::sleep(Duration::from_millis(200)).await;
-        assert!(!read(&path).unwrap().calm);
+        let written = read(&path).unwrap();
+        assert!(!written.calm);
+        // まだコマを送っていない (0) ときは、last_frame_ms を書かない
+        assert_eq!(written.last_frame_ms, None);
+        // コマを送った時刻は、次に書き直すとき (calm の切り替えでも書く) に載る
+        last_frame.store(777, Ordering::Relaxed);
+        calm_tx.send(true).unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(read(&path).unwrap().last_frame_ms, Some(777));
         // 送り手が消えたら終わる
         drop(calm_tx);
         task.await.unwrap();
@@ -213,7 +256,7 @@ mod tests {
         std::fs::write(&blocker, "x").unwrap();
         let (calm_tx, calm) = watch::channel(true);
         let (_frames_tx, frames) = watch::channel(Arc::new(vec![1]));
-        let task = spawn(blocker.join("state.json"), calm, frames);
+        let task = spawn(blocker.join("state.json"), calm, frames, Arc::default());
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert!(!task.is_finished());
         drop(calm_tx);

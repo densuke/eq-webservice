@@ -2,6 +2,7 @@
 
 use tiny_skia::Pixmap;
 
+use super::chip;
 use super::draw::{Scene, BAR_H, H, MAP_W, W};
 use super::eew::{eew_forecast_text, eew_kind_text, EewSummary};
 use super::model::{hypo_text, scale_color, scale_text_color, tsunami_text, QuakeSummary};
@@ -84,16 +85,7 @@ pub fn draw_dynamic(pm: &mut Pixmap, text: &mut Text, scene: &Scene) {
     let shaking = scene.quake.is_some() || scene.eew.is_some();
     let mode = if shaking { "[地震]" } else { "[平時]" };
     text.draw(pm, mode, 210.0, 24.0, 12.0, MUTED);
-    // 右端に配信元 (label)、その左に BGM の曲名
-    let mut right = W as f32 - PAD;
-    if !scene.label.is_empty() {
-        text.draw_right(pm, scene.label, right, 24.0, 12.0, MUTED);
-        right -= text.width(scene.label, 12.0) + 16.0;
-    }
-    if !scene.bgm_title.is_empty() {
-        let s = format!("BGM: {}", scene.bgm_title);
-        text.draw_right(pm, &s, right, 24.0, 12.0, MUTED);
-    }
+    draw_top_right(pm, text, scene);
     if !shaking {
         draw_warn_legend(pm, text);
     }
@@ -103,6 +95,28 @@ pub fn draw_dynamic(pm: &mut Pixmap, text: &mut Text, scene: &Scene) {
     }
     draw_history(pm, text, scene.history);
     draw_clock(pm, text, scene.now_ms, scene.connected, scene.fast_forward);
+}
+
+/// 上部バーの右: 右端に配信元 (label)、その左に BGM の曲名、さらに左に状態の札
+fn draw_top_right(pm: &mut Pixmap, text: &mut Text, scene: &Scene) {
+    let mut right = W as f32 - PAD;
+    if !scene.label.is_empty() {
+        text.draw_right(pm, scene.label, right, 24.0, 12.0, MUTED);
+        right -= text.width(scene.label, 12.0) + 16.0;
+    }
+    let bgm = (!scene.bgm_title.is_empty()).then(|| format!("BGM: {}", scene.bgm_title));
+    let bgm_w = bgm.as_ref().map(|s| text.width(s, 12.0));
+    let Some(notice) = &scene.status else {
+        if let Some(s) = &bgm {
+            text.draw_right(pm, s, right, 24.0, 12.0, MUTED);
+        }
+        return;
+    };
+    let (show_bgm, chip_right) = chip::layout(right, bgm_w, chip::width(text, notice));
+    if let (true, Some(s)) = (show_bgm, &bgm) {
+        text.draw_right(pm, s, right, 24.0, 12.0, MUTED);
+    }
+    chip::draw(pm, text, notice, chip_right);
 }
 
 fn draw_warn_legend(pm: &mut Pixmap, text: &mut Text) {

@@ -1,4 +1,4 @@
-//! e2 の詰まりへの配慮。Linux の /proc/pressure/{io,memory} の full の 60 秒平均が高い間は、描くのも ffmpeg に渡すのも止めて待つ。
+//! e2 の詰まりへの配慮 (再現動画の作る係と、配信の混雑中の札 (status.rs) の両方が読む)。Linux の /proc/pressure/{io,memory} の full の 60 秒平均が高い間は、描くのも ffmpeg に渡すのも止めて待つ。
 //! 10 分以上待っても下がらなければ、あきらめる (作りかけは呼び出し側が消す。R3.3 のキューがやり直す)。Mac では /proc が無く、待たない。
 //! deploy/youtube-live-watch.sh の見送りと同じ値 (20%)。
 
@@ -11,11 +11,20 @@ const CHECK_EVERY: Duration = Duration::from_secs(30);
 /// この時間待っても下がらなければあきらめる
 const GIVE_UP_AFTER: Duration = Duration::from_secs(600);
 
-/// /proc/pressure/* の文から、full の 60 秒平均 (%) を読む
-pub fn full_avg60(text: &str) -> Option<f64> {
+/// /proc/pressure/* の文の full の行から、key ("avg10=" など) の値 (%) を読む
+fn full_avg(text: &str, key: &str) -> Option<f64> {
     let line = text.lines().find(|l| l.starts_with("full "))?;
-    line.split_whitespace()
-        .find_map(|w| w.strip_prefix("avg60=")?.parse().ok())
+    line.split_whitespace().find_map(|w| w.strip_prefix(key)?.parse().ok())
+}
+
+/// full の 10 秒平均 (%) (配信の混雑中の札が見る短い平均)
+pub fn full_avg10(text: &str) -> Option<f64> {
+    full_avg(text, "avg10=")
+}
+
+/// full の 60 秒平均 (%)
+pub fn full_avg60(text: &str) -> Option<f64> {
+    full_avg(text, "avg60=")
 }
 
 /// io か memory のどちらかが、limit (%) を超えて詰まっているか。読めないものは詰まっていないとみなす
@@ -123,6 +132,14 @@ mod tests {
         assert_eq!(full_avg60(SOME_ONLY), Some(2.0));
         assert_eq!(full_avg60("some avg60=9.0\n"), None);
         assert_eq!(full_avg60(""), None);
+    }
+
+    #[test]
+    fn reads_the_full_line_ten_second_average() {
+        assert_eq!(full_avg10(BUSY), Some(30.0));
+        assert_eq!(full_avg10(SOME_ONLY), Some(1.0));
+        assert_eq!(full_avg10("some avg10=9.0\n"), None);
+        assert_eq!(full_avg10(""), None);
     }
 
     #[test]
