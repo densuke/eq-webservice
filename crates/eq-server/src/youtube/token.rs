@@ -9,7 +9,9 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 /// 動画を上げる権限だけ (読み書き・削除はできない)
-pub const SCOPE: &str = "https://www.googleapis.com/auth/youtube.upload";
+/// 動画を上げる (videos.insert) のと、再生リストに足す (playlistItems.insert) のに使う。
+/// 再生リストへの追加は youtube.upload では通らず、これより狭い範囲は無い
+pub const SCOPE: &str = "https://www.googleapis.com/auth/youtube.force-ssl";
 const DEFAULT_AUTH_URI: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const DEFAULT_TOKEN_URI: &str = "https://oauth2.googleapis.com/token";
 /// アクセストークンの期限の、この時間 (ミリ秒) 前から、期限切れとみなす

@@ -186,6 +186,28 @@ impl<A: Api> Uploader<A> {
         }
     }
 
+    /// 上げた動画を再生リストに足す。本数・割り当て・間の空け方には関わらない。
+    /// 失敗しても動画は上がっているので、上げ直さない (呼ぶ側は警告を出すだけ)
+    pub async fn add_to_playlist(&self, playlist_id: &str, video_id: &str, now_ms: u64) -> Result<(), String> {
+        let client = token::load_client(&self.cfg.client_path).map_err(|e| format!("{e:#}"))?;
+        let access = access_token(&self.api, &client, &self.cfg.token_path, now_ms, false)
+            .await
+            .map_err(|e| format!("{e:?}"))?;
+        let mut result = self.api.add_to_playlist(&access, playlist_id, video_id).await;
+        if result == Err(UploadError::Unauthorized) {
+            let fresh = access_token(&self.api, &client, &self.cfg.token_path, now_ms, true)
+                .await
+                .map_err(|e| format!("{e:?}"))?;
+            result = self.api.add_to_playlist(&fresh, playlist_id, video_id).await;
+        }
+        result.map_err(|e| match e {
+            UploadError::Rejected(why) if why.contains("insufficientPermissions") || why.contains("ACCESS_TOKEN_SCOPE_INSUFFICIENT") => format!(
+                "{why}: トークンの許可の範囲が足りません。eq-server youtube-auth をやり直してください (再生リストへの追加には youtube.force-ssl が要ります)"
+            ),
+            other => format!("{other:?}"),
+        })
+    }
+
     fn on_auth_error(&mut self, e: AuthError, now_ms: u64) -> Attempt {
         match e {
             AuthError::InvalidGrant => self.mark_dead(),
@@ -228,6 +250,8 @@ mod tests {
         upload_results: Mutex<VecDeque<Result<String, UploadError>>>,
         refresh_calls: Mutex<u32>,
         uploads: Mutex<Vec<(String, String)>>, // (アクセストークン, タイトル)
+        playlist_results: Mutex<VecDeque<Result<(), UploadError>>>,
+        playlist_adds: Mutex<Vec<(String, String, String)>>, // (アクセストークン, 再生リスト, 動画)
     }
 
     impl Api for &Fake {
@@ -246,6 +270,13 @@ mod tests {
                 .unwrap()
                 .pop_front()
                 .unwrap_or_else(|| Ok("VID".into()))
+        }
+        async fn add_to_playlist(&self, access: &str, playlist: &str, video: &str) -> Result<(), UploadError> {
+            self.playlist_adds
+                .lock()
+                .unwrap()
+                .push((access.into(), playlist.into(), video.into()));
+            self.playlist_results.lock().unwrap().pop_front().unwrap_or(Ok(()))
         }
     }
 
@@ -473,6 +504,40 @@ mod tests {
             u.try_upload(&meta("b"), video(), NOW).await,
             Attempt::Uploaded(_)
         ));
+    }
+
+    #[tokio::test]
+    async fn a_playlist_add_retries_once_on_401_and_does_not_count_toward_the_daily_limit() {
+        let env = Env::new();
+        let fake = Fake::default();
+        fake.playlist_results
+            .lock()
+            .unwrap()
+            .push_back(Err(UploadError::Unauthorized));
+        let mut u = env.uploader(&fake, 1);
+        assert_eq!(
+            u.try_upload(&meta("a"), video(), NOW).await,
+            Attempt::Uploaded("VID".into())
+        );
+        assert_eq!(u.add_to_playlist("PLx", "VID", NOW).await, Ok(()));
+        let adds = fake.playlist_adds.lock().unwrap().clone();
+        assert_eq!(adds.len(), 2, "401 のあと、更新して 1 回だけやり直す");
+        assert_eq!(adds[1], ("AT-new".into(), "PLx".into(), "VID".into()));
+        // 上限 1 本のまま: 再生リストへの追加は本数に数えない (2 本目は上限で止まる)
+        assert_eq!(u.try_upload(&meta("b"), video(), NOW + 1000).await, Attempt::Skipped);
+    }
+
+    #[tokio::test]
+    async fn a_playlist_add_without_the_scope_says_to_redo_the_consent() {
+        let env = Env::new();
+        let fake = Fake::default();
+        fake.playlist_results
+            .lock()
+            .unwrap()
+            .push_back(Err(UploadError::Rejected("HTTP 403 insufficientPermissions".into())));
+        let u = env.uploader(&fake, 3);
+        let err = u.add_to_playlist("PLx", "VID", NOW).await.unwrap_err();
+        assert!(err.contains("youtube-auth をやり直して"), "{err}");
     }
 
     #[tokio::test]

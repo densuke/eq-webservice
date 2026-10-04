@@ -109,7 +109,7 @@ mod tests {
         let url = consent_url(&client, "http://127.0.0.1:5000", super::super::token::SCOPE, &p);
         assert!(url.starts_with("https://accounts.google.com/o/oauth2/v2/auth?client_id=id.apps&"));
         assert!(url.contains("redirect_uri=http%3A%2F%2F127.0.0.1%3A5000&"));
-        assert!(url.contains("scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fyoutube.upload&"));
+        assert!(url.contains("scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fyoutube.force-ssl&"));
         assert!(url.contains("code_challenge=C&code_challenge_method=S256&state=S&"));
         // 秘密は URL に入れない
         assert!(!url.contains("SECRET"));

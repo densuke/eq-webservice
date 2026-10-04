@@ -45,8 +45,11 @@ youtube_token = ""
 #   eq-server youtube-auth --client ~/.config/eq-replay/youtube-client.json --token ~/.config/eq-replay/youtube-token.json
 youtube_upload_token = "~/.config/eq-replay/youtube-token.json"
 youtube_client = "~/.config/eq-replay/youtube-client.json"
-# 公開範囲。最初は非公開。出来を見て、公開・限定公開への変更は YouTube Studio で手でやる
-youtube_privacy = "private"
+# 公開範囲。上げたらすぐ公開する (2026-10-05 利用者の判断)
+youtube_privacy = "public"
+# 上げた動画を足す再生リスト「地震アーカイブ」。空なら足さない。
+# トークンに youtube.force-ssl の許可が要る (v0.29.0 より前の youtube-auth で作ったトークンでは足せないので、やり直す)
+youtube_playlist = "PLeTi1hiiSBto"
 # カテゴリ (25 = ニュースと政治)
 youtube_category = "25"
 # 1 日 (太平洋時間の 0 時で区切る) に上げる本数の上限
