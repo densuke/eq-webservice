@@ -151,7 +151,13 @@ pub fn start(cfg: &BroadcastConfig, notices: Option<UnboundedSender<String>>, st
     // 描き直すかを調べる間隔。地震波が動く間はこの間隔ごとに描き直すので、地震の画面の fps に合わせる
     let check_ms = 1000 / u64::from(cfg.fps.max(1));
     let tasks = vec![
-        tokio::spawn(ws_loop(ws_url(&server), st.clone())),
+        tokio::spawn(ws_loop(
+            ws_url(&server),
+            server.clone(),
+            cfg.voice,
+            notices.clone(),
+            st.clone(),
+        )),
         tokio::spawn(poll(format!("{server}/api/warnings"), st.clone(), |s, v: Warnings| {
             s.warnings = Some(v)
         })),
@@ -283,9 +289,9 @@ async fn render_loop(renderer: Renderer, st: Shared, out: Out, notices: Option<U
     }
 }
 
-async fn ws_loop(url: String, st: Shared) {
+async fn ws_loop(url: String, base: String, voice: bool, notices: Option<UnboundedSender<String>>, st: Shared) {
     loop {
-        if let Err(e) = ws_once(&url, &st).await {
+        if let Err(e) = ws_once(&url, &base, voice, notices.as_ref(), &st).await {
             tracing::warn!("broadcast: ws {e:#}");
         }
         change(&st, |s| s.connected = false);
@@ -293,13 +299,26 @@ async fn ws_loop(url: String, st: Shared) {
     }
 }
 
-async fn ws_once(url: &str, st: &Shared) -> anyhow::Result<()> {
+async fn ws_once(
+    url: &str,
+    base: &str,
+    voice: bool,
+    notices: Option<&UnboundedSender<String>>,
+    st: &Shared,
+) -> anyhow::Result<()> {
+    // この接続で届いた報 (到着順)。hello の分は文脈だけで、音は鳴らさない
+    let mut live: Vec<Event> = Vec::new();
     let (mut ws, _) = tokio_tungstenite::connect_async(url).await.context("connect")?;
     change(st, |s| s.connected = true);
     while let Some(msg) = ws.next().await {
         match msg? {
             Message::Text(t) => match serde_json::from_str::<ServerMessage>(t.as_str()) {
-                Ok(m) => change(st, |s| apply(s, m)),
+                Ok(m) => {
+                    if let Some(n) = notices {
+                        sound_for(&mut live, &m, base, voice, n);
+                    }
+                    change(st, |s| apply(s, m))
+                }
                 Err(e) => tracing::warn!("broadcast: unknown ws message: {e}"),
             },
             Message::Close(_) => break,
@@ -307,6 +326,38 @@ async fn ws_once(url: &str, st: &Shared) -> anyhow::Result<()> {
         }
     }
     anyhow::bail!("closed")
+}
+
+/// 直近に覚えておく報の数
+const MAX_LIVE: usize = 200;
+
+/// 届いた報を覚え、新しい報 (event) なら警戒音と読み上げを mixer に知らせる (hello は覚えるだけ)。
+/// voice が false なら読み上げは知らせない (サーバの tts が無効のとき。BroadcastConfig.voice)
+fn sound_for(live: &mut Vec<Event>, m: &ServerMessage, base: &str, voice: bool, notices: &UnboundedSender<String>) {
+    let (is_new, now_ms, values) = match m {
+        ServerMessage::Hello { server_time_ms, events } => (false, *server_time_ms, events.clone()),
+        ServerMessage::Event { server_time_ms, event } => (true, *server_time_ms, vec![event.clone()]),
+    };
+    for ev in data::parse_events(values) {
+        live.push(ev);
+        if live.len() > MAX_LIVE {
+            live.remove(0);
+        }
+        if !is_new {
+            continue;
+        }
+        let Some((last, before)) = live.split_last() else {
+            continue;
+        };
+        if let Some((level, id)) = model::live_alert(live, now_ms) {
+            let _ = notices.send(model::alert_notice(level));
+            if voice {
+                let _ = notices.send(model::voice_notice(&model::voice_url(base, &id)));
+            }
+        } else if voice && model::should_read_without_alert(before, last) {
+            let _ = notices.send(model::voice_notice(&model::voice_url(base, &last.id)));
+        }
+    }
 }
 
 /// メッセージを状態に反映する (時計のずれを覚え、地震情報を id で重複なく足す)
@@ -434,6 +485,8 @@ async fn bgm_title_loop(url: String, st: Shared) {
     }
 }
 
+#[cfg(test)]
+mod sound_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

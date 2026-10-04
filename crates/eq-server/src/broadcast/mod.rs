@@ -92,6 +92,9 @@ pub struct BroadcastConfig {
     /// 音を eq-server の中で作る (BGM と警戒音を混ぜて ffmpeg に渡す。BlackHole・sox が要らない)。
     /// 指定すると audio・audio_command より優先し、ページには &audio=mixer を付けて開く
     pub mixer: bool,
+    /// 新しい報を読み上げる (native と mixer のとき。サーバの [tts] が有効で、GOOGLE_TTS_API_KEY があるときだけ true にする。
+    /// 無効のサーバに頼むと 404 になるので、既定は false)
+    pub voice: bool,
     /// mixer が流す BGM (Icecast の MP3)。空なら BGM は流さない
     pub bgm_url: String,
     /// 音のビットレート (ffmpeg の -b:a。無音なら 32k などに下げる)
@@ -161,6 +164,7 @@ impl Default for BroadcastConfig {
             audio: Vec::new(),
             audio_command: Vec::new(),
             mixer: false,
+            voice: false,
             bgm_url: "https://eq.fuga.jp/stream/bgm.mp3".into(),
             audio_bitrate: "128k".into(),
             encoder: EncoderKind::Ffmpeg,

@@ -14,6 +14,7 @@ mod plugins;
 mod quake;
 mod source;
 mod telop;
+mod tts;
 mod weather;
 
 use std::path::{Path, PathBuf};
@@ -102,6 +103,11 @@ async fn main() -> anyhow::Result<()> {
         routes.push(archive::router(path));
     }
 
+    // 音声アナウンス。キーが無ければ警告して無効 (エンドポイントは 404)
+    let tts_cache = build_tts(&cfg.tts)?;
+    let tts_token = std::env::var("EQ_TTS_TOKEN").ok().filter(|t| !t.is_empty());
+    routes.push(tts::http::router(hub.clone(), tts_cache, tts_token));
+
     let listener = tokio::net::TcpListener::bind(&cfg.server.listen)
         .await
         .with_context(|| format!("binding {}", cfg.server.listen))?;
@@ -182,4 +188,27 @@ async fn shutdown_signal() {
         _ = term => {},
     }
     tracing::info!("shutting down");
+}
+
+/// `[tts]` からキャッシュを作る。無効、またはキー未設定なら None
+fn build_tts(cfg: &tts::TtsConfig) -> anyhow::Result<Option<Arc<tts::cache::Cache<tts::google::Google>>>> {
+    if !cfg.enabled {
+        return Ok(None);
+    }
+    let Some(key) = std::env::var("GOOGLE_TTS_API_KEY").ok().filter(|k| !k.is_empty()) else {
+        tracing::warn!("tts enabled but GOOGLE_TTS_API_KEY is not set; tts disabled");
+        return Ok(None);
+    };
+    let budget = tts::budget::Budget::load(cfg.cache_dir.join("usage.json"), cfg.monthly_char_limit);
+    let cache = Arc::new(tts::cache::Cache::new(
+        cfg.cache_dir.clone(),
+        cfg.voice.clone(),
+        tts::google::Google::new(key)?,
+        budget,
+    ));
+    if cfg.prewarm {
+        tts::prewarm::spawn_prewarm(cache.clone());
+    }
+    tracing::info!(voice = %cfg.voice, "tts enabled");
+    Ok(Some(cache))
 }

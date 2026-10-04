@@ -146,7 +146,7 @@ fn due_alert(s: &Step) -> Option<(AlertLevel, String)> {
 }
 
 /// 最後の報 (events の末尾) で鳴らす警戒音。web の alertLevel と、その呼び出し (main.ts の onEvents) の判断
-fn alert_level(events: &[Event], now_ms: u64) -> Option<AlertLevel> {
+pub(crate) fn alert_level(events: &[Event], now_ms: u64) -> Option<AlertLevel> {
     let (e, prior) = events.split_last()?;
     match &e.body {
         EventBody::Eew(x) => {

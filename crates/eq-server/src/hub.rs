@@ -11,6 +11,8 @@ use tokio::sync::broadcast;
 const CHANNEL_CAPACITY: usize = 256;
 /// 重複排除のために覚えておく ID 数
 const SEEN_CAPACITY: usize = 4096;
+/// 読み上げ (tts) のために覚えておく受信済みイベントの数。EEW の古い報は直近履歴から消えるので、こちらで引けるようにする
+const PUBLISHED_CAPACITY: usize = 64;
 
 pub struct Hub {
     tx: broadcast::Sender<Arc<Event>>,
@@ -24,6 +26,8 @@ struct State {
     tsunami: Option<Arc<Event>>,
     seen: HashSet<String>,
     seen_order: VecDeque<String>,
+    /// 受信した順のイベント (直近履歴と違い、新しい報で置き換えない)
+    published: VecDeque<Arc<Event>>,
 }
 
 impl Hub {
@@ -36,6 +40,7 @@ impl Hub {
                 tsunami: None,
                 seen: HashSet::new(),
                 seen_order: VecDeque::new(),
+                published: VecDeque::new(),
             }),
             recent_capacity,
         })
@@ -69,6 +74,16 @@ impl Hub {
         pinned.into_iter().chain(st.recent.iter()).cloned().collect()
     }
 
+    /// id でイベントを探す (範囲は `recent()` と同じ)
+    pub fn get(&self, id: &str) -> Option<Arc<Event>> {
+        let st = self.state.lock().unwrap();
+        let found = st.recent.iter().find(|e| e.id == id);
+        found
+            .or(st.tsunami.as_ref().filter(|t| t.id == id))
+            .or_else(|| st.published.iter().find(|e| e.id == id))
+            .cloned()
+    }
+
     fn remember(&self, mut ev: Event) -> Option<Arc<Event>> {
         let mut st = self.state.lock().unwrap();
         if !st.seen.insert(ev.id.clone()) {
@@ -84,6 +99,10 @@ impl Hub {
             ev.received_at_ms = now_ms();
         }
         let ev = Arc::new(ev);
+        st.published.push_back(ev.clone());
+        if st.published.len() > PUBLISHED_CAPACITY {
+            st.published.pop_front();
+        }
         if matches!(ev.body, EventBody::Tsunami(_))
             && st
                 .tsunami
@@ -232,5 +251,29 @@ mod tests {
         assert!(!hub.publish(ev("x")));
         assert!(rx.try_recv().is_err());
         assert_eq!(hub.recent().len(), 1);
+    }
+
+    #[test]
+    fn get_finds_published_event_by_id() {
+        let hub = Hub::new(10);
+        hub.publish(ev("a"));
+        hub.publish(ev("b"));
+        assert_eq!(hub.get("b").unwrap().id, "b");
+    }
+
+    #[test]
+    fn get_finds_an_eew_report_superseded_by_a_later_serial() {
+        // 読み上げは第 1 報の id で取りに来る。その間に第 2 報が届いて直近履歴から消えても見つかること
+        let hub = Hub::new(10);
+        hub.publish(eew("e1", "Q", "1"));
+        hub.publish(eew("e2", "Q", "2"));
+        assert_eq!(hub.get("e1").unwrap().id, "e1");
+    }
+
+    #[test]
+    fn get_returns_none_for_unknown_id() {
+        let hub = Hub::new(10);
+        hub.publish(ev("a"));
+        assert!(hub.get("zzz").is_none());
     }
 }

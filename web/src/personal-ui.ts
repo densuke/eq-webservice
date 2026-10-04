@@ -30,6 +30,7 @@ function renderSettings(): void {
   $<HTMLSelectElement>("#collapse-min").value = String(app.settings.collapseMin);
   $<HTMLSelectElement>("#tour-sec").value = String(app.settings.tourSec);
   $<HTMLSelectElement>("#list-min").value = String(app.settings.listMin);
+  $<HTMLInputElement>("#voice").checked = app.settings.voice;
   $<HTMLSelectElement>("#weather-flip").value = String(app.settings.weatherFlipSec);
 }
 
@@ -148,6 +149,7 @@ $("#weather-flip").addEventListener("change", (e) => setSettings({ ...app.settin
 $("#collapse-min").addEventListener("change", (e) =>
   setSettings({ ...app.settings, collapseMin: Number((e.target as HTMLSelectElement).value) }),
 );
+$("#voice").addEventListener("change", (e) => setSettings({ ...app.settings, voice: (e.target as HTMLInputElement).checked }));
 $("#list-min").addEventListener("change", (e) => {
   setSettings({ ...app.settings, listMin: Number((e.target as HTMLSelectElement).value) });
   hooks.renderAll();

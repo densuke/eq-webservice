@@ -5,7 +5,7 @@
 mod args;
 mod encode;
 mod plan;
-mod sound;
+pub(crate) mod sound;
 mod source;
 #[cfg(test)]
 mod testkit;

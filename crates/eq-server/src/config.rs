@@ -24,6 +24,9 @@ pub struct Config {
     /// 平時のバナー (案内・お知らせ)
     #[serde(default)]
     pub banner: crate::banner::BannerConfig,
+    /// 音声アナウンス (Google TTS)
+    #[serde(default)]
+    pub tts: crate::tts::TtsConfig,
 }
 
 /// 平常時に画面上部で切り替えて表示する文
@@ -169,5 +172,25 @@ mod tests {
         let cfg = Config::parse("").unwrap();
         assert_eq!(cfg.server.listen, "127.0.0.1:8080");
         assert!(cfg.sinks.is_empty());
+    }
+
+    #[test]
+    fn tts_defaults_when_absent() {
+        let cfg = Config::parse("").unwrap();
+        assert_eq!(cfg.tts, crate::tts::TtsConfig::default());
+    }
+
+    #[test]
+    fn tts_section_overrides_and_keeps_other_defaults() {
+        let cfg = Config::parse("[tts]\nenabled = true\nvoice = \"ja-JP-Neural2-C\"").unwrap();
+        assert!(cfg.tts.enabled);
+        assert_eq!(cfg.tts.voice, "ja-JP-Neural2-C");
+        assert_eq!(cfg.tts.monthly_char_limit, 900_000);
+        assert!(cfg.tts.prewarm);
+    }
+
+    #[test]
+    fn tts_unknown_key_is_error() {
+        assert!(Config::parse("[tts]\nbogus = 1").is_err());
     }
 }
