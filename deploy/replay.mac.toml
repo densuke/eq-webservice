@@ -1,0 +1,38 @@
+# Mac の再現動画を作る係の設定 (eq-server replay-worker replay.toml)。docs/replay-video.md の 6 章。
+# 再現動画は Mac だけで作る (e2 は弱く、描画で配信が落ちるため)。e2 の設定は deploy/replay.e2.toml。
+# 省いた項目は既定値になる (deploy/replay.e2.toml に既定値が書いてある)。~/ はホームディレクトリ。
+[replay]
+# 本番の記録を /api/archive から取る (1 時間ずつ、間を空けて)。読むだけ
+events = "https://eq.fuga.jp"
+# 作業場所。queue/ (待ちの印)・work/ (作りかけ)・done/ (できた動画)・checkpoint.json (前に見終えた時刻) を下に作る
+dir = "~/work/eq-replay"
+
+# 子 (replay-video) を直接起動する (systemd が無い)。配信の様子 (状態のファイル・PSI・メモリ・健全性) は見ない
+runner = "inline"
+gate = "none"
+# 子の前に付けて、優先度を最低にする (macOS の background の QoS。CPU・ディスク・ネットワークが後回しになり、
+# 普段の作業の邪魔をしない。遅くなってよい)
+inline_wrap = ["/usr/sbin/taskpolicy", "-b"]
+
+# Mac は起きているあいだだけ動く。止まっていた間 (スリープ・停止・オフライン) の地震は、起きたあとに記録から拾う。
+# 前に見終えた時刻 (checkpoint) からさかのぼり、最大 168 時間 (7 日) まで。それより古いものは動画にしない。
+# 記録の保管の期間はサーバ側で決まる (eq-server は消さない。保管を短くしているなら、それに合わせる)
+catchup_max_hours = 168
+# 見直す間隔 (秒)。サーバは小さな VM なので、短くしすぎない
+scan_secs = 900
+
+# 作り始める時間帯 (日本時間)。Mac は起きていればいつでも作ってよい
+hours = "0-24"
+
+# 動画。Mac は余裕があるので 15fps
+fps = 15
+
+# replay-video に渡すもの。map_dir は、リリースの tar.gz を ~/work/eq-replay/release に展開した中の web/dist
+# (japan.geojson・neighbors.geojson・warning-areas.geojson・areas.geojson・stations.json が入っている)。
+# ffmpeg は Homebrew (brew install ffmpeg)。launchd の PATH には plist で /opt/homebrew/bin を足してある
+map_dir = "~/work/eq-replay/release/web/dist"
+font = "/System/Library/Fonts/ヒラギノ角ゴシック W4.ttc"
+ffmpeg = "ffmpeg"
+
+# YouTube への投稿は R3.3b で足す。Mac には認証情報が無いので、健全性は見ない
+youtube_token = ""

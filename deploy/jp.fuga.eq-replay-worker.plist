@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Mac で再現動画を作る係 (eq-server replay-worker) の LaunchAgent。docs/replay-video.md の 6 章。
+  /Users/USERNAME は自分のホームに置き換えて ~/Library/LaunchAgents/ に置く:
+    sed "s|/Users/USERNAME|$HOME|g" deploy/jp.fuga.eq-replay-worker.plist > ~/Library/LaunchAgents/jp.fuga.eq-replay-worker.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/jp.fuga.eq-replay-worker.plist
+  止める: launchctl bootout gui/$(id -u)/jp.fuga.eq-replay-worker
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>jp.fuga.eq-replay-worker</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/USERNAME/work/eq-replay/release/eq-server</string>
+    <string>replay-worker</string>
+    <string>/Users/USERNAME/work/eq-replay/replay.toml</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/USERNAME/work/eq-replay</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>RUST_LOG</key>
+    <string>info</string>
+    <!-- launchd の PATH は短い。Homebrew の ffmpeg を見つけるため -->
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <!-- 落ち続けても、すぐには起こし直さない -->
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+  <key>StandardOutPath</key>
+  <string>/Users/USERNAME/work/eq-replay/worker.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/USERNAME/work/eq-replay/worker.log</string>
+</dict>
+</plist>

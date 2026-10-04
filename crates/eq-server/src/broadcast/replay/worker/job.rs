@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::config::{expand, WorkerConfig};
+use super::config::{expand, EventsSource, WorkerConfig};
 use super::detect::Quake;
 use super::queue::Job;
 
@@ -24,6 +24,43 @@ pub fn quake_arg(q: &Quake) -> String {
         (Some(lat), Some(lon)) => format!("{},{lat},{lon}", q.origin_ms),
         _ => q.origin_ms.to_string(),
     }
+}
+
+/// replay-video に渡す引数 (サブコマンド名から。runner によらず同じ)
+pub fn replay_video_args(cfg: &WorkerConfig, job: &Job, out: &Path, chapters: &Path) -> Vec<String> {
+    let s = |v: &str| v.to_string();
+    let p = |v: &Path| v.display().to_string();
+    let mut a = vec![
+        s("replay-video"),
+        s("--from"),
+        job.from_ms.to_string(),
+        s("--to"),
+        job.to_ms.to_string(),
+        s("--out"),
+        p(out),
+    ];
+    a.extend(match cfg.events_source() {
+        EventsSource::File(path) => [s("--events"), p(&path)],
+        EventsSource::Url(url) => [s("--archive"), url],
+    });
+    a.extend([
+        s("--chapters"),
+        p(chapters),
+        s("--fps"),
+        cfg.fps.to_string(),
+        s("--label"),
+        cfg.label.clone(),
+        s("--map-dir"),
+        p(&expand(&cfg.map_dir)),
+        s("--font"),
+        p(&expand(&cfg.font)),
+        s("--ffmpeg"),
+        cfg.ffmpeg.clone(),
+    ]);
+    for q in &job.quakes {
+        a.extend([s("--quake"), quake_arg(q)]);
+    }
+    a
 }
 
 /// `systemd-run` の引数: --wait で終わるまで待ち、--collect で失敗した単位も片づける。
@@ -58,31 +95,17 @@ pub fn systemd_run_args(
         s("-p"),
         format!("WorkingDirectory={}", p(cwd)),
         p(exe),
-        s("replay-video"),
-        s("--from"),
-        job.from_ms.to_string(),
-        s("--to"),
-        job.to_ms.to_string(),
-        s("--out"),
-        p(out),
-        s("--events"),
-        p(&cfg.events_path()),
-        s("--chapters"),
-        p(chapters),
-        s("--fps"),
-        cfg.fps.to_string(),
-        s("--label"),
-        cfg.label.clone(),
-        s("--map-dir"),
-        p(&expand(&cfg.map_dir)),
-        s("--font"),
-        p(&expand(&cfg.font)),
-        s("--ffmpeg"),
-        cfg.ffmpeg.clone(),
     ];
-    for q in &job.quakes {
-        a.extend([s("--quake"), quake_arg(q)]);
-    }
+    a.extend(replay_video_args(cfg, job, out, chapters));
+    a
+}
+
+/// inline で起動するコマンド全体 (先頭が実行ファイル)。`inline_wrap` (優先度を下げるコマンド) の後ろに、eq-server と
+/// replay-video の引数を続ける。作業ディレクトリは作る係のまま (子は継ぐ)
+pub fn inline_command(cfg: &WorkerConfig, job: &Job, exe: &Path, out: &Path, chapters: &Path) -> Vec<String> {
+    let mut a = cfg.inline_wrap.clone();
+    a.push(exe.display().to_string());
+    a.extend(replay_video_args(cfg, job, out, chapters));
     a
 }
 
@@ -153,6 +176,51 @@ mod tests {
         assert!(has(["--quake", "1000000,35.5,139.5"]) && has(["--quake", "1060000"]));
         // 作る係の systemd-run の引数より後ろに、replay-video の引数が来る (単位の設定が replay-video に渡らない)
         assert!(a.iter().position(|x| x == "--unit=eq-replay-job-x-1").unwrap() < exe);
+    }
+
+    #[test]
+    fn the_inline_command_has_the_same_replay_video_arguments_as_systemd() {
+        let cfg = WorkerConfig {
+            inline_wrap: vec!["/usr/sbin/taskpolicy".into(), "-b".into()],
+            ..Default::default()
+        };
+        let j = job();
+        let (exe, out, ch) = (
+            Path::new("/opt/eq-server"),
+            Path::new("/w/x.mp4"),
+            Path::new("/w/x.chapters.json"),
+        );
+        let sys = systemd_run_args(&cfg, &j, "u", exe, Path::new("/srv"), out, ch);
+        let inline = inline_command(&cfg, &j, exe, out, ch);
+        // systemd-run の単位の設定を除くと、eq-server 以降は同じ
+        let tail = |a: &[String]| a[a.iter().position(|x| x == "/opt/eq-server").unwrap()..].to_vec();
+        assert_eq!(tail(&sys), tail(&inline));
+        assert_eq!(&inline[..3], ["/usr/sbin/taskpolicy", "-b", "/opt/eq-server"]);
+        assert_eq!(inline[3], "replay-video");
+        // systemd の縛りは付かない
+        assert!(!inline
+            .iter()
+            .any(|x| x.contains("CPUQuota") || x.contains("MemoryMax") || x == "--wait"));
+        // wrap が空なら、先頭が eq-server
+        let bare = inline_command(&WorkerConfig::default(), &j, exe, out, ch);
+        assert_eq!(&bare[..2], ["/opt/eq-server", "replay-video"]);
+    }
+
+    #[test]
+    fn an_archive_url_is_passed_as_archive_not_events() {
+        let j = job();
+        let args = |events: &str| {
+            let cfg = WorkerConfig {
+                events: events.into(),
+                ..Default::default()
+            };
+            replay_video_args(&cfg, &j, Path::new("/o.mp4"), Path::new("/c.json"))
+        };
+        let has = |a: &[String], pair: [&str; 2]| a.windows(2).any(|w| w == pair);
+        let url = args("https://eq.fuga.jp/");
+        assert!(has(&url, ["--archive", "https://eq.fuga.jp"]) && !url.contains(&"--events".to_string()));
+        let file = args("/srv/e.jsonl");
+        assert!(has(&file, ["--events", "/srv/e.jsonl"]) && !file.contains(&"--archive".to_string()));
     }
 
     #[test]
