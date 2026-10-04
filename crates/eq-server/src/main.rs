@@ -14,6 +14,7 @@ mod plugins;
 mod quake;
 mod source;
 mod telop;
+mod tts;
 mod weather;
 
 use std::path::{Path, PathBuf};
