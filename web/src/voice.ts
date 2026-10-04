@@ -113,3 +113,13 @@ export function tsunamiHistory(groups: readonly { events: readonly EqEvent[] }[]
     .flatMap((g) => g.events.filter((e) => e.kind === "tsunami"))
     .sort((a, b) => ((a as { issued_at: string }).issued_at < (b as { issued_at: string }).issued_at ? -1 : 1));
 }
+
+/**
+ * 読み上げの経路。live でない (位置を飛ばした・再生開始時の早送りで黙って流す) ときは読まない。
+ * デモと履歴の再生は報を live として流すが、source を "demo" にして id に #demoN を付ける。
+ * サーバはその id を知らないので、本文つきでキャッシュから組み立ててもらう (合成はしない)
+ */
+export function voiceRoute(e: EqEvent, live: boolean): "get" | "announce" | null {
+  if (!live) return null;
+  return e.source === "demo" ? "announce" : "get";
+}
