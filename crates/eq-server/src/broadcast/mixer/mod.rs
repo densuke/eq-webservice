@@ -190,16 +190,22 @@ async fn open_fifo(path: &Path) -> std::io::Result<pipe::Sender> {
     }
 }
 
+fn is_not_found(e: &anyhow::Error) -> bool {
+    e.downcast_ref::<reqwest::Error>().and_then(|e| e.status()) == Some(reqwest::StatusCode::NOT_FOUND)
+}
+
 /// 声の WAV を取ってきて、モノの PCM にして送る。失敗したら警告だけ出して鳴らさない
 async fn fetch_voice(client: reqwest::Client, url: String, tx: mpsc::UnboundedSender<Vec<i16>>) {
-    let pcm = match crate::net::body(client.get(&url)).await {
+    let res = match crate::net::body(client.get(&url)).await {
         Ok(bytes) => crate::tts::wav::parse(&bytes),
         Err(e) => Err(e),
     };
-    match pcm {
+    match res {
         Ok(pcm) => {
             let _ = tx.send(pcm);
         }
+        // 404 は、その報に読み上げが無い (サーバの tts が無効など)。異常ではないので静かに諦める
+        Err(e) if is_not_found(&e) => tracing::debug!("broadcast: no voice for this report: {url}"),
         Err(e) => tracing::warn!("broadcast: voice fetch failed ({e}): {url}"),
     }
 }
@@ -413,6 +419,26 @@ mod tests {
         let mut m = AudioMixer::new(|| None);
         m.apply(play(1.0));
         assert!(m.bgm.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_404_is_told_apart_from_other_failures() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        for (status, not_found) in [("404 Not Found", true), ("503 Service Unavailable", false)] {
+            let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}/", l.local_addr().unwrap());
+            tokio::spawn(async move {
+                let (mut c, _) = l.accept().await.unwrap();
+                let _ = c.read(&mut [0u8; 1024]).await;
+                let _ = c
+                    .write_all(
+                        format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").as_bytes(),
+                    )
+                    .await;
+            });
+            let e = crate::net::body(reqwest::Client::new().get(&url)).await.unwrap_err();
+            assert_eq!(is_not_found(&e), not_found, "{status}");
+        }
     }
 
     #[test]

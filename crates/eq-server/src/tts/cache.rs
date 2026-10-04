@@ -28,6 +28,11 @@ pub struct Cache<S> {
 }
 
 impl<S: Synth> Cache<S> {
+    /// 設定の既定の声
+    pub fn default_voice(&self) -> &str {
+        &self.voice
+    }
+
     pub fn new(dir: PathBuf, voice: String, synth: S, budget: Budget) -> Self {
         Cache {
             dir,

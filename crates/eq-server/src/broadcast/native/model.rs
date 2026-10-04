@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 
 use super::shaken::Point;
 use crate::broadcast::mixer::AlertLevel;
+use crate::quake::model::{Tsunami, TsunamiGrade};
 use crate::quake::{jst, Event, EventBody, Hypocenter, Quake, Scale};
 
 /// 同じ地震とみなす発生時刻の差と震央の距離
@@ -260,9 +261,33 @@ pub fn live_alert(events: &[Event], now_ms: u64) -> Option<(AlertLevel, String)>
     Some((level, events.last()?.id.clone()))
 }
 
-/// 警戒音を鳴らさなくても読み上げる報か (津波は数が少なく重要)
-pub fn should_read_without_alert(ev: &Event) -> bool {
-    matches!(ev.body, EventBody::Tsunami(_))
+/// 発表中の津波予報区の最大の等級 (解除・予報区なしは 0)。web/src/tsunami.ts の maxRank と同じ
+fn tsunami_rank(t: &Tsunami) -> u8 {
+    if t.cancelled {
+        return 0;
+    }
+    t.areas.iter().map(|a| a.grade as u8).max().unwrap_or(0)
+}
+
+/// 警戒音を鳴らさなくても読み上げる報か。津波は、予報が出た・等級が上がった (注意報以上) ときだけ。
+/// before はその報より前に届いた報 (到着順)。web/src/tsunami.ts の tsunamiAlert と同じ規則
+/// (続報・解除・古い予報の遅れた到着では読まない)
+pub fn should_read_without_alert(before: &[Event], ev: &Event) -> bool {
+    let EventBody::Tsunami(next) = &ev.body else {
+        return false;
+    };
+    let prev = before
+        .iter()
+        .filter_map(|e| match &e.body {
+            EventBody::Tsunami(t) => Some(t),
+            _ => None,
+        })
+        .reduce(|cur, t| if t.issued_at < cur.issued_at { cur } else { t });
+    if prev.is_some_and(|p| next.issued_at < p.issued_at) {
+        return false;
+    }
+    let r = tsunami_rank(next);
+    r >= TsunamiGrade::Watch as u8 && r > prev.map_or(0, tsunami_rank)
 }
 
 /// 読み上げの声の URL (id は URL 用に % で符号化する)
@@ -384,6 +409,61 @@ mod tests {
     fn live_alert_rings_for_a_first_quake_report_without_a_prior_eew() {
         let ev = [live_quake(LT)];
         assert_eq!(live_alert(&ev, LT), Some((AlertLevel::Medium, "q".to_string())));
+    }
+
+    fn tsunami(id: &str, issued: &str, cancelled: bool, grades: &[TsunamiGrade]) -> Event {
+        Event {
+            id: id.into(),
+            source: "test".into(),
+            received_at_ms: LT,
+            body: EventBody::Tsunami(Tsunami {
+                cancelled,
+                issued_at: issued.into(),
+                areas: grades
+                    .iter()
+                    .map(|g| crate::quake::model::TsunamiArea {
+                        name: "宮城県".into(),
+                        grade: *g,
+                        immediate: false,
+                        first_height: None,
+                        max_height: None,
+                    })
+                    .collect(),
+            }),
+        }
+    }
+
+    #[test]
+    fn a_tsunami_is_read_only_when_it_first_appears_or_rises() {
+        use TsunamiGrade::*;
+        let watch = tsunami("a", "2026-01-01T00:00", false, &[Watch]);
+        let watch2 = tsunami("b", "2026-01-01T00:10", false, &[Watch]);
+        let warn = tsunami("c", "2026-01-01T00:20", false, &[Watch, Warning]);
+        let major = tsunami("d", "2026-01-01T00:30", false, &[MajorWarning]);
+        let cancel = tsunami("e", "2026-01-01T00:40", true, &[]);
+        assert!(should_read_without_alert(&[], &watch)); // 初めての注意報
+        assert!(!should_read_without_alert(std::slice::from_ref(&watch), &watch2)); // 同じ等級の続報
+        assert!(should_read_without_alert(std::slice::from_ref(&watch), &warn)); // 警報へ上がった
+        assert!(!should_read_without_alert(&[watch.clone(), warn.clone()], &watch2)); // 下がった
+        assert!(should_read_without_alert(std::slice::from_ref(&warn), &major));
+        assert!(!should_read_without_alert(std::slice::from_ref(&watch), &cancel)); // 解除
+        let again = tsunami("f", "2026-01-01T00:50", false, &[Watch]);
+        assert!(should_read_without_alert(&[watch.clone(), cancel.clone()], &again)); // 解除のあとの再発表
+        assert!(!should_read_without_alert(&[], &tsunami("u", "t", false, &[Unknown])));
+        // 等級不明
+    }
+
+    #[test]
+    fn a_late_older_tsunami_report_is_not_read() {
+        use TsunamiGrade::*;
+        let old = tsunami("a", "2026-01-01T00:00", false, &[Warning]);
+        let new = tsunami("b", "2026-01-01T00:10", false, &[Watch]);
+        assert!(!should_read_without_alert(&[new], &old));
+    }
+
+    #[test]
+    fn a_quake_is_not_read_without_an_alert() {
+        assert!(!should_read_without_alert(&[], &live_quake(LT)));
     }
 
     #[test]

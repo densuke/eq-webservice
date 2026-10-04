@@ -96,7 +96,11 @@ async fn custom<S: Synth>(
     if req.text.trim().is_empty() || chars > MAX_TEXT_CHARS {
         return StatusCode::BAD_REQUEST.into_response();
     }
-    if req.voice.as_deref().is_some_and(|v| !valid_voice(v)) {
+    if req
+        .voice
+        .as_deref()
+        .is_some_and(|v| !valid_voice(v, cache.default_voice()))
+    {
         return StatusCode::BAD_REQUEST.into_response();
     }
     match cache.segment(&req.text, req.voice.as_deref()).await {
@@ -114,10 +118,16 @@ fn ct_eq(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
-/// `^ja-JP-[A-Za-z0-9-]{1,40}$`
-fn valid_voice(v: &str) -> bool {
-    v.strip_prefix("ja-JP-")
-        .is_some_and(|r| (1..=40).contains(&r.len()) && r.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'))
+/// 頼める声 (日本語の Neural2 と、設定の既定の声)。Studio・Chirp など単価の高い声を使わせない
+const VOICES: [&str; 4] = [
+    "ja-JP-Neural2-A",
+    "ja-JP-Neural2-B",
+    "ja-JP-Neural2-C",
+    "ja-JP-Neural2-D",
+];
+
+fn valid_voice(v: &str, default: &str) -> bool {
+    v == default || VOICES.contains(&v)
 }
 
 #[cfg(test)]
@@ -384,6 +394,11 @@ mod tests {
         )
         .await;
         assert_wav(&parts, &body);
+        // ja-JP でも、単価の高い声系統は断る
+        for v in ["ja-JP-Studio-B", "ja-JP-Chirp3-HD-Aoede", "ja-JP-Neural2-Z"] {
+            let (parts, _) = post(app(&e), Some(&bearer()), serde_json::json!({"text": "あ", "voice": v})).await;
+            assert_eq!(parts.status, StatusCode::BAD_REQUEST, "{v}");
+        }
     }
 
     #[tokio::test]
