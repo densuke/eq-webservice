@@ -200,7 +200,7 @@ curl -H "Authorization: Bearer $EQ_TTS_TOKEN" -H "Content-Type: application/json
   -d '{"text":"ただいま訓練放送中です。"}' http://127.0.0.1:8080/api/tts -o out.wav
 ```
 
-仕様の詳細は [docs/tts.md](docs/tts.md) にあります。
+仕様の詳細は [docs/tts.md](docs/tts.md)、2 つの鍵の作り方と置き方は [docs/tts-keys.md](docs/tts-keys.md) にあります。
 
 
 ### バナー (平時の案内・お知らせ)
