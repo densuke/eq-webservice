@@ -87,3 +87,13 @@ stream = ""
 dir = ""
 # dir = "/home/eq/banner"
 interval_sec = 20
+
+# 音声アナウンス (Google Cloud Text-to-Speech)。秘密情報は設定ファイルに書かず、環境変数で渡す
+#   GOOGLE_TTS_API_KEY: Google の API キー (未設定なら enabled = true でも警告を出して無効)
+#   EQ_TTS_TOKEN: POST /api/tts の Bearer トークン (未設定ならこの窓口は無効)
+[tts]
+enabled = false
+# voice = "ja-JP-Neural2-B"
+# cache_dir = "data/tts"
+# monthly_char_limit = 900000
+# prewarm = true

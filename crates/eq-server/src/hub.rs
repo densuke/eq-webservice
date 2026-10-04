@@ -69,6 +69,13 @@ impl Hub {
         pinned.into_iter().chain(st.recent.iter()).cloned().collect()
     }
 
+    /// id でイベントを探す (範囲は `recent()` と同じ)
+    pub fn get(&self, id: &str) -> Option<Arc<Event>> {
+        let st = self.state.lock().unwrap();
+        let found = st.recent.iter().find(|e| e.id == id);
+        found.or(st.tsunami.as_ref().filter(|t| t.id == id)).cloned()
+    }
+
     fn remember(&self, mut ev: Event) -> Option<Arc<Event>> {
         let mut st = self.state.lock().unwrap();
         if !st.seen.insert(ev.id.clone()) {
@@ -232,5 +239,20 @@ mod tests {
         assert!(!hub.publish(ev("x")));
         assert!(rx.try_recv().is_err());
         assert_eq!(hub.recent().len(), 1);
+    }
+
+    #[test]
+    fn get_finds_published_event_by_id() {
+        let hub = Hub::new(10);
+        hub.publish(ev("a"));
+        hub.publish(ev("b"));
+        assert_eq!(hub.get("b").unwrap().id, "b");
+    }
+
+    #[test]
+    fn get_returns_none_for_unknown_id() {
+        let hub = Hub::new(10);
+        hub.publish(ev("a"));
+        assert!(hub.get("zzz").is_none());
     }
 }
