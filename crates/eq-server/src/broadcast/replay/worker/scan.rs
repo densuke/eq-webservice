@@ -1,8 +1,6 @@
 //! `eq-server replay-worker --scan <jsonl | URL>`: 検知とまとめだけを試して、結果を出す (キューには何も書かない)。
 //! 設定の基準を決めるときと、e2 で「なぜ動画にならないか」を調べるときに使う。
 
-use std::collections::HashSet;
-
 use anyhow::Context;
 
 use super::super::source;
@@ -10,28 +8,13 @@ use super::config::WorkerConfig;
 use super::detect::{self, Rules};
 use crate::quake::{jst, Event, Scale};
 
-/// /api/archive が 1 回に返す範囲
-const CHUNK_MS: u64 = 3_600_000;
-
 /// 記録を読む。URL なら、今から hours 時間さかのぼって 1 時間ずつ取る。ファイルなら全部。
 /// 返すもう 1 つは「今」の時刻: URL は実際の今。ファイルは、最後の報の静かな時間のあと (全部閉じたものとして見る)
 async fn read(spec: &str, hours: u64, rules: &Rules) -> anyhow::Result<(Vec<Event>, u64)> {
     if spec.starts_with("http://") || spec.starts_with("https://") {
-        let base = spec.trim_end_matches('/');
         let now = super::super::super::calm_state::now_ms();
-        let mut seen = HashSet::new();
-        let mut events: Vec<Event> = Vec::new();
-        let mut from = now.saturating_sub(hours * 3_600_000);
-        while from < now {
-            let to = (from + CHUNK_MS).min(now);
-            for e in source::from_archive(base, from, to).await? {
-                if seen.insert(e.id.clone()) {
-                    events.push(e);
-                }
-            }
-            from = to + 1;
-        }
-        events.sort_by_key(|e| e.received_at_ms);
+        let from = now.saturating_sub(hours * 3_600_000);
+        let events = source::from_archive_range(spec.trim_end_matches('/'), from, now).await?;
         return Ok((events, now));
     }
     let events = source::from_file(std::path::Path::new(spec), 0, u64::MAX)

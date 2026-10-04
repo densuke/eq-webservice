@@ -7,6 +7,7 @@
 mod config;
 mod decide;
 mod detect;
+mod feed;
 mod health;
 mod hours;
 mod job;
@@ -20,10 +21,11 @@ use std::time::{Duration, Instant};
 use anyhow::Context;
 use tokio::process::{Child, Command};
 
-use super::source::FILE_MAX_EVENTS;
+use super::source::{self, ARCHIVE_PAUSE, FILE_MAX_EVENTS};
 use crate::archive;
 use crate::broadcast::calm_state;
-use config::WorkerConfig;
+use crate::quake::Event;
+use config::{EventsSource, Gate, Runner, WorkerConfig};
 use decide::{Action, Seen, StartRules, Why};
 use health::{Checker, Health};
 use queue::{Job, Outcome, Policy, State};
@@ -78,6 +80,8 @@ struct Worker {
     queue_dir: PathBuf,
     health: Option<Checker>,
     last_scan: Option<Instant>,
+    /// 記録を取れない状態が続いているか (警告は、切れたときの 1 回だけ)
+    offline: bool,
     running: Option<Running>,
 }
 
@@ -87,7 +91,12 @@ fn now_ms() -> u64 {
 
 impl Worker {
     fn new(cfg: WorkerConfig) -> anyhow::Result<Self> {
-        let health = if cfg.youtube_token.is_empty() {
+        let health = if cfg.gate == Gate::None {
+            tracing::info!(
+                "replay-worker: gate = \"none\" なので、配信の状態・PSI・メモリ・YouTube の健全性は見ません"
+            );
+            None
+        } else if cfg.youtube_token.is_empty() {
             tracing::info!("replay-worker: youtube_token が空なので、YouTube の健全性は見ません");
             None
         } else {
@@ -107,6 +116,7 @@ impl Worker {
             queue_dir: cfg.queue_dir(),
             health,
             last_scan: None,
+            offline: false,
             running: None,
             cfg,
         })
@@ -145,13 +155,15 @@ impl Worker {
         }
         // 残っている作りかけの単位と、作りかけのファイル
         // (該当する単位が無いと失敗するので、結果は見ない)
-        let _ = Command::new(&self.cfg.systemctl)
-            .args(["--user", "stop", "eq-replay-job-*"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .await;
+        if self.cfg.runner == Runner::Systemd {
+            let _ = Command::new(&self.cfg.systemctl)
+                .args(["--user", "stop", "eq-replay-job-*"])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .await;
+        }
         if let Ok(entries) = std::fs::read_dir(self.cfg.work_dir()) {
             entries.flatten().for_each(|e| {
                 let _ = std::fs::remove_file(e.path());
@@ -175,6 +187,15 @@ impl Worker {
 
     /// 配信の状態・e2 の詰まり・健全性から、今の様子を作る
     fn seen(&self, health: Health) -> Seen {
+        // gate = "none" は、何も読まない (Linux の /proc も要らない)。判断 (decide) もこの値を見ない
+        if self.cfg.gate == Gate::None {
+            return Seen {
+                screen: calm_state::Screen::Unknown,
+                congested: false,
+                health: Health::Unknown,
+                mem_available_mb: None,
+            };
+        }
         Seen {
             screen: calm_state::screen(calm_state::read(&self.state_path).as_ref(), now_ms()),
             congested: crate::broadcast::psi::congested_now(self.cfg.psi_limit),
@@ -208,6 +229,7 @@ impl Worker {
             return;
         };
         let rules = StartRules {
+            gate: self.cfg.gate,
             calm_ms: self.cfg.calm_min * 60_000,
             hours: self.cfg.start_hours(),
             min_mem_mb: self.cfg.min_mem_mb,
@@ -222,24 +244,72 @@ impl Worker {
         }
     }
 
-    /// 記録の最近の分から、閉じたまとまりを見つけて、キューに積む
-    async fn scan(&self) {
+    /// 記録から、閉じたまとまりを見つけて、キューに積む。
+    /// ファイルなら最近 lookback_hours を読む。URL なら、前に見終えた時刻から今までを取る (feed.rs)
+    async fn scan(&mut self) {
         let now = now_ms();
-        let from = now.saturating_sub(self.cfg.lookback_hours * 3_600_000);
-        let events = match archive::read_range_upto(&self.cfg.events_path(), from, now, FILE_MAX_EVENTS).await {
-            Ok(e) => e,
-            Err(e) => return tracing::warn!("replay-worker: 記録を読めません: {e:#}"),
+        let res = match self.cfg.events_source() {
+            EventsSource::File(path) => self.scan_file(&path, now).await,
+            EventsSource::Url(base) => {
+                let window = feed::Window::from(&self.cfg);
+                feed::catch_up(
+                    &self.cfg.checkpoint_path(),
+                    now,
+                    &window,
+                    ARCHIVE_PAUSE,
+                    |a, b| source::from_archive(&base, a, b),
+                    |events| self.enqueue(&events, now),
+                )
+                .await
+            }
         };
+        self.note_scan(res);
+    }
+
+    async fn scan_file(&self, path: &std::path::Path, now: u64) -> anyhow::Result<()> {
+        let from = now.saturating_sub(self.cfg.lookback_hours * 3_600_000);
+        let events = archive::read_range_upto(path, from, now, FILE_MAX_EVENTS).await?;
+        self.enqueue(&events, now);
+        Ok(())
+    }
+
+    /// 見直しの結果を記録する。取れない状態 (オフライン・スリープ明け) は、切れたときに警告を 1 回だけ出し、
+    /// 続く間は静かに次の見直しを待つ。戻ったら 1 回知らせる
+    fn note_scan(&mut self, res: anyhow::Result<()>) {
+        match res {
+            Ok(()) if self.offline => {
+                self.offline = false;
+                tracing::info!("replay-worker: 記録を取れるようになりました");
+            }
+            Ok(()) => {}
+            Err(e) if !self.offline => {
+                self.offline = true;
+                tracing::warn!("replay-worker: 記録を取れません。次の見直しでやり直します: {e:#}");
+            }
+            Err(e) => tracing::debug!("replay-worker: 記録を取れません: {e:#}"),
+        }
+    }
+
+    /// 閉じたまとまりのうち、キューに無いものを積む。全部うまくいったか (false なら、次の見直しでやり直す)
+    fn enqueue(&self, events: &[Event], now: u64) -> bool {
         let existing = match queue::load_all(&self.queue_dir) {
             Ok(j) => j,
-            Err(e) => return tracing::warn!("replay-worker: キューを読めません: {e:#}"),
+            Err(e) => {
+                tracing::warn!("replay-worker: キューを読めません: {e:#}");
+                return false;
+            }
         };
-        for job in queue::new_jobs(&events, &self.rules, now, &existing) {
+        let mut all_saved = true;
+        for job in queue::new_jobs(events, &self.rules, now, &existing) {
             match queue::save(&self.queue_dir, &job) {
                 Ok(()) => tracing::info!(id = %job.id, quakes = job.quakes.len(), "replay-worker: キューに積みました"),
-                Err(e) => tracing::warn!("replay-worker: キューに積めません: {e:#}"),
+                Err(e) => {
+                    all_saved = false;
+                    tracing::warn!("replay-worker: キューに積めません: {e:#}");
+                }
             }
         }
+        all_saved
     }
 
     async fn start(&mut self, mut job: Job) {
@@ -247,15 +317,9 @@ impl Worker {
         let (out, chapters) = job::work_files(&self.cfg, &job.id);
         let _ = std::fs::remove_file(&out);
         let unit = job::unit_name(&job.id, now / 1000);
-        let spawned = std::env::current_exe().map_err(anyhow::Error::from).and_then(|exe| {
-            let cwd = std::env::current_dir()?;
-            let args = job::systemd_run_args(&self.cfg, &job, &unit, &exe, &cwd, &out, &chapters);
-            Command::new(&self.cfg.systemd_run)
-                .args(args)
-                .stdin(Stdio::null())
-                .spawn()
-                .with_context(|| format!("starting {}", self.cfg.systemd_run))
-        });
+        let spawned = std::env::current_exe()
+            .map_err(anyhow::Error::from)
+            .and_then(|exe| self.spawn(&job, &unit, &exe, &out, &chapters));
         match spawned {
             Ok(child) => {
                 tracing::info!(id = %job.id, unit = %unit, "replay-worker: 作り始めます");
@@ -282,6 +346,37 @@ impl Worker {
         }
     }
 
+    /// 子を起動する。systemd は一時的なユーザー単位 (縛りと凍結のため)、inline は直接の子プロセス
+    fn spawn(
+        &self,
+        job: &Job,
+        unit: &str,
+        exe: &std::path::Path,
+        out: &std::path::Path,
+        chapters: &std::path::Path,
+    ) -> anyhow::Result<Child> {
+        let (program, args) = match self.cfg.runner {
+            Runner::Systemd => {
+                let cwd = std::env::current_dir()?;
+                (
+                    self.cfg.systemd_run.clone(),
+                    job::systemd_run_args(&self.cfg, job, unit, exe, &cwd, out, chapters),
+                )
+            }
+            Runner::Inline => {
+                let mut cmd = job::inline_command(&self.cfg, job, exe, out, chapters);
+                (cmd.remove(0), cmd)
+            }
+        };
+        Command::new(&program)
+            .args(args)
+            .stdin(Stdio::null())
+            // 作る係が落ちたときに、子を残さない (inline では、これが唯一の後始末)
+            .kill_on_drop(self.cfg.runner == Runner::Inline)
+            .spawn()
+            .with_context(|| format!("starting {program}"))
+    }
+
     /// 作っている間の見張り
     async fn watch(&mut self) {
         let Some(mut r) = self.running.take() else { return };
@@ -302,7 +397,13 @@ impl Worker {
         let health = self.health().await;
         let seen = self.seen(health);
         let give_up = Duration::from_secs(self.cfg.freeze_give_up_min * 60);
-        match decide::watch(&seen, r.frozen_since.map(|t| t.elapsed()), give_up, self.cfg.on_busy) {
+        match decide::watch(
+            self.cfg.gate,
+            &seen,
+            r.frozen_since.map(|t| t.elapsed()),
+            give_up,
+            self.cfg.on_busy,
+        ) {
             Action::Keep => {}
             Action::Freeze => {
                 tracing::info!(id = %r.job.id, ?seen, "replay-worker: 凍結します");
@@ -340,9 +441,14 @@ impl Worker {
         self.running = Some(r);
     }
 
-    /// 単位を止める。凍結していても確実に止まるよう SIGKILL。終わらなければ stop で押し切る
+    /// 子を止める。systemd は、単位を止める (凍結していても確実に止まるよう SIGKILL。終わらなければ stop で押し切る)。
+    /// inline は、子を SIGKILL する
     async fn stop(&self, r: &mut Running, outcome: Outcome) {
         r.stopped = Some(outcome);
+        if self.cfg.runner == Runner::Inline {
+            let _ = r.child.kill().await;
+            return;
+        }
         self.systemctl(&["kill", "--signal=SIGKILL", &r.unit]).await;
         if tokio::time::timeout(KILL_WAIT, r.child.wait()).await.is_err() {
             tracing::warn!(unit = %r.unit, "replay-worker: 止まらないので stop します");

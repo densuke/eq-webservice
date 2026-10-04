@@ -333,7 +333,7 @@ eq-server replay-video --from <ms> --to <ms> --out x.mp4
 - **止まっていた間を取り戻す (checkpoint)。** URL のときは、前に見終えた時刻を `dir/checkpoint.json` (`{"scanned_until_ms": …}`) に残す。次の見直しは、`max(checkpoint - overlap, 今 - catchup_max_hours)` から今までを 1 時間ずつ取る。`overlap` は `max_group_hours + quiet_min` (checkpoint の時点で開いていたまとまりの始まりを含めるため)。checkpoint が無い最初は、`lookback_hours` だけさかのぼる。checkpoint は、**全部取れて、キューに積めたときだけ**今に進める。途中で 1 つでも失敗したら動かさず、次の `scan_secs` で同じところからやり直す。同じまとまりを二重に積まないのは 5.2.1 のとおり (キューにある地震と照らす)。
 - `catchup_max_hours` (既定 24、Mac の例は 168 = 7 日。`lookback_hours` 以上)。サーバのコード (`archive.rs`・jsonl の sink) には記録を消す仕組みが無く、`/api/archive` は jsonl を頭から読む。つまり、保管の長さは運用 (ファイルを残している間) で決まる。これより古い地震は、止まっていても動画にしない。
 - **取る先への負担を抑える。** 範囲と範囲の間に 1 秒空ける (eq.fuga.jp は 1GB の VM で、1 回ごとに記録を頭から読む)。7 日さかのぼっても約 3 分で、定常では (4 時間 + 経過分) の数回だけ。取れなくなったら (オフライン・スリープ明け)、その回は何もせず、警告は切れたときの 1 回だけ出して、続く間は静かに次の `scan_secs` を待つ。戻ったら 1 回だけ知らせる。
-- `inline_wrap` (既定は空): `inline` のとき、子の前に付けるコマンド。Mac は `["/usr/bin/taskpolicy", "-b"]`。macOS の background の優先度 (CPU・ディスク・ネットワークが後回し) で動かし、子の ffmpeg も引き継ぐ。普段の作業を優先し、遅くなってよい。作るのは 1 本ずつ。
+- `inline_wrap` (既定は空): `inline` のとき、子の前に付けるコマンド。Mac は `["/usr/sbin/taskpolicy", "-b"]`。macOS の background の優先度 (CPU・ディスク・ネットワークが後回し) で動かし、子の ffmpeg も引き継ぐ。普段の作業を優先し、遅くなってよい。作るのは 1 本ずつ。
 - `runner = "inline"` と `on_busy = "freeze"` の組み合わせは、凍結に systemd が要るので設定の読み込みで断る (`gate = "none"` なら凍結は使わないので構わない)。
 - 例: `deploy/replay.mac.toml`。YouTube への投稿は R3.3b で足すので、いまは `youtube_token = ""`。
 
@@ -369,3 +369,8 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/jp.fuga.eq-replay-worker
 ### 6.6 意図的に空けている箇所
 
 - ネットワークを実際に使う取得と、launchd・スリープの実機での動き (起動処理・外部との接続で、壊れても気づいて直せる)。取得は範囲の分割と重複の除去を別の関数にして、そちらをテストしている。
+
+### 6.7 実測 (2026-10-04、Mac aarch64)
+
+- 本番の `/api/archive` を 60 時間分 (60 回、1 秒おき) 取って、2026-10-02 17:39 熊本県熊本地方 (震度 3) の 1 本をキューに積み、`taskpolicy -b` で作った。15fps・3784 コマ・動画 252 秒・1280x720、作った時間は 45 秒、mp4 は 10.5MB。60 時間分の取得に約 90 秒。
+- `taskpolicy` は `/usr/sbin/taskpolicy` (`/usr/bin` ではない)。
