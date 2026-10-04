@@ -16,6 +16,7 @@ mod source;
 mod telop;
 mod tts;
 mod weather;
+mod youtube;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -56,6 +57,10 @@ async fn main() -> anyhow::Result<()> {
     // eq-server replay-worker [replay.toml]: 記録から動画にする地震を見つけて、キューに積み、空き時間に作る
     if args.first().map(String::as_str) == Some("replay-worker") {
         return broadcast::replay_worker(&args[1..]).await;
+    }
+    // eq-server youtube-auth --client <client.json> --token <token.json>: YouTube に上げる許可を一度だけ得る
+    if args.first().map(String::as_str) == Some("youtube-auth") {
+        return youtube::auth::run(&args[1..]).await;
     }
     let cli = Cli::parse(args)?.with_env(|k| std::env::var(k).ok())?;
     if cli.help {

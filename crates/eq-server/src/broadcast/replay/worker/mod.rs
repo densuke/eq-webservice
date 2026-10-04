@@ -13,6 +13,8 @@ mod hours;
 mod job;
 mod queue;
 mod scan;
+mod upload;
+mod youtube_meta;
 
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -25,10 +27,12 @@ use super::source::{self, ARCHIVE_PAUSE, FILE_MAX_EVENTS};
 use crate::archive;
 use crate::broadcast::calm_state;
 use crate::quake::Event;
+use crate::youtube::api::Google;
 use config::{EventsSource, Gate, Runner, WorkerConfig};
 use decide::{Action, Seen, StartRules, Why};
 use health::{Checker, Health};
 use queue::{Job, Outcome, Policy, State};
+use upload::Publisher;
 
 const USAGE: &str = "\
 usage: eq-server replay-worker [replay.toml]                         (常駐して、動画を自動で作る)
@@ -79,6 +83,8 @@ struct Worker {
     state_path: PathBuf,
     queue_dir: PathBuf,
     health: Option<Checker>,
+    /// できた動画を YouTube に上げる係 (youtube_upload_token が空なら無い)
+    publisher: Option<Publisher<Google>>,
     last_scan: Option<Instant>,
     /// 記録を取れない状態が続いているか (警告は、切れたときの 1 回だけ)
     offline: bool,
@@ -115,6 +121,7 @@ impl Worker {
             state_path: calm_state::path_of(&cfg.state_file),
             queue_dir: cfg.queue_dir(),
             health,
+            publisher: Publisher::from_config(&cfg)?,
             last_scan: None,
             offline: false,
             running: None,
@@ -182,6 +189,12 @@ impl Worker {
             self.watch().await;
         } else {
             self.idle().await;
+            // 作り始めていなければ、できた動画を上げる (作るのと上げるのは同時にやらない。1 本ずつ)
+            if self.running.is_none() {
+                if let Some(p) = &mut self.publisher {
+                    p.run_once(now_ms()).await;
+                }
+            }
         }
     }
 

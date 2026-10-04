@@ -117,6 +117,20 @@ pub struct WorkerConfig {
     /// 認証情報 (google-auth の authorized user の JSON。読むだけで書き戻さない)。空なら健全性を見ない
     pub youtube_token: String,
 
+    // YouTube への投稿 (docs/replay-video.md 5.3・6.8)。トークンのファイルが空なら、上げない
+    /// youtube-auth で作ったトークンのファイル。空なら投稿しない
+    pub youtube_upload_token: String,
+    /// Google Cloud の OAuth クライアントの JSON (デスクトップアプリ)。トークンを使うときは要る
+    pub youtube_client: String,
+    /// 公開範囲。"private" (既定)・"unlisted"・"public"。公開への変更は、見てから YouTube Studio で手で
+    pub youtube_privacy: String,
+    /// カテゴリ ID (25 = ニュースと政治)
+    pub youtube_category: String,
+    /// 1 日 (太平洋時間) に上げる本数の上限
+    pub youtube_daily_limit: u32,
+    /// 上げたあと、done/ の mp4 を消すか
+    pub youtube_delete_after_upload: bool,
+
     // replay-video に渡すもの
     pub fps: u32,
     pub label: String,
@@ -162,6 +176,12 @@ impl Default for WorkerConfig {
             health_secs: 60,
             stream_name: "地震モニター用".into(),
             youtube_token: "~/.config/pd2/youtube-upload-token.json".into(),
+            youtube_upload_token: String::new(),
+            youtube_client: String::new(),
+            youtube_privacy: "private".into(),
+            youtube_category: "25".into(),
+            youtube_daily_limit: 3,
+            youtube_delete_after_upload: false,
             fps: 5,
             label: "記録から再現".into(),
             map_dir: b.map_dir,
@@ -210,6 +230,14 @@ impl WorkerConfig {
             "凍結 (on_busy = \"freeze\") は runner = \"systemd\" でだけ使えます"
         );
         Hours::parse(&self.hours)?;
+        anyhow::ensure!(
+            ["private", "unlisted", "public"].contains(&self.youtube_privacy.as_str()),
+            "youtube_privacy は \"private\"・\"unlisted\"・\"public\" のどれか"
+        );
+        anyhow::ensure!(
+            self.youtube_upload_token.is_empty() || !self.youtube_client.is_empty(),
+            "youtube_upload_token を使うときは、youtube_client も書いてください"
+        );
         Ok(self)
     }
 
@@ -278,6 +306,32 @@ mod tests {
         let f: File = toml::from_str("[replay]\nmin_scale = 40\ncpu_quota = \"10%\"").unwrap();
         assert_eq!((f.replay.min_scale, f.replay.cpu_quota.as_str()), (40, "10%"));
         assert!(toml::from_str::<File>("[replay]\nnope = 1").is_err());
+    }
+
+    #[test]
+    fn youtube_upload_is_off_and_private_by_default() {
+        let c = WorkerConfig::default();
+        assert_eq!(
+            (
+                c.youtube_upload_token.as_str(),
+                c.youtube_privacy.as_str(),
+                c.youtube_category.as_str(),
+                c.youtube_daily_limit,
+                c.youtube_delete_after_upload
+            ),
+            ("", "private", "25", 3, false)
+        );
+    }
+
+    #[test]
+    fn youtube_settings_are_checked() {
+        let ok = |t: &str| toml::from_str::<File>(t).unwrap().replay.check();
+        assert!(ok("[replay]\nyoutube_privacy = \"unlisted\"").is_ok());
+        assert!(ok("[replay]\nyoutube_privacy = \"public \"").is_err());
+        assert!(ok("[replay]\nyoutube_privacy = \"secret\"").is_err());
+        // トークンを使うなら、クライアントも要る
+        assert!(ok("[replay]\nyoutube_upload_token = \"~/t.json\"").is_err());
+        assert!(ok("[replay]\nyoutube_upload_token = \"~/t.json\"\nyoutube_client = \"~/c.json\"").is_ok());
     }
 
     #[test]
@@ -376,6 +430,21 @@ mod tests {
         assert_eq!((c.fps, c.hours.as_str(), c.catchup_max_hours), (15, "0-24", 168));
         assert_eq!(c.inline_wrap, ["/usr/sbin/taskpolicy", "-b"]);
         assert!(c.youtube_token.is_empty());
+        // 投稿は、トークンのファイルがあれば動く。公開範囲は非公開
+        assert_eq!(
+            (
+                c.youtube_upload_token.as_str(),
+                c.youtube_client.as_str(),
+                c.youtube_privacy.as_str(),
+                c.youtube_daily_limit
+            ),
+            (
+                "~/.config/eq-replay/youtube-token.json",
+                "~/.config/eq-replay/youtube-client.json",
+                "private",
+                3
+            )
+        );
     }
 
     #[test]

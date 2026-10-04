@@ -11,6 +11,8 @@ usage: eq-server [options]
                                                           (記録から音入りの動画を描き直す。詳しくは replay-video --help)
        eq-server replay-worker [replay.toml]
                                                           (動画にする地震を見つけて、キューに積み、空き時間に自動で作る。詳しくは replay-worker --help)
+       eq-server youtube-auth --client <client.json> --token <token.json>
+                                                          (再現動画を YouTube に上げる許可を、一度だけ得る。詳しくは youtube-auth --help)
        eq-server bgm-send <MP3 のディレクトリ> <http://127.0.0.1:8010/bgm.mp3>
                                                           (平時の BGM を Icecast へ送る。パスワードは ICECAST_SOURCE_PASSWORD)
 

@@ -123,6 +123,8 @@ mod tests {
             warning: false,
             name: String::new(),
             last_recv_ms: origin_ms as u64,
+            magnitude: None,
+            depth_km: None,
         };
         let rules = Rules::from(&WorkerConfig::default());
         let g = groups(&[q(1_000_000, Some((35.5, 139.5))), q(1_060_000, None)], &rules);

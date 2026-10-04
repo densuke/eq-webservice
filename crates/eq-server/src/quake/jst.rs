@@ -56,7 +56,7 @@ pub fn shift_str(s: &str, delta_ms: i64) -> String {
 }
 
 // Howard Hinnant の days_from_civil / civil_from_days
-fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
+pub fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
     let y = if m <= 2 { y - 1 } else { y };
     let era = y.div_euclid(400);
     let yoe = y - era * 400;

@@ -343,7 +343,7 @@ eq-server replay-video --from <ms> --to <ms> --out x.mp4
 - **取る先への負担を抑える。** 範囲と範囲の間に 1 秒空ける (eq.fuga.jp は 1GB の VM で、1 回ごとに記録を頭から読む)。7 日さかのぼっても約 3 分で、定常では (4 時間 + 経過分) の数回だけ。取れなくなったら (オフライン・スリープ明け)、その回は何もせず、警告は切れたときの 1 回だけ出して、続く間は静かに次の `scan_secs` を待つ。戻ったら 1 回だけ知らせる。
 - `inline_wrap` (既定は空): `inline` のとき、子の前に付けるコマンド。Mac は `["/usr/sbin/taskpolicy", "-b"]`。macOS の background の優先度 (CPU・ディスク・ネットワークが後回し) で動かし、子の ffmpeg も引き継ぐ。普段の作業を優先し、遅くなってよい。作るのは 1 本ずつ。
 - `runner = "inline"` と `on_busy = "freeze"` の組み合わせは、凍結に systemd が要るので設定の読み込みで断る (`gate = "none"` なら凍結は使わないので構わない)。
-- 例: `deploy/replay.mac.toml`。YouTube への投稿は R3.3b で足すので、いまは `youtube_token = ""`。
+- 例: `deploy/replay.mac.toml`。YouTube への投稿は 6.8。
 
 ### 6.3 置き方 (Mac)
 
@@ -382,3 +382,44 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/jp.fuga.eq-replay-worker
 
 - 本番の `/api/archive` を 60 時間分 (60 回、1 秒おき) 取って、2026-10-02 17:39 熊本県熊本地方 (震度 3) の 1 本をキューに積み、`taskpolicy -b` で作った。15fps・3784 コマ・動画 252 秒・1280x720、作った時間は 45 秒、mp4 は 10.5MB。60 時間分の取得に約 90 秒。
 - `taskpolicy` は `/usr/sbin/taskpolicy` (`/usr/bin` ではない)。
+
+### 6.8 YouTube への投稿 (v0.27.0、R3.3b)
+
+できた動画は、作る係が自動で YouTube に上げる。方針は 5.3。ここは Mac での使い方と決めたこと。
+
+**初回に一度だけ (人がやる)**
+
+1. Google Cloud で YouTube Data API v3 を有効にし、OAuth クライアント (種類は「デスクトップアプリ」) を作って、JSON を `~/.config/eq-replay/youtube-client.json` に置く (`{"installed": {...}}` の形)。同意画面が「テスト」のままなら、自分のアカウントをテストユーザーに入れる。なお、テストのままだと、リフレッシュトークンは 7 日で切れる。続けて使うなら、同意画面を「本番」にする (範囲は `youtube.upload` だけなので、確認の手続きは要らないが、「未確認のアプリ」の警告は出る)。
+2. 次を実行する。表示された URL をブラウザで開き (macOS では自動で開く)、許可する。
+
+```sh
+~/work/eq-replay/release/eq-server youtube-auth \
+  --client ~/.config/eq-replay/youtube-client.json \
+  --token ~/.config/eq-replay/youtube-token.json
+```
+
+3. `~/.config/eq-replay/youtube-token.json` ができる (モード 0600。リフレッシュトークンと、アクセストークンの控え)。作る係は、次の見直しで自動で使い始める。入れ直しは要らない (`replay.toml` を書き換えたときだけ、`launchctl kickstart -k` で入れ直す)。
+
+**置き場所**
+
+| ファイル | 中身 |
+|---|---|
+| `~/.config/eq-replay/youtube-client.json` | OAuth クライアント (人が置く。読むだけ) |
+| `~/.config/eq-replay/youtube-token.json` | `youtube-auth` が書く。作る係がアクセストークンの控えを書き戻す |
+| `~/work/eq-replay/youtube-state.json` | 今日 (太平洋時間) に上げた本数と、割り当てを使い切ったか |
+| `~/work/eq-replay/queue/<id>.json` | 上げた動画の ID (`youtube_id`)・時刻 (`uploaded_ms`)。状態は `uploaded` |
+
+**動き**
+
+- 公開範囲は既定で非公開 (`youtube_privacy = "private"`)。公開・限定公開にしたいときは、YouTube Studio で動画を開いて、公開範囲を手で変える。設定で `unlisted`・`public` にすることもできるが、出来を見てからにする。
+- 1 日の本数は `youtube_daily_limit` (既定 3)。太平洋時間 (夏時間を考える) の 0 時で区切って数える。日本時間では夏は 16 時、冬は 17 時に切り替わる。`quotaExceeded`・`uploadLimitExceeded` が返ったら、その日はやめる。
+- 通信が失敗したら、1 分・2 分・4 分…(最大 30 分) と間を空けて、最初から上げ直す (途中からの再開はしない)。警告は切れたときの 1 回だけで、続く間は静か。
+- 4xx で断られたら、5 回まで数えて諦める。キューの `error` に理由が残る (mp4 は `done/` に残る)。
+- `invalid_grant` (許可の取り消し・期限切れ) になったら、ログ (`~/work/eq-replay/worker.log`) に `youtube-auth をやり直してください` と出して、上げるのをやめる。もう一度 `youtube-auth` を実行してトークンのファイルが書き換わると、自動で再開する。
+- トークンのファイルが無いあいだは、ログに「youtube-auth を実行してください」と 1 回だけ出して、上げない (動画は作り続ける)。
+- 上げるのは、動画を作っていないときだけ。1 本ずつで、`taskpolicy -b` は子の作る処理にだけ付いている (上げるのは通信が主で、軽い)。
+- `youtube_upload_token = ""` にすると、上げない。
+
+**テスト**: Google との通信は `youtube::api::Api` の後ろにあり、テストは偽物で、タイトルと説明文・チャプターの条件・太平洋時間の日付 (日付変更線と夏時間)・1 日の上限・割り当ての超過・二重に上げないこと・トークンの更新 (成功・`invalid_grant`・401)・PKCE・リダイレクトの読み取り・トークンのファイルのモード 0600 を確かめている。本物の Google には、テストから触らない。
+
+**意図的に空けている箇所**: 本物の HTTP (`youtube::api::Google`) と、同意の手続きの一連の動き (ブラウザ・実際の Google)。壊れても、最初の 1 本のときに表面化する。応答の判断は別の関数に分けてあり、そちらはテストしている。
