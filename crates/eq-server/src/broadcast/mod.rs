@@ -11,7 +11,7 @@ mod chrome;
 mod encoder;
 mod ffmpeg;
 mod mixer;
-mod native;
+pub(crate) mod native;
 mod psi;
 mod record;
 mod replay;

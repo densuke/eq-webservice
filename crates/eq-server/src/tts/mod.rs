@@ -7,6 +7,7 @@ pub mod google;
 pub mod http;
 pub mod phrase;
 pub mod prewarm;
+pub mod priors;
 pub mod wav;
 
 use std::path::PathBuf;

@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::extract::{Path, State};
+use axum::extract::{DefaultBodyLimit, Path, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -13,9 +13,10 @@ use serde::Deserialize;
 
 use super::cache::{Cache, TtsError};
 use super::google::Synth;
+use super::priors::priors_of;
 use super::{phrase, wav};
 use crate::hub::Hub;
-use crate::quake::model::EventBody;
+use crate::quake::model::{Event, EventBody};
 
 const MAX_TEXT_CHARS: usize = 500;
 
@@ -29,6 +30,10 @@ pub fn router<S: Synth>(hub: Arc<Hub>, cache: Option<Arc<Cache<S>>>, token: Opti
     Router::new()
         .route("/api/tts/event/{id}", get(event::<S>))
         .route("/api/tts", post(custom::<S>))
+        .route(
+            "/api/tts/announce",
+            post(announce::<S>).layer(DefaultBodyLimit::max(1 << 20)),
+        )
         .with_state(Arc::new(AppState { hub, cache, token }))
 }
 
@@ -47,7 +52,13 @@ async fn event<S: Synth>(State(st): State<Arc<AppState<S>>>, Path(id): Path<Stri
     let Some(ev) = st.hub.get(&id) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    let segs = phrase::segments(&ev);
+    // 続報の差分読み上げ用に、知っている報すべてから先行する報を探す
+    let mut events: Vec<Event> = st.hub.snapshot().iter().map(|e| (**e).clone()).collect();
+    if !events.iter().any(|e| e.id == ev.id) {
+        events.push((*ev).clone());
+    }
+    let priors = priors_of(&ev, &events);
+    let segs = phrase::announce_segments(&ev, &priors);
     if segs.is_empty() {
         return StatusCode::NOT_FOUND.into_response();
     }
@@ -65,6 +76,42 @@ async fn event<S: Synth>(State(st): State<Arc<AppState<S>>>, Path(id): Path<Stri
             StatusCode::SERVICE_UNAVAILABLE.into_response()
         }
     }
+}
+
+/// 履歴の再生・デモ用。キャッシュ済みの部品だけで組み立てる (docs/tts.md S10)
+async fn announce<S: Synth>(State(st): State<Arc<AppState<S>>>, body: String) -> Response {
+    let Some(cache) = st.cache.as_ref() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let Ok(req) = serde_json::from_str::<AnnounceReq>(&body) else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+    if req.priors.len() > MAX_PRIORS {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    // 位置で順序を決められるよう、対象を末尾に置く
+    let AnnounceReq { event, mut priors } = req;
+    priors.push(event.clone());
+    let p = priors_of(&event, &priors);
+    let segs = phrase::announce_segments(&event, &p);
+    if segs.is_empty() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    match cache.announce_cached(&segs).await {
+        Some(bytes) => wav_response(bytes, Some("no-store")),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+/// 履歴の再生に添える先行報の上限
+const MAX_PRIORS: usize = 300;
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AnnounceReq {
+    event: Event,
+    #[serde(default)]
+    priors: Vec<Event>,
 }
 
 #[derive(Deserialize)]
@@ -141,11 +188,20 @@ mod tests {
     use axum::http::{header, Request, StatusCode};
     use tower::ServiceExt;
 
-    /// 常に 10 サンプルを返す偽の合成器
-    struct Fake;
+    /// 文字数と同じ長さのサンプルを返し、頼まれた文を記録する偽の合成器
+    #[derive(Clone, Default)]
+    struct Fake {
+        texts: Arc<std::sync::Mutex<Vec<String>>>,
+    }
+    impl Fake {
+        fn texts(&self) -> Vec<String> {
+            self.texts.lock().unwrap().clone()
+        }
+    }
     impl Synth for Fake {
-        async fn synth(&self, _text: &str, _voice: &str) -> anyhow::Result<Vec<i16>> {
-            Ok(vec![100i16; 10])
+        async fn synth(&self, text: &str, _voice: &str) -> anyhow::Result<Vec<i16>> {
+            self.texts.lock().unwrap().push(text.to_string());
+            Ok(vec![100i16; text.chars().count()])
         }
     }
 
@@ -155,21 +211,24 @@ mod tests {
         _dir: tempfile::TempDir,
         hub: Arc<Hub>,
         cache: Arc<Cache<Fake>>,
+        fake: Fake,
     }
 
     fn env(limit: usize) -> Env {
         let dir = tempfile::tempdir().unwrap();
         let budget = Budget::load(dir.path().join("usage.json"), limit);
+        let fake = Fake::default();
         let cache = Arc::new(Cache::new(
             dir.path().to_path_buf(),
             "ja-JP-Neural2-B".into(),
-            Fake,
+            fake.clone(),
             budget,
         ));
         Env {
             _dir: dir,
             hub: Hub::new(10),
             cache,
+            fake,
         }
     }
 
@@ -406,5 +465,139 @@ mod tests {
         let e = env(0);
         let (parts, _) = post(app(&e), Some(&bearer()), serde_json::json!({"text": "こんにちは"})).await;
         assert_eq!(parts.status, StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    // ---- 続報 (GET) と POST /api/tts/announce ----
+
+    const T0: i64 = 1_700_000_000_000;
+
+    /// 発生時刻と県別最大震度を指定できる地震情報
+    fn quake_with(t: QuakeInfoType, prefs: &[(&str, Scale)], max: Scale) -> EventBody {
+        let EventBody::Quake(mut q) = quake_body(t) else {
+            unreachable!()
+        };
+        q.origin_time_ms = Some(T0);
+        q.max_scale = max;
+        q.pref_max = prefs
+            .iter()
+            .map(|(p, s)| crate::quake::model::PrefScale {
+                pref: (*p).into(),
+                scale: *s,
+            })
+            .collect();
+        EventBody::Quake(q)
+    }
+
+    fn prior_body() -> EventBody {
+        quake_with(
+            QuakeInfoType::ScalePrompt,
+            &[("石川県", Scale::S6_UPPER)],
+            Scale::S6_UPPER,
+        )
+    }
+
+    fn followup_body() -> EventBody {
+        quake_with(QuakeInfoType::ScalePrompt, &[("石川県", Scale::S7)], Scale::S7)
+    }
+
+    const FOLLOW: &str = "続報。";
+    const ISHIKAWA7: &str = "石川県で震度7を観測しました。";
+
+    async fn post_announce(app: Router, json: serde_json::Value) -> (axum::http::response::Parts, Vec<u8>) {
+        let req = Request::post("/api/tts/announce")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json.to_string()))
+            .unwrap();
+        call(app, req).await
+    }
+
+    fn announce_json(ev: Event, priors: Vec<Event>) -> serde_json::Value {
+        serde_json::json!({"event": ev, "priors": priors})
+    }
+
+    #[tokio::test]
+    async fn get_followup_quake_reads_only_the_difference() {
+        let e = env(1_000_000);
+        e.hub.publish(event("p1", prior_body()));
+        e.hub.publish(event("f1", followup_body()));
+        let (parts, body) = get(app(&e), "/api/tts/event/f1").await;
+        assert_wav(&parts, &body);
+        let texts = e.fake.texts();
+        assert!(texts.contains(&FOLLOW.to_string()), "{texts:?}");
+        assert!(texts.contains(&ISHIKAWA7.to_string()), "{texts:?}");
+        assert!(!texts.contains(&"地震情報。".to_string()), "{texts:?}");
+        assert!(!texts.contains(&"震度速報。".to_string()), "{texts:?}");
+    }
+
+    #[tokio::test]
+    async fn get_followup_identical_to_prior_is_404() {
+        let e = env(1_000_000);
+        e.hub.publish(event("p1", prior_body()));
+        e.hub.publish(event("f1", prior_body()));
+        let (parts, _) = get(app(&e), "/api/tts/event/f1").await;
+        assert_eq!(parts.status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn announce_without_cached_segments_is_404_and_does_not_synth() {
+        let e = env(1_000_000);
+        let j = announce_json(event("f1", followup_body()), vec![event("p1", prior_body())]);
+        let (parts, _) = post_announce(app(&e), j).await;
+        assert_eq!(parts.status, StatusCode::NOT_FOUND);
+        assert_eq!(e.fake.texts().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn announce_with_cached_segments_returns_no_store_wav_without_synth() {
+        let e = env(1_000_000);
+        e.cache.segment(FOLLOW, None).await.unwrap();
+        e.cache.segment(ISHIKAWA7, None).await.unwrap();
+        let before = e.fake.texts().len();
+        let j = announce_json(event("f1", followup_body()), vec![event("p1", prior_body())]);
+        let (parts, body) = post_announce(app(&e), j).await;
+        assert_wav(&parts, &body);
+        assert_eq!(parts.headers[header::CACHE_CONTROL], "no-store");
+        assert_eq!(e.fake.texts().len(), before);
+    }
+
+    #[tokio::test]
+    async fn announce_appends_event_to_priors_when_received_at_is_zero() {
+        let e = env(1_000_000);
+        e.cache.segment(FOLLOW, None).await.unwrap();
+        e.cache.segment(ISHIKAWA7, None).await.unwrap();
+        // デモの報は received_at_ms がすべて 0。位置 (priors の後ろに event を足した並び) で続報を判定する
+        let j = announce_json(event("f1", followup_body()), vec![event("p1", prior_body())]);
+        let (_, body) = post_announce(app(&e), j).await;
+        let want = FOLLOW.chars().count() + ISHIKAWA7.chars().count() + 6615;
+        assert_eq!(wav::parse(&body).unwrap().len(), want);
+    }
+
+    #[tokio::test]
+    async fn announce_with_301_priors_is_400() {
+        let e = env(1_000_000);
+        let priors: Vec<Event> = (0..301).map(|i| event(&format!("p{i}"), prior_body())).collect();
+        let (parts, _) = post_announce(app(&e), announce_json(event("f1", followup_body()), priors)).await;
+        assert_eq!(parts.status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn announce_body_over_1mib_is_413() {
+        let e = env(1_000_000);
+        let EventBody::Quake(mut q) = followup_body() else {
+            unreachable!()
+        };
+        q.comment = "x".repeat(3 << 19);
+        let j = announce_json(event("f1", EventBody::Quake(q)), vec![]);
+        let (parts, _) = post_announce(app(&e), j).await;
+        assert_eq!(parts.status, StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[tokio::test]
+    async fn announce_without_cache_is_404() {
+        let e = env(1_000_000);
+        let app = router::<Fake>(e.hub.clone(), None, Some(TOKEN.into()));
+        let j = announce_json(event("f1", followup_body()), vec![event("p1", prior_body())]);
+        let (parts, _) = post_announce(app, j).await;
+        assert_eq!(parts.status, StatusCode::NOT_FOUND);
     }
 }
