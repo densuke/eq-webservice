@@ -14,6 +14,8 @@ mod plugins;
 mod quake;
 mod source;
 mod telop;
+// T6 で main から使うまでの間だけ (docs/tts.md)
+#[allow(dead_code)]
 mod tts;
 mod weather;
 
