@@ -71,7 +71,7 @@ if (broadcasting) {
   try {
     localStorage.setItem("eq-sound", "on");
     const s = JSON.parse(localStorage.getItem("eq-settings") ?? "{}");
-    localStorage.setItem("eq-settings", JSON.stringify({ ...s, bgm: true, voice: true }));
+    localStorage.setItem("eq-settings", JSON.stringify({ ...s, bgm: true, voiceV2: true }));
   } catch {
     // 保存できなければ音は鳴らないが、表示はできる
   }

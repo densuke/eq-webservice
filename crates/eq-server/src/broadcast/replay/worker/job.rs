@@ -57,6 +57,9 @@ pub fn replay_video_args(cfg: &WorkerConfig, job: &Job, out: &Path, chapters: &P
         s("--ffmpeg"),
         cfg.ffmpeg.clone(),
     ]);
+    if !cfg.voice_server.is_empty() {
+        a.extend([s("--voice"), cfg.voice_server.clone()]);
+    }
     for q in &job.quakes {
         a.extend([s("--quake"), quake_arg(q)]);
     }
@@ -223,6 +226,23 @@ mod tests {
         assert!(has(&url, ["--archive", "https://eq.fuga.jp"]) && !url.contains(&"--events".to_string()));
         let file = args("/srv/e.jsonl");
         assert!(has(&file, ["--events", "/srv/e.jsonl"]) && !file.contains(&"--archive".to_string()));
+    }
+
+    #[test]
+    fn voice_is_passed_only_when_a_server_is_configured() {
+        let j = job();
+        let args = |voice_server: &str| {
+            let cfg = WorkerConfig {
+                voice_server: voice_server.into(),
+                ..Default::default()
+            };
+            replay_video_args(&cfg, &j, Path::new("/o.mp4"), Path::new("/c.json"))
+        };
+        let has = |a: &[String], pair: [&str; 2]| a.windows(2).any(|w| w == pair);
+        assert!(!args("").contains(&"--voice".to_string()));
+        assert!(has(&args("https://eq.fuga.jp"), ["--voice", "https://eq.fuga.jp"]));
+        let parsed: WorkerConfig = toml::from_str("voice_server = \"https://eq.fuga.jp\"").unwrap();
+        assert_eq!(parsed.voice_server, "https://eq.fuga.jp");
     }
 
     #[test]

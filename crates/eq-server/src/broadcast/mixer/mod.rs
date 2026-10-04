@@ -110,6 +110,11 @@ impl AudioMixer {
         }
     }
 
+    /// 警戒音 1 回の長さ (フレーム数)。再現動画が、声を警戒音のあとに置くのに使う
+    pub fn alert_frames(level: AlertLevel) -> usize {
+        synth::alert(level).len() / 2
+    }
+
     /// 声 (モノ) を待ち行列に積む。ステレオ (L=R) に広げる。待ちは 4 本まで (あふれたら古いものを捨てる)
     pub fn push_voice(&mut self, mono: Vec<i16>) {
         let pcm = mono.into_iter().flat_map(|s| [s, s]).collect();

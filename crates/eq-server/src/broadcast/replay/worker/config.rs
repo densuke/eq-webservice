@@ -139,6 +139,8 @@ pub struct WorkerConfig {
     pub map_dir: String,
     pub font: String,
     pub ffmpeg: String,
+    /// 読み上げをもらうサーバの URL (例 `https://eq.fuga.jp`)。空なら読み上げを入れない (docs/replay-video.md 7 章)
+    pub voice_server: String,
 
     // 外のコマンド (Linux 以外で、代わりのものに差し替えて確かめるため)
     pub systemd_run: String,
@@ -190,6 +192,7 @@ impl Default for WorkerConfig {
             map_dir: b.map_dir,
             font: b.font,
             ffmpeg: b.ffmpeg,
+            voice_server: String::new(),
             systemd_run: "systemd-run".into(),
             systemctl: "systemctl".into(),
         }

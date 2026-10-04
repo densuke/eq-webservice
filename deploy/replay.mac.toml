@@ -33,6 +33,8 @@ fps = 15
 map_dir = "~/work/eq-replay/release/web/dist"
 font = "/System/Library/Fonts/ヒラギノ角ゴシック W4.ttc"
 ffmpeg = "ffmpeg"
+# 読み上げ (docs/replay-video.md 7 章)。サーバの声のキャッシュから警戒音のあとに入れる。Google は呼ばない。空なら入れない
+voice_server = "https://eq.fuga.jp"
 
 # YouTube の健全性は見ない (Mac には e2 の認証情報が無い。gate = "none")
 youtube_token = ""

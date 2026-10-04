@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { shownInList, countdown, countdownWorthShowing, DEFAULTS, estimateIntensity, intensityToScale, listOpen, nearestArea, normalizeSettings, notifyScale, shouldNotify } from "./personal.ts";
+import { shownInList, countdown, countdownWorthShowing, DEFAULTS, estimateIntensity, intensityToScale, listOpen, nearestArea, normalizeSettings, notifyScale, settingsJson, shouldNotify } from "./personal.ts";
 import type { Station } from "./detail.ts";
 
 const stations = new Map<string, Station>([
@@ -110,4 +110,13 @@ test("the weather badge setting keeps 'off' (-1) and falls back to the default f
   assert.equal(normalizeSettings({ weatherFlipSec: -1 }).weatherFlipSec, -1);
   assert.equal(normalizeSettings({ weatherFlipSec: 0 }).weatherFlipSec, 0);
   assert.equal(normalizeSettings({ weatherFlipSec: 7 }).weatherFlipSec, DEFAULTS.weatherFlipSec);
+});
+
+test("voice reading is on by default; the old saved voice key is ignored, voiceV2 wins", () => {
+  assert.equal(DEFAULTS.voice, true);
+  assert.equal(normalizeSettings({ voice: false }).voice, true);
+  assert.equal(normalizeSettings({ voiceV2: false }).voice, false);
+  assert.equal(normalizeSettings({ voice: false, voiceV2: true }).voice, true);
+  assert.equal(normalizeSettings(JSON.parse(settingsJson({ ...DEFAULTS, voice: false }))).voice, false);
+  assert.equal("voice" in JSON.parse(settingsJson(DEFAULTS)), false);
 });

@@ -9,6 +9,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::{Child, Command};
 
 use super::plan::{duration_ms, Frame, Plan};
+use super::voice::{self, Clip};
 use super::Options;
 use crate::broadcast::mixer::{AudioMixer, Notice, RATE};
 use crate::broadcast::native::{Icons, Input, Stepper};
@@ -118,13 +119,20 @@ async fn finish(mut child: Child, name: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// 筋書きの音 (警戒音・揺れの始まり・刻み) だけを混ぜて、AAC のファイルにする
-pub async fn encode_audio(o: &Options, plan: &Plan, audio: &Path, throttle: &mut Throttle) -> anyhow::Result<()> {
+/// 筋書きの音 (警戒音・揺れの始まり・刻み) と読み上げの声を混ぜて、AAC のファイルにする
+pub async fn encode_audio(
+    o: &Options,
+    plan: &Plan,
+    voices: &[Clip],
+    audio: &Path,
+    throttle: &mut Throttle,
+) -> anyhow::Result<()> {
     let mut child = spawn(&o.ffmpeg, audio_args(audio))?;
     let mut stdin = child.stdin.take().context("ffmpeg stdin")?;
     let mut mixer = AudioMixer::new(|| None);
     let total = duration_ms(plan.frames.len(), o.fps) * u64::from(RATE) / 1000;
     let mut sounds = plan.sounds.iter().peekable();
+    let mut clips = voices.iter().peekable();
     let mut done = 0u64;
     while done < total {
         throttle.wait().await?;
@@ -132,6 +140,7 @@ pub async fn encode_audio(o: &Options, plan: &Plan, audio: &Path, throttle: &mut
         while let Some(s) = sounds.next_if(|s| s.video_ms <= at_ms) {
             mixer.apply(Notice::Alert { level: s.level });
         }
+        voice::push_due(&mut mixer, &mut clips, at_ms);
         let n = CHUNK_FRAMES.min((total - done) as usize);
         let bytes: Vec<u8> = mixer.render(n).into_iter().flat_map(i16::to_le_bytes).collect();
         stdin.write_all(&bytes).await.context("writing audio to ffmpeg")?;
