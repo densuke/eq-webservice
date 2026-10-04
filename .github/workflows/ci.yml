@@ -48,6 +48,9 @@ jobs:
             target: x86_64-unknown-linux-gnu
           - os: macos-latest # Apple Silicon (arm64)
             target: aarch64-apple-darwin
+          # Raspberry Pi (64 ビットの Raspberry Pi OS)。Bookworm の glibc 2.36 で動くよう 22.04 (glibc 2.35) で作る
+          - os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
