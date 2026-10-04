@@ -10,6 +10,7 @@ use serde_json::{json, Value};
 use super::token::{parse_token_response, AuthError, Client, Fresh};
 
 const INSERT_URL: &str = "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status";
+const PLAYLIST_ITEMS_URL: &str = "https://www.googleapis.com/youtube/v3/playlistItems?part=snippet";
 
 /// 1 本の動画の登録内容
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +34,16 @@ pub fn insert_body(m: &Insert) -> Value {
             "privacyStatus": m.privacy,
             // 実写の映像ではなく、記録からの再現。子ども向けではない
             "selfDeclaredMadeForKids": false,
+        },
+    })
+}
+
+/// playlistItems.insert の本文 (再生リストの最後に足す)
+pub fn playlist_item_body(playlist_id: &str, video_id: &str) -> Value {
+    json!({
+        "snippet": {
+            "playlistId": playlist_id,
+            "resourceId": { "kind": "youtube#video", "videoId": video_id },
         },
     })
 }
@@ -80,6 +91,8 @@ pub trait Api {
     async fn refresh(&self, client: &Client, refresh_token: &str, now_ms: u64) -> Result<Fresh, AuthError>;
     /// 動画を上げて、動画の ID を返す
     async fn upload(&self, access_token: &str, meta: &Insert, video: &Path) -> Result<String, UploadError>;
+    /// 上げた動画を再生リストに足す
+    async fn add_to_playlist(&self, access_token: &str, playlist_id: &str, video_id: &str) -> Result<(), UploadError>;
 }
 
 /// 本物の Google
@@ -201,6 +214,23 @@ impl Api for Google {
             .and_then(|v| v.get("id").and_then(Value::as_str).map(str::to_string))
             .ok_or_else(|| UploadError::Transient("応答に動画の ID がありません".into()))
     }
+
+    async fn add_to_playlist(&self, access_token: &str, playlist_id: &str, video_id: &str) -> Result<(), UploadError> {
+        let res = self
+            .http
+            .post(PLAYLIST_ITEMS_URL)
+            .bearer_auth(access_token)
+            .timeout(Duration::from_secs(30))
+            .json(&playlist_item_body(playlist_id, video_id))
+            .send()
+            .await
+            .map_err(transient)?;
+        let status = res.status().as_u16();
+        if (200..300).contains(&status) {
+            return Ok(());
+        }
+        Err(classify(status, &res.text().await.unwrap_or_default()))
+    }
 }
 
 #[cfg(test)]
@@ -247,5 +277,13 @@ mod tests {
         assert_eq!(b["snippet"]["title"], "T");
         assert_eq!(b["snippet"]["categoryId"], "25");
         assert_eq!(b["status"]["privacyStatus"], "private");
+    }
+
+    #[test]
+    fn the_playlist_item_body_points_at_the_video() {
+        let b = playlist_item_body("PLx", "VID");
+        assert_eq!(b["snippet"]["playlistId"], "PLx");
+        assert_eq!(b["snippet"]["resourceId"]["kind"], "youtube#video");
+        assert_eq!(b["snippet"]["resourceId"]["videoId"], "VID");
     }
 }
