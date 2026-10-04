@@ -50,6 +50,15 @@ pub struct Job {
     /// 各地震の始まりの、動画の中の時刻 (説明文のチャプターに使う)
     #[serde(default)]
     pub chapters: Vec<Chapter>,
+    /// 上げた YouTube の動画の ID (あれば二重に上げない)。古いファイルには無い
+    #[serde(default)]
+    pub youtube_id: Option<String>,
+    /// 上げた時刻 (epoch ミリ秒)
+    #[serde(default)]
+    pub uploaded_ms: Option<u64>,
+    /// 上げるのを断られた回数 (4xx。通信の失敗は数えない)
+    #[serde(default)]
+    pub upload_failures: u32,
 }
 
 impl Job {
@@ -68,6 +77,9 @@ impl Job {
             error: None,
             video: None,
             chapters: Vec::new(),
+            youtube_id: None,
+            uploaded_ms: None,
+            upload_failures: 0,
         }
     }
 }
@@ -135,6 +147,39 @@ pub fn next_job(jobs: &[Job], now_ms: u64) -> Option<&Job> {
     jobs.iter()
         .filter(|j| j.state == State::Waiting && j.not_before_ms <= now_ms)
         .min_by_key(|j| (j.from_ms, j.created_ms))
+}
+
+/// 上げる回数の上限 (断られた回数がこれに達したら、諦める)
+pub const MAX_UPLOAD_FAILURES: u32 = 5;
+
+/// 次に上げるもの: できていて、まだ上げていなくて、断られ続けていない中で、いちばん古いもの
+pub fn next_upload(jobs: &[Job]) -> Option<&Job> {
+    jobs.iter()
+        .filter(|j| {
+            j.state == State::Done
+                && j.video.is_some()
+                && j.youtube_id.is_none()
+                && j.upload_failures < MAX_UPLOAD_FAILURES
+        })
+        .min_by_key(|j| (j.from_ms, j.created_ms))
+}
+
+/// 上げた (動画の ID と時刻を残す。これで二重に上げない)
+pub fn uploaded(mut job: Job, youtube_id: String, now_ms: u64) -> Job {
+    job.state = State::Uploaded;
+    job.youtube_id = Some(youtube_id);
+    job.uploaded_ms = Some(now_ms);
+    job.error = None;
+    job.updated_ms = now_ms;
+    job
+}
+
+/// 上げるのを断られた (同じ内容では通らないので、回数を数えて、上限で諦める)
+pub fn upload_rejected(mut job: Job, why: &str, now_ms: u64) -> Job {
+    job.upload_failures += 1;
+    job.error = Some(format!("YouTube に上げられません: {why}"));
+    job.updated_ms = now_ms;
+    job
 }
 
 /// まとまりの地震のどれかが、もうキューにあるか (同じ地震を二重に積まない。記録を見る範囲の端で、まとまりが欠けて見えても同じ)
@@ -215,12 +260,71 @@ mod tests {
             warning: false,
             name: "x".into(),
             last_recv_ms: origin_ms as u64 + 60_000,
+            magnitude: None,
+            depth_km: None,
         }
     }
 
     fn job(origin_ms: i64, at: (f64, f64)) -> Job {
         let rules = Rules::from(&WorkerConfig::default());
         Job::new(&groups(&[quake(origin_ms, at)], &rules)[0], 1_000)
+    }
+
+    fn done_job(origin_ms: i64) -> Job {
+        finish(
+            job(origin_ms, TOKYO),
+            Outcome::Made {
+                video: "a.mp4".into(),
+                chapters: vec![],
+            },
+            9,
+            &POLICY,
+        )
+    }
+
+    #[test]
+    fn only_a_made_unuploaded_video_is_next_to_upload_and_never_twice() {
+        let waiting = job(T0, TOKYO);
+        let older = done_job(T0 - 1_000_000);
+        let newer = done_job(T0);
+        assert_eq!(next_upload(std::slice::from_ref(&waiting)).map(|j| j.id.clone()), None);
+        let jobs = [newer.clone(), waiting, older.clone()];
+        assert_eq!(next_upload(&jobs).map(|j| j.id.clone()), Some(older.id.clone()));
+        // 上げたら、もう選ばれない (二重に上げない)。ID と時刻が残る
+        let up = uploaded(older, "VID1".into(), 77);
+        assert_eq!(
+            (up.state, up.youtube_id.as_deref(), up.uploaded_ms),
+            (State::Uploaded, Some("VID1"), Some(77))
+        );
+        let jobs = [newer.clone(), up];
+        assert_eq!(next_upload(&jobs).map(|j| j.id.clone()), Some(newer.id));
+    }
+
+    #[test]
+    fn a_repeatedly_rejected_upload_is_given_up() {
+        let mut j = done_job(T0);
+        for i in 1..=MAX_UPLOAD_FAILURES {
+            assert!(next_upload(std::slice::from_ref(&j)).is_some());
+            j = upload_rejected(j, "HTTP 400", i as u64);
+            assert_eq!(j.upload_failures, i);
+        }
+        assert!(next_upload(std::slice::from_ref(&j)).is_none());
+        assert!(j.error.as_deref().unwrap().contains("HTTP 400"));
+        assert_eq!(j.state, State::Done, "動画は done/ に残る");
+    }
+
+    #[test]
+    fn an_old_queue_file_without_the_upload_fields_still_parses() {
+        let j = done_job(T0);
+        let mut v = serde_json::to_value(&j).unwrap();
+        for k in ["youtube_id", "uploaded_ms", "upload_failures"] {
+            v.as_object_mut().unwrap().remove(k);
+        }
+        let back: Job = serde_json::from_value(v).unwrap();
+        assert_eq!(
+            (back.youtube_id, back.uploaded_ms, back.upload_failures),
+            (None, None, 0)
+        );
     }
 
     #[test]

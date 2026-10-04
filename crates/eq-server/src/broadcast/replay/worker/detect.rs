@@ -51,6 +51,11 @@ pub struct Quake {
     pub name: String,
     /// 最後の報が届いた時刻
     pub last_recv_ms: u64,
+    /// マグニチュードと深さ (km)。動画の説明文に使う。古いキューのファイルには無い
+    #[serde(default)]
+    pub magnitude: Option<f64>,
+    #[serde(default)]
+    pub depth_km: Option<i32>,
 }
 
 impl Quake {
@@ -78,6 +83,8 @@ pub fn quakes(events: &[Event], rules: &Rules) -> Vec<Quake> {
                 warning: false,
                 name: q.hypocenter.as_ref().map(|h| h.name.clone()).unwrap_or_default(),
                 last_recv_ms: q.updated_ms,
+                magnitude: q.hypocenter.as_ref().and_then(|h| h.magnitude),
+                depth_km: q.hypocenter.as_ref().and_then(|h| h.depth_km),
             })
         })
         .collect();
@@ -96,6 +103,9 @@ pub fn quakes(events: &[Event], rules: &Rules) -> Vec<Quake> {
                 if f.name.is_empty() {
                     f.name = name;
                 }
+                let h = e.hypocenter.as_ref();
+                f.magnitude = f.magnitude.or(h.and_then(|h| h.magnitude));
+                f.depth_km = f.depth_km.or(h.and_then(|h| h.depth_km));
             }
             None => found.push(Quake {
                 origin_ms,
@@ -105,6 +115,8 @@ pub fn quakes(events: &[Event], rules: &Rules) -> Vec<Quake> {
                 warning: e.warning,
                 name,
                 last_recv_ms: e.received_ms,
+                magnitude: e.hypocenter.as_ref().and_then(|h| h.magnitude),
+                depth_km: e.hypocenter.as_ref().and_then(|h| h.depth_km),
             }),
         }
     }
@@ -216,6 +228,8 @@ mod tests {
             warning: false,
             name: "x".into(),
             last_recv_ms,
+            magnitude: None,
+            depth_km: None,
         }
     }
 

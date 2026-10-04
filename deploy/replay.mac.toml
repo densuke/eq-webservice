@@ -34,5 +34,20 @@ map_dir = "~/work/eq-replay/release/web/dist"
 font = "/System/Library/Fonts/ヒラギノ角ゴシック W4.ttc"
 ffmpeg = "ffmpeg"
 
-# YouTube への投稿は R3.3b で足す。Mac には認証情報が無いので、健全性は見ない
+# YouTube の健全性は見ない (Mac には e2 の認証情報が無い。gate = "none")
 youtube_token = ""
+
+# YouTube への投稿 (docs/replay-video.md 6.8)。できた動画を 1 本ずつ上げる。
+# トークンのファイルがまだ無いあいだは、ログに「youtube-auth を実行してください」と 1 回出して、上げない。
+# 先に一度だけ、次を実行する (Google Cloud の OAuth クライアント (デスクトップアプリ) の JSON を置いておく):
+#   eq-server youtube-auth --client ~/.config/eq-replay/youtube-client.json --token ~/.config/eq-replay/youtube-token.json
+youtube_upload_token = "~/.config/eq-replay/youtube-token.json"
+youtube_client = "~/.config/eq-replay/youtube-client.json"
+# 公開範囲。最初は非公開。出来を見て、公開・限定公開への変更は YouTube Studio で手でやる
+youtube_privacy = "private"
+# カテゴリ (25 = ニュースと政治)
+youtube_category = "25"
+# 1 日 (太平洋時間の 0 時で区切る) に上げる本数の上限
+youtube_daily_limit = 3
+# 上げたあと done/ の mp4 を消すか
+youtube_delete_after_upload = false
