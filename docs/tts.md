@@ -291,6 +291,7 @@ P2P地震情報の利用者が「揺れた」と報告した集計 (Userquake) �
 | 配信 mixer (S7) | `crates/eq-server/src/broadcast/mixer/mod.rs` |
 | native 配信の判定 | `crates/eq-server/src/broadcast/native/model.rs` (`live_alert`) |
 | ブラウザ | `web/src/voice.ts` |
+| 地震感知情報の判断 (S12) | `crates/eq-server/src/quake/userquake.rs` (地域コードの県は `userquake_prefs.txt`)、ブラウザは `web/src/userquake.ts`、native は `broadcast/native/mod.rs` の `sound_for` |
 
 ## 無料枠の見積もり
 

@@ -40,7 +40,9 @@ use tokio_tungstenite::tungstenite::Message;
 use super::record::Shown;
 use super::status::Feed;
 use super::BroadcastConfig;
-use crate::quake::Event;
+use crate::broadcast::mixer::AlertLevel;
+use crate::quake::userquake::Gate;
+use crate::quake::{Event, EventBody};
 use data::{CityWeather, ServerMessage, Warnings};
 use draw::Renderer;
 use notice::{Banners, Notices};
@@ -308,6 +310,7 @@ async fn ws_once(
 ) -> anyhow::Result<()> {
     // この接続で届いた報 (到着順)。hello の分は文脈だけで、音は鳴らさない
     let mut live: Vec<Event> = Vec::new();
+    let mut gate = Gate::default();
     let (mut ws, _) = tokio_tungstenite::connect_async(url).await.context("connect")?;
     change(st, |s| s.connected = true);
     while let Some(msg) = ws.next().await {
@@ -315,7 +318,7 @@ async fn ws_once(
             Message::Text(t) => match serde_json::from_str::<ServerMessage>(t.as_str()) {
                 Ok(m) => {
                     if let Some(n) = notices {
-                        sound_for(&mut live, &m, base, voice, n);
+                        sound_for(&mut live, &mut gate, &m, base, voice, n);
                     }
                     change(st, |s| apply(s, m))
                 }
@@ -333,7 +336,14 @@ const MAX_LIVE: usize = 200;
 
 /// 届いた報を覚え、新しい報 (event) なら警戒音と読み上げを mixer に知らせる (hello は覚えるだけ)。
 /// voice が false なら読み上げは知らせない (サーバの tts が無効のとき。BroadcastConfig.voice)
-fn sound_for(live: &mut Vec<Event>, m: &ServerMessage, base: &str, voice: bool, notices: &UnboundedSender<String>) {
+fn sound_for(
+    live: &mut Vec<Event>,
+    gate: &mut Gate,
+    m: &ServerMessage,
+    base: &str,
+    voice: bool,
+    notices: &UnboundedSender<String>,
+) {
     let (is_new, now_ms, values) = match m {
         ServerMessage::Hello { server_time_ms, events } => (false, *server_time_ms, events.clone()),
         ServerMessage::Event { server_time_ms, event } => (true, *server_time_ms, vec![event.clone()]),
@@ -349,6 +359,15 @@ fn sound_for(live: &mut Vec<Event>, m: &ServerMessage, base: &str, voice: bool, 
         let Some((last, before)) = live.split_last() else {
             continue;
         };
+        // 地震感知情報は、信頼できる評価を 1 回だけ、案内音のあとに読む (voice のときだけ。docs/tts.md S12)
+        if let EventBody::Userquake(u) = &last.body {
+            let official = official_received_ms(before);
+            if voice && gate.should_read(u, now_ms as i64, &official) {
+                let _ = notices.send(model::alert_notice(AlertLevel::Info));
+                let _ = notices.send(model::voice_notice(&model::voice_url(base, &last.id)));
+            }
+            continue;
+        }
         if let Some((level, id)) = model::live_alert(live, now_ms) {
             let _ = notices.send(model::alert_notice(level));
             if voice {
@@ -358,6 +377,15 @@ fn sound_for(live: &mut Vec<Event>, m: &ServerMessage, base: &str, voice: bool, 
             let _ = notices.send(model::voice_notice(&model::voice_url(base, &last.id)));
         }
     }
+}
+
+/// 届いた気象庁の地震の情報 (緊急地震速報・地震情報) の受信時刻
+fn official_received_ms(events: &[Event]) -> Vec<i64> {
+    events
+        .iter()
+        .filter(|e| matches!(e.body, EventBody::Eew(_) | EventBody::Quake(_)))
+        .map(|e| e.received_at_ms as i64)
+        .collect()
 }
 
 /// メッセージを状態に反映する (時計のずれを覚え、地震情報を id で重複なく足す)

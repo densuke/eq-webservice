@@ -20,7 +20,8 @@ pub fn prewarm_segments() -> Vec<String> {
             crate::quake::area::PREFS
                 .iter()
                 .map(|p| format!("{p}などで揺れを観測しました。")),
-        );
+        )
+        .chain(super::phrase::userquake_pref_segments());
     let mut seen = HashSet::new();
     all.filter(|s| seen.insert(s.clone())).collect()
 }
@@ -173,6 +174,19 @@ mod tests {
     fn exactly_47_prefecture_segments() {
         let n = prewarm_segments().iter().filter(|s| s.ends_with(SUFFIX)).count();
         assert_eq!(n, 47);
+    }
+
+    #[test]
+    fn contains_userquake_phrases() {
+        let v = prewarm_segments();
+        for s in [
+            "揺れを感じたという報告が集まっています。",
+            "茨城県で、",
+            "茨城県、",
+            "千葉県などで、",
+        ] {
+            assert!(v.iter().any(|x| x == s), "missing: {s}");
+        }
     }
 
     #[test]

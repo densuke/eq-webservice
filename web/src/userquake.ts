@@ -26,6 +26,33 @@ export function userquakeShown(u: UserquakeEvent | null, now: number, officialAt
   return !officialAt.some((t) => t >= started - OFFICIAL_LEAD_MS);
 }
 
+// 読み上げの規則。サーバ (crates/eq-server/src/quake/userquake.rs) と揃える。docs/tts.md S12
+/** 評価全体の信頼度の下限。P2P地震情報 Beta3 の表示される水準 (レベル1〜4) は 0.96774〜0.98052、0 は非表示 */
+export const USERQUAKE_MIN_CONFIDENCE = 0.96;
+/** 読み上げの間隔の下限 */
+export const USERQUAKE_COOLDOWN_MS = 10 * 60_000;
+
+/** 前に読んだ揺れ (started_at) と、そのとき */
+export interface UserquakeRead {
+  startedAt: string;
+  at: number;
+}
+
+/** 読んでよいほど信頼できる評価か (全体の信頼度と、P2P の区分で A か B (0.6 以上) の地域が 1 つ以上) */
+export function userquakeCredible(u: UserquakeEvent): boolean {
+  return u.confidence >= USERQUAKE_MIN_CONFIDENCE && u.areas.some((a) => ["A", "B"].includes(confidenceGrade(a.confidence)));
+}
+
+/**
+ * 読み上げるか。信頼できる評価で、地図に出す条件 (userquakeShown) を満たし、同じ揺れをまだ読んでおらず、前に読んでから 10 分以上空いているとき。
+ * last は前に読んだ記録。cooldown が false なら間隔を見ない (デモ)
+ */
+export function userquakeReadable(u: UserquakeEvent, now: number, officialAt: number[], last: UserquakeRead | null, cooldown = true): boolean {
+  if (!userquakeCredible(u) || !userquakeShown(u, now, officialAt)) return false;
+  if (last?.startedAt === u.started_at) return false;
+  return !(cooldown && last && now - last.at < USERQUAKE_COOLDOWN_MS);
+}
+
 /** 地域ごとの信頼度の表示 (P2P地震情報 Beta3 の区分) */
 export function confidenceGrade(c: number): "A" | "B" | "C" | "D" | "E" | "F" {
   if (c < 0) return "F";

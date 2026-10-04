@@ -5,6 +5,7 @@ pub mod jst;
 pub mod model;
 pub mod p2pquake;
 pub mod scale;
+pub mod userquake;
 pub mod wolfx;
 
 pub use model::*;
