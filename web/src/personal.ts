@@ -17,6 +17,8 @@ interface Settings {
   bgm: boolean;
   /** BGM の音量 (0〜100) */
   bgmVolume: number;
+  /** 警報などを音声で読み上げるか */
+  voice: boolean;
   /** 履歴に出す地震情報の最大震度の下限 (0 はすべて) */
   listMin: number;
   /** 平時の天気の札を「今」と「明日」で切り替える間隔 (秒)。0 は今だけ、WEATHER_OFF は札を出さない */
@@ -24,7 +26,7 @@ interface Settings {
 }
 
 const KEY = "eq-settings";
-export const DEFAULTS: Settings = { home: null, notify: "4", tourSec: 10, collapseMin: 10, bgm: false, bgmVolume: 40, listMin: 0, weatherFlipSec: 20 };
+export const DEFAULTS: Settings = { home: null, notify: "4", tourSec: 10, collapseMin: 10, bgm: false, bgmVolume: 40, voice: false, listMin: 0, weatherFlipSec: 20 };
 /** 履歴のしぼり込み: すべて / 震度2以上 / 3以上 / 4以上 / 5弱以上 */
 const LIST_MIN_CHOICES = [0, 20, 30, 40, 45];
 const BGM_VOLUMES = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
@@ -47,6 +49,7 @@ export function normalizeSettings(v: unknown): Settings {
     collapseMin: pick(o.collapseMin, COLLAPSE_CHOICES, DEFAULTS.collapseMin),
     bgm: o.bgm === true,
     bgmVolume: pick(o.bgmVolume, BGM_VOLUMES, DEFAULTS.bgmVolume),
+    voice: o.voice === true,
     listMin: pick(o.listMin, LIST_MIN_CHOICES, DEFAULTS.listMin),
     weatherFlipSec: pick(o.weatherFlipSec, WEATHER_FLIP_CHOICES, DEFAULTS.weatherFlipSec),
   };

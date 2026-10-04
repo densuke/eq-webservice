@@ -21,6 +21,8 @@ import { activeAreas, latestTsunami, tsunamiAlert } from "./tsunami.ts";
 import type { EewEvent, EqEvent, UserquakeEvent } from "./types.ts";
 import { confidenceGrade, latestUserquake, userquakeShown } from "./userquake.ts";
 import { type Warnings, topLevel, warningSummary } from "./warnings.ts";
+import { notifyVoice, mixerAudio } from "./broadcast.ts";
+import { enqueueVoice, voiceUrl } from "./voice.ts";
 import { loadBgmConfig, updateBgm } from "./bgm.ts";
 import { loadBanners, updateBanner } from "./banner.ts";
 import { loadCityWeather, renderCityWeather } from "./weather-layer.ts";
@@ -46,6 +48,13 @@ function playAlert(level: AlertLevel): void {
   if (now() - lastAlert.at < ALERT_MERGE_MS && RANK[level] <= RANK[lastAlert.level]) return;
   play(level);
   lastAlert = { level, at: now() };
+}
+
+/** 音声読み上げ (設定が ON のとき)。mixer ならサーバへ URL を知らせ、通常はページで鳴らす */
+function speak(id: string, group: string): void {
+  if (!app.settings.voice) return;
+  if (mixerAudio) notifyVoice(voiceUrl(id, location.href));
+  else enqueueVoice(id, group);
 }
 
 let timer = 0;
@@ -133,6 +142,7 @@ export function onEvents(all: EqEvent[], live: boolean, target: World = liveWorl
       app.world.tsunami = latestTsunami(app.world.tsunami, e);
       const lv = live ? tsunamiAlert(prev, activeAreas(app.world.tsunami)) : null;
       if (lv && (!alert || RANK[lv] > RANK[alert])) alert = lv;
+      if (lv) speak(e.id, "tsunami");
     }
     if (!live) continue;
     // その地震の EEW で既に鳴らしていれば、地震情報では鳴らさない
@@ -145,6 +155,7 @@ export function onEvents(all: EqEvent[], live: boolean, target: World = liveWorl
     const prevMax = Math.max(-1, ...g.events.slice(0, -1).map((x) => (x as EewEvent).max_scale));
     const lv = alertLevel(e, isNew, eewActive, prevMax);
     if (lv && (!alert || RANK[lv] > RANK[alert])) alert = lv;
+    if (lv) speak(e.id, g.key);
     // 新しい地震は、巡回より先にしばらく見せる
     if (isNew && (e.kind === "eew" || e.kind === "quake")) {
       app.tourHold = { key: g.key, until: now() + Math.max(20, app.settings.tourSec * 2) * 1000 };

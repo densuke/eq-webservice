@@ -28,6 +28,11 @@ export function notifyBgm(wanted: boolean, volumePercent: number): void {
   if (n && post(n)) lastBgm = n;
 }
 
+/** 読み上げる音声の URL を知らせる */
+export function notifyVoice(url: string): void {
+  post({ type: "voice", url });
+}
+
 export function notifyAlert(level: AlertSound): void {
   post({ type: "alert", level });
 }
@@ -66,7 +71,7 @@ if (broadcasting) {
   try {
     localStorage.setItem("eq-sound", "on");
     const s = JSON.parse(localStorage.getItem("eq-settings") ?? "{}");
-    localStorage.setItem("eq-settings", JSON.stringify({ ...s, bgm: true }));
+    localStorage.setItem("eq-settings", JSON.stringify({ ...s, bgm: true, voice: true }));
   } catch {
     // 保存できなければ音は鳴らないが、表示はできる
   }
