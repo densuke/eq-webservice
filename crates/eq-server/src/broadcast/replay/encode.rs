@@ -159,6 +159,7 @@ fn frame_input<'a>(label: &'a str, events: &'a [Event], f: &'a Frame, icons: &'a
         hindsight: f.hindsight.as_ref(),
         fast_forward: f.fast_forward,
         status: None,
+        notices: None,
     }
 }
 
@@ -233,6 +234,7 @@ mod tests {
         let icons = Icons::new();
         let input = frame_input("記録から再現", &[], &f, &icons, 200);
         assert_eq!(input.status, None);
+        assert_eq!(input.notices, None);
     }
 
     #[test]

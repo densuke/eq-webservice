@@ -17,6 +17,7 @@ mod held;
 mod hindsight;
 mod icon;
 mod model;
+mod notice;
 mod paint;
 mod panel;
 mod shaken;
@@ -42,6 +43,7 @@ use super::BroadcastConfig;
 use crate::quake::Event;
 use data::{CityWeather, ServerMessage, Warnings};
 use draw::Renderer;
+use notice::{Banners, Notices};
 
 // 記録から描き直す動画 (broadcast/replay) が使う
 pub(super) use eew::{eew_place, latest_eews, quake_place, EEW_ACTIVE_MS};
@@ -53,6 +55,8 @@ pub(super) use step::{look, Input, Output, Stepper};
 const RECONNECT_AFTER: Duration = Duration::from_secs(5);
 /// 警報・天気を取り直す間隔 (取れなかったときは短く)
 const POLL_EVERY: Duration = Duration::from_secs(300);
+/// お知らせを取り直す間隔 (サーバは毎回ディレクトリを読み直すので、差し替えはこの間隔で入る)
+const NOTICE_EVERY: Duration = Duration::from_secs(60);
 const POLL_RETRY: Duration = Duration::from_secs(30);
 /// 足りないアイコンが無いか調べる間隔 (天気が新しくなって、知らないコードが来たときのため)
 const ICON_CHECK: Duration = Duration::from_secs(5);
@@ -71,6 +75,8 @@ struct State {
     offset: i64,
     warnings: Option<Warnings>,
     weather: Option<CityWeather>,
+    /// 右パネルの下に出すお知らせ (取れていなければ None)
+    notices: Option<Notices>,
     icons: Icons,
     bgm_title: String,
     connected: bool,
@@ -154,6 +160,7 @@ pub fn start(cfg: &BroadcastConfig, notices: Option<UnboundedSender<String>>, st
             st.clone(),
             |s, v: CityWeather| s.weather = Some(v),
         )),
+        tokio::spawn(notice_loop(format!("{server}/api/banners"), st.clone())),
         tokio::spawn(icon_loop(icon::IMG_BASE.to_string(), st.clone())),
         tokio::spawn(bgm_title_loop(format!("{server}/stream/status-json.xsl"), st.clone())),
         tokio::spawn(render_loop(
@@ -257,6 +264,7 @@ async fn render_loop(renderer: Renderer, st: Shared, out: Out, notices: Option<U
                 hindsight: None,
                 fast_forward: false,
                 status,
+                notices: s.notices.as_ref(),
             })
         };
         let Some(Output { i420, calm, shown }) = o else {
@@ -337,6 +345,30 @@ async fn poll<T: DeserializeOwned>(url: String, st: Shared, set: fn(&mut State, 
             }
         };
         tokio::time::sleep(wait).await;
+    }
+}
+
+/// 1 分ごとにお知らせ (/api/banners) を取る。失敗しても前の一覧を残し、警告は続けて失敗した最初の 1 回だけ出す
+async fn notice_loop(url: String, st: Shared) {
+    let Ok(client) = crate::net::client(Duration::from_secs(15)) else {
+        return;
+    };
+    let mut failing = false;
+    loop {
+        match crate::net::json::<Banners>(client.get(&url)).await {
+            Ok(b) => {
+                failing = false;
+                let n = b.notices();
+                change(&st, |s| s.notices = Some(n));
+            }
+            Err(e) => {
+                if !failing {
+                    tracing::warn!("broadcast: {url}: {e:#}");
+                }
+                failing = true;
+            }
+        }
+        tokio::time::sleep(NOTICE_EVERY).await;
     }
 }
 

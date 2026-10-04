@@ -16,6 +16,7 @@ use super::geo::{Shape, View};
 use super::hindsight::Hindsight;
 use super::icon::Icons;
 use super::model::{scale_color, scale_text_color, QuakeSummary};
+use super::notice::{self, LayoutCache, Notices};
 use super::paint::{epicenter, ghost_epicenter, rect, rrect, LAND, LAND_EDGE, MUTED, NEIGHBOR, NEIGHBOR_EDGE, SEA};
 use super::panel;
 use super::shaken::{Stations, Zones};
@@ -60,6 +61,8 @@ pub struct Scene<'a> {
     pub fast_forward: bool,
     /// 上部バーの右に出す状態の札 (docs/broadcast-status.md)。ライブだけが入れる。再現動画は None
     pub status: Option<Notice>,
+    /// 平時の右パネルの下に出すお知らせ (docs/broadcast-native.md)。ライブだけが入れる。再現動画は None
+    pub notices: Option<&'a Notices>,
 }
 
 pub struct Renderer {
@@ -80,6 +83,8 @@ pub struct Renderer {
     base: Pixmap,
     /// 天気の札の置き場所 (警報を避けた位置) を面ごとに覚える
     cards: CardCache,
+    /// お知らせの並べた行の覚え
+    notice_lines: LayoutCache,
 }
 
 /// 別枠の枠線の色 (web/public/style.css の .inset)
@@ -99,6 +104,7 @@ impl Renderer {
             areas: areas.into_iter().map(|s| (s.key.clone(), s)).collect(),
             base: Pixmap::new(W, H).expect("size"),
             cards: CardCache::default(),
+            notice_lines: LayoutCache::default(),
         };
         r.base = r.draw_base();
         r
@@ -173,6 +179,10 @@ impl Renderer {
             }
         }
         panel::draw_dynamic(&mut pm, &mut self.text, scene);
+        // お知らせは平時だけ (右パネルの下半分。地震の画面では出さない)
+        if let (None, None, Some(n)) = (scene.quake, scene.eew, scene.notices) {
+            notice::draw(&mut pm, &mut self.text, &mut self.notice_lines, n, scene.now_ms);
+        }
         // 警報以上の帯は平時だけ。テスト配信の赤い帯の下に置く
         if let (None, None, Some(w)) = (scene.quake, scene.eew, scene.warnings) {
             let below = if scene.test { test_mark::BAND_H } else { 0.0 };

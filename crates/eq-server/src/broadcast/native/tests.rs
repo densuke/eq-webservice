@@ -112,6 +112,7 @@ fn scene<'a>(
         hindsight: None,
         fast_forward: false,
         status: None,
+        notices: None,
     }
 }
 
@@ -632,6 +633,17 @@ fn write_fixture_pngs_when_asked() {
     };
     let calm_png = r.render(&scene(None, &history[1..], Some(&warnings), Some(&weather)));
     calm_png.save_png(std::path::Path::new(&out).join("calm.png")).unwrap();
+    let notices = Notices {
+        interval_s: 20,
+        texts: vec!["毎日 4:00〜4:15 ごろ、システムメンテナンスのため数分配信が途切れることがあります".into()],
+    };
+    let notice_png = r.render(&Scene {
+        notices: Some(&notices),
+        ..scene(None, &history[1..], Some(&warnings), Some(&weather))
+    });
+    notice_png
+        .save_png(std::path::Path::new(&out).join("notice.png"))
+        .unwrap();
     // 石狩市に警報: 札幌の札が石狩の塗りを隠さず、引き出し線で海へ逃げる
     let ishikari = Warnings {
         areas: [("0123500".to_string(), kind("レベル３大雨警報"))]
@@ -844,6 +856,7 @@ fn input<'a>(events: &'a [Event], now: u64, h: Option<&'a Hindsight>) -> Input<'
         hindsight: h,
         fast_forward: false,
         status: None,
+        notices: None,
     }
 }
 
@@ -940,4 +953,47 @@ fn a_warning_on_ishikari_is_not_hidden_by_the_sapporo_card() {
     let adv = warned("レベル２大雨注意報");
     let stay = r.render(&scene(None, &[], Some(&adv), Some(&weather)));
     assert!(card_pixels_over_ishikari(&stay) > covered / 2);
+}
+
+fn maintenance_notices() -> Notices {
+    Notices {
+        interval_s: 20,
+        texts: vec!["システムメンテナンスのお知らせ".into(), "二つ目のお知らせ".into()],
+    }
+}
+
+/// お知らせの箱の中の画素 (右パネルの下半分。文字の無いテストでは 1 行ぶんの箱)
+const NOTICE_PX: (u32, u32) = (1000, 500);
+
+#[test]
+fn the_notice_box_is_drawn_in_calm_only() {
+    let mut r = renderer(Text::none());
+    let n = maintenance_notices();
+    let mut with = |quake| {
+        r.render(&Scene {
+            notices: Some(&n),
+            ..scene(quake, &[], None, None)
+        })
+    };
+    let calm = with(None);
+    let q = quake(Scale::S4, &[("千葉県", Scale::S4)], Some((35.3, 140.3)));
+    let shaking = with(Some(&q));
+    assert_eq!(rgb(&calm, NOTICE_PX), super::paint::BG);
+    // 地震の画面では出さない
+    assert_eq!(rgb(&shaking, NOTICE_PX), super::paint::PANEL);
+    let plain = r.render(&scene(None, &[], None, None));
+    assert_eq!(rgb(&plain, NOTICE_PX), super::paint::PANEL);
+}
+
+#[test]
+fn the_stepper_shows_the_notice_in_calm() {
+    let mut s = Stepper::new(renderer(Text::none()));
+    let n = maintenance_notices();
+    let plain = s.step(&input(&[], NOW, None)).unwrap();
+    let with = Input {
+        notices: Some(&n),
+        rev: 1, // 取れたときは rev が進む
+        ..input(&[], NOW, None)
+    };
+    assert_ne!(s.step(&with).unwrap().i420, plain.i420);
 }
