@@ -1,7 +1,8 @@
 # e2 の再現動画を作る係の設定 (eq-server replay-worker replay.toml)。docs/replay-video.md の 5.2。
 # 省いた項目は、ここに書いた既定値になる。変えたいものだけ書く。~/ はホームディレクトリ。
 [replay]
-# eq-server の記録 (config.toml の jsonl の sink の path)。作業ディレクトリからの相対か、絶対パス
+# eq-server の記録 (config.toml の jsonl の sink の path)。作業ディレクトリからの相対か、絶対パス。
+# https://eq.fuga.jp のような URL なら /api/archive から取る (Mac。deploy/replay.mac.toml)
 events = "data/events.jsonl"
 # 作業場所。queue/ (待ちの印)・work/ (作りかけ)・done/ (できた動画) を下に作る
 dir = "~/work/eq-replay"
@@ -21,6 +22,13 @@ max_group_hours = 3
 # 記録を見直す範囲 (時間) と間隔 (秒)。範囲は max_group_hours + quiet_min より長くする
 lookback_hours = 6
 scan_secs = 300
+# events が URL のときだけ: 止まっていた間をさかのぼる上限 (時間)。lookback_hours 以上にする
+catchup_max_hours = 24
+
+# 子の起動のしかたと、配信の様子を見るか。既定は e2 (systemd のユーザー単位・配信の様子を見る)。
+# Mac は runner = "inline"・gate = "none" (deploy/replay.mac.toml)
+runner = "systemd"
+gate = "vm"
 
 # 作る・見張る
 tick_secs = 5            # 見張る間隔 (秒)

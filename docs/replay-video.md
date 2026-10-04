@@ -316,3 +316,61 @@ eq-server replay-video --from <ms> --to <ms> --out x.mp4
 - 重くなったとき (`on_busy`): 既定は `kill`。PSI の超過・YouTube の健全性が bad のどちらかで、すぐ `kill --signal=SIGKILL` し、作りかけを消して待ちに戻す。**やり直しに数える** (失敗と同じで、`retry_wait_min` を空けて、5 回を超えたら `failed`)。`freeze` にすると 5.2 の動き (凍結・解凍・10 分で止める) に戻る。
 - 時間帯 (`hours = "1-5"`): 日本時間で 1:00 以上 5:00 未満に作り始める。`"22-5"` のように始めが大きければ日をまたぐ。`"0-24"` で一日中。`"10-15,21:30-23"` のようにカンマで複数書け、分も書ける (e2 は夜中 1〜2 時半ごろポッドキャストの作業で重いので、日中と夜の早い時間にしている)。始めるときだけ見るので、作りかけは過ぎても続ける。
 - メモリの空き (`min_mem_mb = 250`): 始める条件にだけ足した (`/proc/meminfo` の MemAvailable。読めない Mac では見ない)。作っている間は見ない (仕様どおり、止める条件は PSI と健全性)。
+
+## 6. Mac で作る (v0.25.0)
+
+### 6.1 決めたこと (2026-10-04、利用者の了承済み)
+
+- 再現動画は **Mac だけで作る**。e2 は弱く、10fps の描画に 1.5〜2 コア要るため、作ると配信が落ちた。e2 では作る係を動かさない (`eq-replay-worker.service` は使わない)。
+- Mac は常時起きているわけではない。起きているあいだに、取りこぼした地震をまとめて作る。止まっている間に起きた地震は、起きたあとに記録から見つけるので失われない。
+- 作る係は 5 章のものをそのまま使い、設定で Mac 向けにする。
+
+### 6.2 設定
+
+- `runner = "systemd" | "inline"` (既定 `systemd`)。`inline` は `systemd-run` を使わず、`replay-video` を子プロセスとして直接起動する。CPUQuota・MemoryMax は付けない。引数は `systemd` のときと同じ。作る係が止まるとき・止めるときは、子を kill する。
+- `gate = "vm" | "none"` (既定 `vm`)。`none` は、配信の状態のファイル・PSI・メモリの空き・YouTube の健全性の確認と、作っている間の「重いから止める」をやめる。`hours` だけは効く (Mac は `"0-24"`)。`/proc` は読まない。
+- `events` に `http://` か `https://` の URL (例: `https://eq.fuga.jp`) を書くと、`/api/archive` から取る。サーバは 1 回に 1 時間まで (`from`〜`to` の差が 3,600,000 ミリ秒以内、1 回 500 件まで) なので、1 時間ずつに分けて取り、`id` が同じ報を 1 つにして検知に渡す。作るときも同じ URL から取る (`replay-video --archive`)。1 本が 1 時間を超えるときは、`replay-video` が 1 時間ずつ取って 1 つにする。
+- **止まっていた間を取り戻す (checkpoint)。** URL のときは、前に見終えた時刻を `dir/checkpoint.json` (`{"scanned_until_ms": …}`) に残す。次の見直しは、`max(checkpoint - overlap, 今 - catchup_max_hours)` から今までを 1 時間ずつ取る。`overlap` は `max_group_hours + quiet_min` (checkpoint の時点で開いていたまとまりの始まりを含めるため)。checkpoint が無い最初は、`lookback_hours` だけさかのぼる。checkpoint は、**全部取れて、キューに積めたときだけ**今に進める。途中で 1 つでも失敗したら動かさず、次の `scan_secs` で同じところからやり直す。同じまとまりを二重に積まないのは 5.2.1 のとおり (キューにある地震と照らす)。
+- `catchup_max_hours` (既定 24、Mac の例は 168 = 7 日。`lookback_hours` 以上)。サーバのコード (`archive.rs`・jsonl の sink) には記録を消す仕組みが無く、`/api/archive` は jsonl を頭から読む。つまり、保管の長さは運用 (ファイルを残している間) で決まる。これより古い地震は、止まっていても動画にしない。
+- **取る先への負担を抑える。** 範囲と範囲の間に 1 秒空ける (eq.fuga.jp は 1GB の VM で、1 回ごとに記録を頭から読む)。7 日さかのぼっても約 3 分で、定常では (4 時間 + 経過分) の数回だけ。取れなくなったら (オフライン・スリープ明け)、その回は何もせず、警告は切れたときの 1 回だけ出して、続く間は静かに次の `scan_secs` を待つ。戻ったら 1 回だけ知らせる。
+- `inline_wrap` (既定は空): `inline` のとき、子の前に付けるコマンド。Mac は `["/usr/sbin/taskpolicy", "-b"]`。macOS の background の優先度 (CPU・ディスク・ネットワークが後回し) で動かし、子の ffmpeg も引き継ぐ。普段の作業を優先し、遅くなってよい。作るのは 1 本ずつ。
+- `runner = "inline"` と `on_busy = "freeze"` の組み合わせは、凍結に systemd が要るので設定の読み込みで断る (`gate = "none"` なら凍結は使わないので構わない)。
+- 例: `deploy/replay.mac.toml`。YouTube への投稿は R3.3b で足すので、いまは `youtube_token = ""`。
+
+### 6.3 置き方 (Mac)
+
+リリースの tar.gz (aarch64-apple-darwin) を `~/work/eq-replay/release/` に展開する。地図の素材 (`japan.geojson`・`neighbors.geojson`・`warning-areas.geojson`・`areas.geojson`・`stations.json`) は、その中の `web/dist` をそのまま `map_dir` にする。コピーや symlink は要らない。バージョンを上げるときは、展開し直して `launchctl kickstart -k` で作る係を入れ直す。
+
+```sh
+mkdir -p ~/work/eq-replay/release
+tar xzf eq-server-<version>-aarch64-apple-darwin.tar.gz --strip-components=1 -C ~/work/eq-replay/release
+xattr -dr com.apple.quarantine ~/work/eq-replay/release
+brew install ffmpeg
+cp deploy/replay.mac.toml ~/work/eq-replay/replay.toml
+sed "s|/Users/USERNAME|$HOME|g" deploy/jp.fuga.eq-replay-worker.plist > ~/Library/LaunchAgents/jp.fuga.eq-replay-worker.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/jp.fuga.eq-replay-worker.plist
+```
+
+止めるときは `launchctl bootout gui/$(id -u)/jp.fuga.eq-replay-worker`。ログは `~/work/eq-replay/worker.log`。launchd は PATH が短いので、plist で `/opt/homebrew/bin` を足してある (ffmpeg のため)。
+
+### 6.4 スリープと途中停止
+
+- 作っている最中にスリープすると、`replay-video` も一緒に止まり、起きたら続きから進む。壁時計の時刻は変わらないが、動画の中の時刻は記録から決まるので、できあがりに影響しない。
+- 作る係や子が途中で kill されたり失敗したりしても、`work/` の作りかけは `done/` に移さない。できた動画として数えるのは、子が成功で終わり、`done/` への移動に成功したときだけ。止まったものは 5.2.1 のやり直しの規則に従って待ちに戻る。
+- 作る係が落ちて再起動したときは、`work/` を空にして、作り中のまま残った印を待ちに戻す。
+
+### 6.5 テスト (cargo test)
+
+- 設定: 新しい項目の既定値 (`systemd`・`vm`)・Mac の例が読めること。
+- 判断: `gate = "none"` では、重い・詰まり・地震の画面でも止めず、始める条件は `hours` だけになること。
+- 記録の取得: 1 時間ずつの範囲が、隙間も重なりもなく全体を覆うこと。同じ `id` が 1 つになること。取る範囲 (checkpoint・`catchup_max_hours`)・checkpoint の読み書き、全部取れたときだけ進むこと (失敗・キューに積めなかったときは動かない)。
+- 引数: `inline` は `systemd` の `replay-video` 以降と同じ引数になること。
+
+### 6.6 意図的に空けている箇所
+
+- ネットワークを実際に使う取得と、launchd・スリープの実機での動き (起動処理・外部との接続で、壊れても気づいて直せる)。取得は範囲の分割と重複の除去を別の関数にして、そちらをテストしている。
+
+### 6.7 実測 (2026-10-04、Mac aarch64)
+
+- 本番の `/api/archive` を 60 時間分 (60 回、1 秒おき) 取って、2026-10-02 17:39 熊本県熊本地方 (震度 3) の 1 本をキューに積み、`taskpolicy -b` で作った。15fps・3784 コマ・動画 252 秒・1280x720、作った時間は 45 秒、mp4 は 10.5MB。60 時間分の取得に約 90 秒。
+- `taskpolicy` は `/usr/sbin/taskpolicy` (`/usr/bin` ではない)。

@@ -18,11 +18,39 @@ pub enum OnBusy {
     Freeze,
 }
 
+/// 動画を作る子 (replay-video) の起動のしかた
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Runner {
+    /// systemd-run のユーザー単位 (既定。e2。CPU・メモリを縛り、凍結もできる)
+    Systemd,
+    /// 子プロセスとして直接起動する (Mac)。縛りも凍結も無い
+    Inline,
+}
+
+/// 作り始める・止める判断に、ライブの配信の様子を使うか
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Gate {
+    /// 配信の状態のファイル・PSI・メモリの空き・YouTube の健全性を見る (既定。e2 は配信と同じ機械)
+    Vm,
+    /// 見ない。時間帯 (hours) だけが効く (配信と別の機械の Mac)
+    None,
+}
+
+/// 記録の読み先
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EventsSource {
+    File(PathBuf),
+    /// eq-server の URL (/api/archive から取る)
+    Url(String),
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct WorkerConfig {
     // 置き場所
-    /// eq-server の記録 (sink の jsonl)
+    /// eq-server の記録。sink の jsonl のパスか、`https://eq.fuga.jp` のような URL (/api/archive から取る)
     pub events: String,
     /// 作る係の作業場所。queue/ (待ちの印)・work/ (作りかけ)・done/ (できた動画) を下に作る
     pub dir: String,
@@ -48,6 +76,9 @@ pub struct WorkerConfig {
     pub lookback_hours: u64,
     /// 記録を見直す間隔 (秒)
     pub scan_secs: u64,
+    /// events が URL のとき、止まっていた間 (スリープ・オフライン) をさかのぼって見る上限 (時間)。
+    /// 前に見終えた時刻 (checkpoint) からさかのぼり、これより古い分は見ない。checkpoint が無い最初は lookback_hours
+    pub catchup_max_hours: u64,
 
     // 作る・見張る
     /// 見張る間隔 (秒)
@@ -68,6 +99,12 @@ pub struct WorkerConfig {
     pub max_retries: u32,
     /// 失敗してから、やり直すまでの時間 (分)
     pub retry_wait_min: u64,
+    /// 子の起動のしかた。"systemd" (既定) か "inline"
+    pub runner: Runner,
+    /// 配信の様子を見るか。"vm" (既定) か "none"
+    pub gate: Gate,
+    /// runner = "inline" のとき、子の前に付けるコマンド (優先度を最低にするため。Mac は ["/usr/sbin/taskpolicy", "-b"])
+    pub inline_wrap: Vec<String>,
     /// 作る間の CPU・メモリの上限 (systemd の CPUQuota・MemoryMax)
     pub cpu_quota: String,
     pub memory_max: String,
@@ -107,6 +144,7 @@ impl Default for WorkerConfig {
             max_group_hours: 3,
             lookback_hours: 6,
             scan_secs: 300,
+            catchup_max_hours: 24,
             tick_secs: 5,
             calm_min: 30,
             hours: "10-15,21:30-23".into(),
@@ -116,6 +154,9 @@ impl Default for WorkerConfig {
             freeze_give_up_min: 10,
             max_retries: 5,
             retry_wait_min: 10,
+            runner: Runner::Systemd,
+            gate: Gate::Vm,
+            inline_wrap: Vec::new(),
             cpu_quota: "5%".into(),
             memory_max: "200M".into(),
             health_secs: 60,
@@ -160,6 +201,14 @@ impl WorkerConfig {
             "間隔は 1 秒以上"
         );
         anyhow::ensure!((1..=60).contains(&self.fps), "fps must be 1..=60");
+        anyhow::ensure!(
+            self.catchup_max_hours >= self.lookback_hours,
+            "catchup_max_hours は lookback_hours 以上にしてください"
+        );
+        anyhow::ensure!(
+            !(self.runner == Runner::Inline && self.gate == Gate::Vm && self.on_busy == OnBusy::Freeze),
+            "凍結 (on_busy = \"freeze\") は runner = \"systemd\" でだけ使えます"
+        );
         Hours::parse(&self.hours)?;
         Ok(self)
     }
@@ -169,9 +218,18 @@ impl WorkerConfig {
         Hours::parse(&self.hours).expect("hours is validated by check()")
     }
 
-    /// eq-server の記録 (`~/` はホームディレクトリ)
-    pub fn events_path(&self) -> PathBuf {
-        expand(&self.events)
+    /// eq-server の記録の読み先。`http://` か `https://` で始まれば URL (末尾の `/` は除く)
+    pub fn events_source(&self) -> EventsSource {
+        if self.events.starts_with("http://") || self.events.starts_with("https://") {
+            EventsSource::Url(self.events.trim_end_matches('/').to_string())
+        } else {
+            EventsSource::File(expand(&self.events))
+        }
+    }
+
+    /// 前に見終えた時刻の印 (checkpoint)
+    pub fn checkpoint_path(&self) -> PathBuf {
+        expand(&self.dir).join("checkpoint.json")
     }
 
     pub fn queue_dir(&self) -> PathBuf {
@@ -261,6 +319,66 @@ mod tests {
     }
 
     #[test]
+    fn the_runner_and_the_gate_default_to_the_vm_behaviour() {
+        let c = File::default().replay.check().unwrap();
+        assert_eq!((c.runner, c.gate, c.catchup_max_hours), (Runner::Systemd, Gate::Vm, 24));
+        assert!(c.inline_wrap.is_empty());
+        let f: File =
+            toml::from_str("[replay]\nrunner = \"inline\"\ngate = \"none\"\ninline_wrap = [\"nice\", \"-n19\"]")
+                .unwrap();
+        let c = f.replay.check().unwrap();
+        assert_eq!((c.runner, c.gate), (Runner::Inline, Gate::None));
+        assert_eq!(c.inline_wrap, ["nice", "-n19"]);
+        assert!(toml::from_str::<File>("[replay]\nrunner = \"docker\"").is_err());
+        assert!(toml::from_str::<File>("[replay]\ngate = \"off\"").is_err());
+    }
+
+    #[test]
+    fn freezing_needs_systemd_and_the_catchup_covers_the_lookback() {
+        let bad = |t: &str| toml::from_str::<File>(t).unwrap().replay.check().is_err();
+        assert!(bad("[replay]\nrunner = \"inline\"\non_busy = \"freeze\""));
+        assert!(!bad(
+            "[replay]\nrunner = \"inline\"\ngate = \"none\"\non_busy = \"freeze\""
+        ));
+        assert!(bad("[replay]\ncatchup_max_hours = 5"));
+    }
+
+    #[test]
+    fn the_events_setting_is_a_file_or_an_archive_url() {
+        let src = |e: &str| {
+            WorkerConfig {
+                events: e.into(),
+                ..Default::default()
+            }
+            .events_source()
+        };
+        assert_eq!(
+            src("https://eq.fuga.jp/"),
+            EventsSource::Url("https://eq.fuga.jp".into())
+        );
+        assert_eq!(
+            src("http://localhost:9995"),
+            EventsSource::Url("http://localhost:9995".into())
+        );
+        assert_eq!(src("/srv/e.jsonl"), EventsSource::File(PathBuf::from("/srv/e.jsonl")));
+        assert_eq!(
+            src("data/events.jsonl"),
+            EventsSource::File(PathBuf::from("data/events.jsonl"))
+        );
+    }
+
+    #[test]
+    fn the_mac_example_runs_inline_without_the_vm_gate() {
+        let f: File = toml::from_str(include_str!("../../../../../../deploy/replay.mac.toml")).unwrap();
+        let c = f.replay.check().unwrap();
+        assert_eq!((c.runner, c.gate), (Runner::Inline, Gate::None));
+        assert_eq!(c.events_source(), EventsSource::Url("https://eq.fuga.jp".into()));
+        assert_eq!((c.fps, c.hours.as_str(), c.catchup_max_hours), (15, "0-24", 168));
+        assert_eq!(c.inline_wrap, ["/usr/sbin/taskpolicy", "-b"]);
+        assert!(c.youtube_token.is_empty());
+    }
+
+    #[test]
     fn a_tilde_is_the_home_directory() {
         assert_eq!(expand("/a/b"), PathBuf::from("/a/b"));
         if let Some(home) = std::env::var_os("HOME") {
@@ -269,7 +387,10 @@ mod tests {
                 events: "~/data/e.jsonl".into(),
                 ..Default::default()
             };
-            assert_eq!(c.events_path(), Path::new(&home).join("data/e.jsonl"));
+            assert_eq!(
+                c.events_source(),
+                EventsSource::File(Path::new(&home).join("data/e.jsonl"))
+            );
         }
         let c = WorkerConfig {
             dir: "/srv/r".into(),
