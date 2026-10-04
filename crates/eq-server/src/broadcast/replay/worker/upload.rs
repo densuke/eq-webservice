@@ -18,6 +18,8 @@ pub struct Publisher<A: Api> {
     done_dir: PathBuf,
     privacy: String,
     category: String,
+    /// 上げた動画を足す再生リストの ID。空なら足さない
+    playlist: String,
     delete_after_upload: bool,
 }
 
@@ -51,6 +53,7 @@ impl<A: Api> Publisher<A> {
             done_dir: cfg.done_dir(),
             privacy: cfg.youtube_privacy.clone(),
             category: cfg.youtube_category.clone(),
+            playlist: cfg.youtube_playlist.clone(),
             delete_after_upload: cfg.youtube_delete_after_upload,
         }
     }
@@ -79,7 +82,18 @@ impl<A: Api> Publisher<A> {
         match self.uploader.try_upload(&insert, &file, now_ms).await {
             Attempt::Uploaded(id) => {
                 tracing::info!(id = %job.id, video = %id, privacy = %self.privacy, "replay-worker: YouTube に上げました");
-                self.save(queue::uploaded(job, id, now_ms));
+                self.save(queue::uploaded(job.clone(), id.clone(), now_ms));
+                if !self.playlist.is_empty() {
+                    // 動画はもう上がっている。足せなくても上げ直さない (Studio で手で足せる)
+                    match self.uploader.add_to_playlist(&self.playlist, &id, now_ms).await {
+                        Ok(()) => {
+                            tracing::info!(id = %job.id, video = %id, playlist = %self.playlist, "replay-worker: 再生リストに足しました")
+                        }
+                        Err(why) => {
+                            tracing::warn!(id = %job.id, video = %id, playlist = %self.playlist, "replay-worker: 再生リストに足せません: {why}")
+                        }
+                    }
+                }
                 if self.delete_after_upload {
                     if let Err(e) = std::fs::remove_file(&file) {
                         tracing::warn!("replay-worker: 上げた動画を消せません: {e}");
@@ -120,6 +134,8 @@ mod tests {
     struct Fake {
         results: Mutex<VecDeque<Result<String, UploadError>>>,
         titles: Mutex<Vec<String>>,
+        playlist_results: Mutex<VecDeque<Result<(), UploadError>>>,
+        playlist_adds: Mutex<Vec<(String, String)>>, // (再生リスト, 動画)
     }
 
     impl Api for &Fake {
@@ -130,6 +146,10 @@ mod tests {
             self.titles.lock().unwrap().push(meta.title.clone());
             self.results.lock().unwrap().pop_front().unwrap_or(Ok("VID".into()))
         }
+        async fn add_to_playlist(&self, _: &str, playlist: &str, video: &str) -> Result<(), UploadError> {
+            self.playlist_adds.lock().unwrap().push((playlist.into(), video.into()));
+            self.playlist_results.lock().unwrap().pop_front().unwrap_or(Ok(()))
+        }
     }
 
     struct Env {
@@ -138,6 +158,10 @@ mod tests {
     }
 
     fn env(delete_after: bool) -> Env {
+        env_with(delete_after, "")
+    }
+
+    fn env_with(delete_after: bool, playlist: &str) -> Env {
         let dir = tempfile::tempdir().unwrap();
         let p = |n: &str| dir.path().join(n);
         std::fs::write(
@@ -159,6 +183,7 @@ mod tests {
             youtube_upload_token: p("token.json").display().to_string(),
             youtube_client: p("client.json").display().to_string(),
             youtube_delete_after_upload: delete_after,
+            youtube_playlist: playlist.into(),
             ..WorkerConfig::default()
         };
         std::fs::create_dir_all(cfg.done_dir()).unwrap();
@@ -222,6 +247,40 @@ mod tests {
         p.run_once(NOW + 1000).await;
         assert_eq!(fake.titles.lock().unwrap().len(), 1);
         assert!(env.cfg.done_dir().join(job.video.unwrap()).exists());
+    }
+
+    #[tokio::test]
+    async fn an_uploaded_video_goes_into_the_playlist_and_a_failed_add_is_not_retried() {
+        let env = env_with(false, "PLx");
+        let first = enqueue_done(&env, T0);
+        let fake = Fake::default();
+        let mut p = Publisher::new(&fake, &env.cfg);
+        p.run_once(NOW).await;
+        assert_eq!(
+            fake.playlist_adds.lock().unwrap().clone(),
+            [("PLx".to_string(), "VID".to_string())]
+        );
+        assert_eq!(reload(&env, &first.id).state, State::Uploaded);
+        // 足すのに失敗しても、上げたことは残り、上げ直さない
+        let second = enqueue_done(&env, T0 + 86_400_000);
+        fake.playlist_results
+            .lock()
+            .unwrap()
+            .push_back(Err(UploadError::Rejected("HTTP 403".into())));
+        p.run_once(NOW + 1000).await;
+        p.run_once(NOW + 2000).await;
+        assert_eq!(reload(&env, &second.id).state, State::Uploaded);
+        assert_eq!(fake.titles.lock().unwrap().len(), 2);
+        assert_eq!(fake.playlist_adds.lock().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn no_playlist_configured_means_no_playlist_call() {
+        let env = env(false);
+        enqueue_done(&env, T0);
+        let fake = Fake::default();
+        Publisher::new(&fake, &env.cfg).run_once(NOW).await;
+        assert!(fake.playlist_adds.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

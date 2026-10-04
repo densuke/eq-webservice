@@ -263,12 +263,13 @@ eq-server replay-video --from <ms> --to <ms> --out x.mp4
 当初の案 (e2 の pd2 の認証情報を読むだけにする・`done/` の mp4 を 7 日で消す) は取り下げた。
 
 - 「できた」の動画を、キューの古い順に YouTube Data API v3 の `videos.insert` (resumable upload) で 1 本ずつ上げる。作っている間は上げない (作るのと上げるのは同時にやらない)。
-- 認証は OAuth 2.0 の installed app (ループバックのリダイレクト・PKCE)。範囲は `youtube.upload` だけ。一度だけ人が `eq-server youtube-auth` を実行する (6.8)。
+- 認証は OAuth 2.0 の installed app (ループバックのリダイレクト・PKCE)。範囲は `youtube.force-ssl` (v0.29.0 から。再生リストへの追加 `playlistItems.insert` は `youtube.upload` では通らず、これより狭い範囲が無い)。一度だけ人が `eq-server youtube-auth` を実行する (6.8)。
 - タイトル・説明文
   - 1 つ: 「【地震の記録】2026/10/02 17:39 熊本県熊本地方 最大震度3 (再現)」。
   - 連続地震: 「【連続して発生した地震の記録】2026/09/30 14:00 与那国島近海ほか計 5 回 最大震度5弱 (再現)」。
   - 説明文: 当時の記録から再現した映像であるという断り書き、地震の一覧 (時刻・震源・M・深さ・最大震度)、出典 (画面の出典と同じ)。連続地震で、チャプターが条件を満たすときは、先頭にチャプターを置く。条件は、先頭が 0:00・3 個以上・各 10 秒以上で、満たさないときは付けない (YouTube は条件を満たさないとチャプターとして扱わない)。
-- 公開範囲は設定 (`youtube_privacy`) で、**既定は非公開 (private)**。公開・限定公開への変更は、利用者が出来を見て YouTube Studio で手でやる。カテゴリは 25 (ニュースと政治)。
+- 公開範囲は設定 (`youtube_privacy`) で、既定は非公開 (private)。Mac では 2026-10-05 から公開 (public) にした。カテゴリは 25 (ニュースと政治)。
+- 再生リスト (v0.29.0): `youtube_playlist` に ID を書くと、上げたあとに `playlistItems.insert` でその再生リストに足す。足せなくても動画は上がっているので、上げ直さない (警告を出すだけ。Studio で手で足せる)。1 日の本数には数えない。
 - 割り当て
   - 1 日の本数の上限を設定 (`youtube_daily_limit`、既定 3) にする。ローカルの状態ファイルで数え、太平洋時間 (夏時間を考える) の 0 時で区切る (YouTube の割り当てが太平洋時間の 0 時に戻るため)。
   - `quotaExceeded`・`uploadLimitExceeded` などが返ったら、その太平洋時間の日はもう上げない。
@@ -389,7 +390,7 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/jp.fuga.eq-replay-worker
 
 **初回に一度だけ (人がやる)**
 
-1. Google Cloud で YouTube Data API v3 を有効にし、OAuth クライアント (種類は「デスクトップアプリ」) を作って、JSON を `~/.config/eq-replay/youtube-client.json` に置く (`{"installed": {...}}` の形)。同意画面が「テスト」のままなら、自分のアカウントをテストユーザーに入れる。なお、テストのままだと、リフレッシュトークンは 7 日で切れる。続けて使うなら、同意画面を「本番」にする (範囲は `youtube.upload` だけなので、確認の手続きは要らないが、「未確認のアプリ」の警告は出る)。
+1. Google Cloud で YouTube Data API v3 を有効にし、OAuth クライアント (種類は「デスクトップアプリ」) を作って、JSON を `~/.config/eq-replay/youtube-client.json` に置く (`{"installed": {...}}` の形)。同意画面が「テスト」のままなら、自分のアカウントをテストユーザーに入れる。なお、テストのままだと、リフレッシュトークンは 7 日で切れる。続けて使うなら、同意画面を「本番」にする (自分のアカウントで使うだけなので、確認の手続きはしない。「未確認のアプリ」の警告は出る)。
 2. 次を実行する。表示された URL をブラウザで開き (macOS では自動で開く)、許可する。
 
 ```sh
@@ -411,7 +412,8 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/jp.fuga.eq-replay-worker
 
 **動き**
 
-- 公開範囲は既定で非公開 (`youtube_privacy = "private"`)。公開・限定公開にしたいときは、YouTube Studio で動画を開いて、公開範囲を手で変える。設定で `unlisted`・`public` にすることもできるが、出来を見てからにする。
+- 公開範囲は既定で非公開 (`youtube_privacy = "private"`)。Mac の設定例 (`deploy/replay.mac.toml`) は公開 (`public`) で、再生リスト「地震アーカイブ」(`youtube_playlist`) に足す。
+- v0.29.0 より前の `youtube-auth` で作ったトークンは範囲が `youtube.upload` だけなので、上げられるが再生リストに足せない (ログに「youtube-auth をやり直してください」)。`youtube-auth` をやり直す。
 - 1 日の本数は `youtube_daily_limit` (既定 3)。太平洋時間 (夏時間を考える) の 0 時で区切って数える。日本時間では夏は 16 時、冬は 17 時に切り替わる。`quotaExceeded`・`uploadLimitExceeded` が返ったら、その日はやめる。
 - 通信が失敗したら、1 分・2 分・4 分…(最大 30 分) と間を空けて、最初から上げ直す (途中からの再開はしない)。警告は切れたときの 1 回だけで、続く間は静か。
 - 4xx で断られたら、5 回まで数えて諦める。キューの `error` に理由が残る (mp4 は `done/` に残る)。

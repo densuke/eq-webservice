@@ -1,5 +1,5 @@
 //! `eq-server youtube-auth --client <client.json> --token <token.json>`: 一度だけ人がやる同意の手続き。
-//! OAuth 2.0 の installed app (ループバックのリダイレクト・PKCE)。範囲は動画を上げる権限だけ。
+//! OAuth 2.0 の installed app (ループバックのリダイレクト・PKCE)。範囲は youtube.force-ssl (動画を上げる・再生リストに足すのに要る)。
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -16,7 +16,7 @@ pub const USAGE: &str = "\
 usage: eq-server youtube-auth --client <client.json> --token <token.json>
   Google Cloud の「デスクトップアプリ」の OAuth クライアント (JSON) を使って、YouTube に動画を上げる許可を 1 度だけ得る。
   同意の URL を表示する (macOS ではブラウザも開く)。同意すると、リフレッシュトークンを token.json に書く (モード 0600)。
-  許可の範囲は https://www.googleapis.com/auth/youtube.upload だけ (動画を上げるだけで、読み出し・削除はできない)。";
+  許可の範囲は https://www.googleapis.com/auth/youtube.force-ssl (再生リストへの追加に要る。YouTube の動画の編集・削除もできる範囲なので、トークンのファイルは人に渡さない)。";
 
 /// 同意の画面での操作を待つ時間
 const WAIT: Duration = Duration::from_secs(300);
