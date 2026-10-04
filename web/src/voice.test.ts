@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { enqueue, voiceUrl, MAX_VOICES, isPriorityTsunami, announceBody, announceUrl, tsunamiHistory } from "./voice.ts";
+import { enqueue, voiceUrl, MAX_VOICES, isPriorityTsunami, announceBody, announceUrl, tsunamiHistory, voiceRoute } from "./voice.ts";
 import type { Item } from "./voice.ts";
 import type { EqEvent } from "./types.ts";
 
@@ -125,4 +125,14 @@ test("tsunamiHistory: collects tsunami events from all groups in issued order", 
     tsunamiHistory(groups).map((e) => e.id),
     ["a", "b"],
   );
+});
+
+test("voiceRoute: demo and history replays (source demo) read from the cache, real events by id", () => {
+  // デモと履歴の再生は報を live として流し、id に #demoN を付ける。サーバはその id を知らないので本文つきで送る
+  const ev = (source: string) => ({ id: "x#demo1", kind: "quake", source }) as unknown as EqEvent;
+  assert.equal(voiceRoute(ev("demo"), true), "announce");
+  assert.equal(voiceRoute(ev("p2pquake"), true), "get");
+  // 黙って流す場合 (位置を飛ばした・再生開始時の早送り) は読まない
+  assert.equal(voiceRoute(ev("demo"), false), null);
+  assert.equal(voiceRoute(ev("p2pquake"), false), null);
 });

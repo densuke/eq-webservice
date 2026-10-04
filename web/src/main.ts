@@ -22,7 +22,7 @@ import type { EewEvent, EqEvent, UserquakeEvent } from "./types.ts";
 import { confidenceGrade, latestUserquake, userquakeShown } from "./userquake.ts";
 import { type Warnings, topLevel, warningSummary } from "./warnings.ts";
 import { notifyVoice, mixerAudio } from "./broadcast.ts";
-import { enqueueAnnounce, enqueueVoice, isPriorityTsunami, tsunamiHistory, voiceUrl } from "./voice.ts";
+import { enqueueAnnounce, enqueueVoice, isPriorityTsunami, tsunamiHistory, voiceRoute, voiceUrl } from "./voice.ts";
 import { loadBgmConfig, updateBgm } from "./bgm.ts";
 import { loadBanners, updateBanner } from "./banner.ts";
 import { loadCityWeather, renderCityWeather } from "./weather-layer.ts";
@@ -50,12 +50,21 @@ function playAlert(level: AlertLevel): void {
   lastAlert = { level, at: now() };
 }
 
-/** 音声読み上げ (設定が ON のとき)。mixer ならサーバへ URL を知らせ、通常はページで鳴らす */
-function speak(id: string, group: string, priority = false): void {
+/**
+ * 音声読み上げ (設定が ON のとき)。実際の報は id でサーバに取りに行き (mixer ならサーバへ URL を知らせる)、
+ * デモと履歴の再生の報は前の報と一緒に送ってキャッシュから組み立ててもらう (voiceRoute)
+ */
+function speak(e: EqEvent, group: string, groupEvents: readonly EqEvent[], live: boolean): void {
   // 画面右上の「音」が OFF なら、警戒音と同じく読み上げも止める
   if (!app.settings.voice || !soundEnabled()) return;
-  if (mixerAudio) notifyVoice(voiceUrl(id, location.href));
-  else enqueueVoice(id, group, priority);
+  const route = voiceRoute(e, live);
+  if (route === "announce") {
+    // 配信の mixer は本文つきの読み上げを受けないので、デモは鳴らさない
+    if (!mixerAudio) enqueueAnnounce(e, groupEvents, group);
+  } else if (route === "get") {
+    if (mixerAudio) notifyVoice(voiceUrl(e.id, location.href));
+    else enqueueVoice(e.id, group, isPriorityTsunami(e));
+  }
 }
 
 let timer = 0;
@@ -143,12 +152,7 @@ export function onEvents(all: EqEvent[], live: boolean, target: World = liveWorl
       app.world.tsunami = latestTsunami(app.world.tsunami, e);
       const lv = live ? tsunamiAlert(prev, activeAreas(app.world.tsunami)) : null;
       if (lv && (!alert || RANK[lv] > RANK[alert])) alert = lv;
-      if (lv) speak(e.id, "tsunami", isPriorityTsunami(e));
-    }
-    // 履歴の再生・デモ: 警戒音の判定が走らないので、報ごとに本文つきで読む (早送り中は読まない)
-    if (!live && (e.kind === "eew" || e.kind === "quake" || e.kind === "tsunami") && app.settings.voice && soundEnabled() && !mixerAudio && !fastForwarding()) {
-      if (e.kind === "tsunami") enqueueAnnounce(e, tsunamiHistory(app.world.store.list()), "tsunami");
-      else enqueueAnnounce(e, g.events, g.key);
+      if (lv) speak(e, "tsunami", tsunamiHistory(app.world.store.list()), live);
     }
     if (!live) continue;
     // その地震の EEW で既に鳴らしていれば、地震情報では鳴らさない
@@ -161,7 +165,7 @@ export function onEvents(all: EqEvent[], live: boolean, target: World = liveWorl
     const prevMax = Math.max(-1, ...g.events.slice(0, -1).map((x) => (x as EewEvent).max_scale));
     const lv = alertLevel(e, isNew, eewActive, prevMax);
     if (lv && (!alert || RANK[lv] > RANK[alert])) alert = lv;
-    if (lv) speak(e.id, g.key);
+    if (lv) speak(e, g.key, g.events, live);
     // 新しい地震は、巡回より先にしばらく見せる
     if (isNew && (e.kind === "eew" || e.kind === "quake")) {
       app.tourHold = { key: g.key, until: now() + Math.max(20, app.settings.tourSec * 2) * 1000 };
