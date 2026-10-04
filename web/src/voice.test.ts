@@ -136,3 +136,10 @@ test("voiceRoute: demo and history replays (source demo) read from the cache, re
   assert.equal(voiceRoute(ev("demo"), false), null);
   assert.equal(voiceRoute(ev("p2pquake"), false), null);
 });
+
+test("browser playback asks for the smaller 22.05 kHz wav, the mixer url stays 44.1 kHz", () => {
+  // 遠い回線でも早く届くよう、ブラウザで鳴らすときだけ ?rate=22050 を付ける
+  assert.equal(voiceUrl("a/b", "https://eq.example/", 22050), "https://eq.example/api/tts/event/a%2Fb?rate=22050");
+  assert.equal(voiceUrl("a/b", "https://eq.example/"), "https://eq.example/api/tts/event/a%2Fb");
+  assert.equal(announceUrl("https://eq.example/app/", 22050), "https://eq.example/app/api/tts/announce?rate=22050");
+});

@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::extract::{DefaultBodyLimit, Path, State};
+use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -37,6 +37,26 @@ pub fn router<S: Synth>(hub: Arc<Hub>, cache: Option<Arc<Cache<S>>>, token: Opti
         .with_state(Arc::new(AppState { hub, cache, token }))
 }
 
+/// `?rate=22050` でブラウザ向けの小さい WAV にする。無ければ 44.1kHz (配信の mixer はこちら)
+#[derive(Deserialize)]
+struct RateQuery {
+    rate: Option<u32>,
+}
+
+impl RateQuery {
+    /// 受け付ける周波数か (44.1kHz とその半分だけ)
+    fn valid(&self) -> bool {
+        matches!(self.rate, None | Some(wav::RATE) | Some(22_050))
+    }
+
+    fn apply(&self, bytes: Vec<u8>) -> Vec<u8> {
+        match self.rate {
+            Some(22_050) => wav::half_rate(&bytes).unwrap_or(bytes),
+            _ => bytes,
+        }
+    }
+}
+
 fn wav_response(bytes: Vec<u8>, cache_control: Option<&'static str>) -> Response {
     let mut res = ([(header::CONTENT_TYPE, "audio/wav")], bytes).into_response();
     if let Some(cc) = cache_control {
@@ -45,7 +65,14 @@ fn wav_response(bytes: Vec<u8>, cache_control: Option<&'static str>) -> Response
     res
 }
 
-async fn event<S: Synth>(State(st): State<Arc<AppState<S>>>, Path(id): Path<String>) -> Response {
+async fn event<S: Synth>(
+    State(st): State<Arc<AppState<S>>>,
+    Path(id): Path<String>,
+    Query(q): Query<RateQuery>,
+) -> Response {
+    if !q.valid() {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
     let Some(cache) = st.cache.clone() else {
         return StatusCode::NOT_FOUND.into_response();
     };
@@ -69,7 +96,7 @@ async fn event<S: Synth>(State(st): State<Arc<AppState<S>>>, Path(id): Path<Stri
         Duration::from_secs(3)
     };
     match cache.announce(&segs, timeout).await {
-        Ok(bytes) => wav_response(bytes, Some("public, max-age=86400")),
+        Ok(bytes) => wav_response(q.apply(bytes), Some("public, max-age=86400")),
         Err(TtsError::Budget) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
         Err(TtsError::Failed(e)) => {
             tracing::warn!("tts announce failed: {e:#}");
@@ -79,7 +106,10 @@ async fn event<S: Synth>(State(st): State<Arc<AppState<S>>>, Path(id): Path<Stri
 }
 
 /// 履歴の再生・デモ用。キャッシュ済みの部品だけで組み立てる (docs/tts.md S10)
-async fn announce<S: Synth>(State(st): State<Arc<AppState<S>>>, body: String) -> Response {
+async fn announce<S: Synth>(State(st): State<Arc<AppState<S>>>, Query(q): Query<RateQuery>, body: String) -> Response {
+    if !q.valid() {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
     let Some(cache) = st.cache.as_ref() else {
         return StatusCode::NOT_FOUND.into_response();
     };
@@ -98,7 +128,7 @@ async fn announce<S: Synth>(State(st): State<Arc<AppState<S>>>, body: String) ->
         return StatusCode::NOT_FOUND.into_response();
     }
     match cache.announce_cached(&segs).await {
-        Some(bytes) => wav_response(bytes, Some("no-store")),
+        Some(bytes) => wav_response(q.apply(bytes), Some("no-store")),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
@@ -328,6 +358,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn get_event_with_rate_22050_returns_half_size_wav() {
+        // ブラウザは ?rate=22050 で小さい WAV を受ける (配信の mixer は付けずに 44.1kHz)
+        let e = env(1_000_000);
+        e.hub.publish(event("q1", quake_body(QuakeInfoType::Destination)));
+        let (_, full) = get(app(&e), "/api/tts/event/q1").await;
+        let (parts, half) = get(app(&e), "/api/tts/event/q1?rate=22050").await;
+        assert_eq!(parts.status, StatusCode::OK);
+        assert_eq!(parts.headers[header::CONTENT_TYPE], "audio/wav");
+        assert_eq!(u32::from_le_bytes(half[24..28].try_into().unwrap()), 22_050);
+        assert!(half.len() < full.len() / 2 + 64);
+    }
+
+    #[tokio::test]
+    async fn get_event_with_unknown_rate_is_400() {
+        let e = env(1_000_000);
+        e.hub.publish(event("q1", quake_body(QuakeInfoType::Destination)));
+        let (parts, _) = get(app(&e), "/api/tts/event/q1?rate=12345").await;
+        assert_eq!(parts.status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
     async fn get_eew_event_returns_wav() {
         let e = env(1_000_000);
         e.hub.publish(event("w1", eew_body()));
@@ -545,6 +596,21 @@ mod tests {
         let (parts, _) = post_announce(app(&e), j).await;
         assert_eq!(parts.status, StatusCode::NOT_FOUND);
         assert_eq!(e.fake.texts().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn announce_with_rate_22050_returns_22050_hz_wav() {
+        let e = env(1_000_000);
+        e.cache.segment(FOLLOW, None).await.unwrap();
+        e.cache.segment(ISHIKAWA7, None).await.unwrap();
+        let j = announce_json(event("f1", followup_body()), vec![event("p1", prior_body())]);
+        let req = Request::post("/api/tts/announce?rate=22050")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(j.to_string()))
+            .unwrap();
+        let (parts, body) = call(app(&e), req).await;
+        assert_eq!(parts.status, StatusCode::OK);
+        assert_eq!(u32::from_le_bytes(body[24..28].try_into().unwrap()), 22_050);
     }
 
     #[tokio::test]
