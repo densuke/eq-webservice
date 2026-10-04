@@ -11,6 +11,8 @@ use tokio::sync::broadcast;
 const CHANNEL_CAPACITY: usize = 256;
 /// 重複排除のために覚えておく ID 数
 const SEEN_CAPACITY: usize = 4096;
+/// 読み上げ (tts) のために覚えておく受信済みイベントの数。EEW の古い報は直近履歴から消えるので、こちらで引けるようにする
+const PUBLISHED_CAPACITY: usize = 64;
 
 pub struct Hub {
     tx: broadcast::Sender<Arc<Event>>,
@@ -24,6 +26,8 @@ struct State {
     tsunami: Option<Arc<Event>>,
     seen: HashSet<String>,
     seen_order: VecDeque<String>,
+    /// 受信した順のイベント (直近履歴と違い、新しい報で置き換えない)
+    published: VecDeque<Arc<Event>>,
 }
 
 impl Hub {
@@ -36,6 +40,7 @@ impl Hub {
                 tsunami: None,
                 seen: HashSet::new(),
                 seen_order: VecDeque::new(),
+                published: VecDeque::new(),
             }),
             recent_capacity,
         })
@@ -73,7 +78,10 @@ impl Hub {
     pub fn get(&self, id: &str) -> Option<Arc<Event>> {
         let st = self.state.lock().unwrap();
         let found = st.recent.iter().find(|e| e.id == id);
-        found.or(st.tsunami.as_ref().filter(|t| t.id == id)).cloned()
+        found
+            .or(st.tsunami.as_ref().filter(|t| t.id == id))
+            .or_else(|| st.published.iter().find(|e| e.id == id))
+            .cloned()
     }
 
     fn remember(&self, mut ev: Event) -> Option<Arc<Event>> {
@@ -91,6 +99,10 @@ impl Hub {
             ev.received_at_ms = now_ms();
         }
         let ev = Arc::new(ev);
+        st.published.push_back(ev.clone());
+        if st.published.len() > PUBLISHED_CAPACITY {
+            st.published.pop_front();
+        }
         if matches!(ev.body, EventBody::Tsunami(_))
             && st
                 .tsunami
@@ -247,6 +259,15 @@ mod tests {
         hub.publish(ev("a"));
         hub.publish(ev("b"));
         assert_eq!(hub.get("b").unwrap().id, "b");
+    }
+
+    #[test]
+    fn get_finds_an_eew_report_superseded_by_a_later_serial() {
+        // 読み上げは第 1 報の id で取りに来る。その間に第 2 報が届いて直近履歴から消えても見つかること
+        let hub = Hub::new(10);
+        hub.publish(eew("e1", "Q", "1"));
+        hub.publish(eew("e2", "Q", "2"));
+        assert_eq!(hub.get("e1").unwrap().id, "e1");
     }
 
     #[test]

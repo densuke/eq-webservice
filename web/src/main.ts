@@ -14,7 +14,7 @@ import { sameQuake } from "./priority.ts";
 import { activeEews, calmState, currentGroup, displayedInfoMs, placeOf, priorityGroups, relatedQuake, updateNumbers, updateTour } from "./quakes.ts";
 import { renderMarkers, renderScene, scene } from "./scene.ts";
 import { pipSlot } from "./replay-sound.ts";
-import { play } from "./sound.ts";
+import { play, soundEnabled } from "./sound.ts";
 import { $, map } from "./dom.ts";
 import { type World, app, hooks, liveWorld, now, now as serverNow } from "./state.ts";
 import { activeAreas, latestTsunami, tsunamiAlert } from "./tsunami.ts";
@@ -52,7 +52,8 @@ function playAlert(level: AlertLevel): void {
 
 /** 音声読み上げ (設定が ON のとき)。mixer ならサーバへ URL を知らせ、通常はページで鳴らす */
 function speak(id: string, group: string): void {
-  if (!app.settings.voice) return;
+  // 画面右上の「音」が OFF なら、警戒音と同じく読み上げも止める
+  if (!app.settings.voice || !soundEnabled()) return;
   if (mixerAudio) notifyVoice(voiceUrl(id, location.href));
   else enqueueVoice(id, group);
 }
