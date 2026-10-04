@@ -40,8 +40,10 @@ enum ServerMessage<'a> {
     },
 }
 
+// media-src の blob: は、履歴の再生とデモの読み上げ (POST で受けた WAV を blob: の URL で鳴らす) のため
 const CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; \
-                   connect-src 'self' ws: wss:; frame-ancestors 'self'; base-uri 'none'; form-action 'none'";
+                   media-src 'self' blob:; connect-src 'self' ws: wss:; frame-ancestors 'self'; base-uri 'none'; \
+                   form-action 'none'";
 
 /// ブラウザから届くメッセージの上限。ブラウザは閉じる・ping への応答くらいしか送らない
 const MAX_CLIENT_MESSAGE: usize = 16 * 1024;
@@ -181,6 +183,8 @@ mod tests {
         assert_eq!(h(header::CACHE_CONTROL), "no-cache");
         assert_eq!(h(header::X_CONTENT_TYPE_OPTIONS), "nosniff");
         assert!(h(header::CONTENT_SECURITY_POLICY).contains("script-src 'self'"));
+        // 履歴の再生とデモの読み上げは POST で受けた WAV を blob: の URL で鳴らす (docs/tts.md S11)
+        assert!(h(header::CONTENT_SECURITY_POLICY).contains("media-src 'self' blob:"));
     }
 
     #[tokio::test]

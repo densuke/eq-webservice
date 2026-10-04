@@ -120,6 +120,23 @@ impl<S: Synth> Cache<S> {
     }
 }
 
+impl<S: Synth> Cache<S> {
+    /// キャッシュ済みの部品だけで組み立てる。合成も予算も使わない。無い部品は飛ばし、1 つも無ければ None
+    pub async fn announce_cached(&self, segs: &[String]) -> Option<Vec<u8>> {
+        let mut parts = Vec::new();
+        for seg in segs {
+            let path = self.dir.join("seg").join(format!("{}.wav", self.key(seg, &self.voice)));
+            if let Some(pcm) = Self::read_cached(&path).await {
+                parts.push(pcm);
+            }
+        }
+        if parts.is_empty() {
+            return None;
+        }
+        Some(wav::encode(&wav::join(&parts, 150)))
+    }
+}
+
 /// 一時ファイルに書いてから rename する (途中の壊れたファイルを残さない)。
 async fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
@@ -289,5 +306,29 @@ mod tests {
         let segs = vec!["a".to_string(), "b".to_string()];
         let r = cache.announce(&segs, Duration::from_secs(1)).await;
         assert!(matches!(r, Err(TtsError::Failed(_))));
+    }
+
+    #[tokio::test]
+    async fn announce_cached_returns_none_when_nothing_cached() {
+        let tmp = tempfile::tempdir().unwrap();
+        let fake = Fake::default();
+        let cache = make(tmp.path(), 1000, fake.clone());
+        let segs = vec!["A".to_string(), "B".to_string()];
+        assert!(cache.announce_cached(&segs).await.is_none());
+        assert_eq!(fake.count(), 0);
+    }
+
+    #[tokio::test]
+    async fn announce_cached_uses_only_cached_segments_without_synth() {
+        let tmp = tempfile::tempdir().unwrap();
+        let fake = Fake::default();
+        let cache = make(tmp.path(), 1000, fake.clone());
+        cache.segment("A", None).await.unwrap();
+        let before = fake.count();
+        let segs = vec!["A".to_string(), "B".to_string()];
+        let bytes = cache.announce_cached(&segs).await.unwrap();
+        // A だけ (間は入らない)
+        assert_eq!(wav::parse(&bytes).unwrap().len(), 10);
+        assert_eq!(fake.count(), before);
     }
 }

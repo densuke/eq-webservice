@@ -49,6 +49,23 @@ pub fn parse(bytes: &[u8]) -> anyhow::Result<Vec<i16>> {
 
 /// 44 バイトの標準ヘッダ付き WAV に書き出す。
 pub fn encode(pcm: &[i16]) -> Vec<u8> {
+    encode_at(pcm, RATE)
+}
+
+/// ブラウザ向けに半分の点数 (22.05kHz) へ落とす。読み上げは声だけなので十分聞き取れ、
+/// 遠い回線 (n2 は米国西部) でも届くまでの時間が半分になる。隣り合う 2 点の平均で、端の 1 点は捨てる
+pub fn half_rate(wav: &[u8]) -> anyhow::Result<Vec<u8>> {
+    let pcm = parse(wav)?;
+    let half: Vec<i16> = pcm
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|[a, b]| ((*a as i32 + *b as i32) / 2) as i16)
+        .collect();
+    Ok(encode_at(&half, RATE / 2))
+}
+
+fn encode_at(pcm: &[i16], rate: u32) -> Vec<u8> {
     let data_len = (pcm.len() * 2) as u32;
     let mut out = Vec::with_capacity(44 + pcm.len() * 2);
     out.extend_from_slice(b"RIFF");
@@ -57,8 +74,8 @@ pub fn encode(pcm: &[i16]) -> Vec<u8> {
     out.extend_from_slice(&16u32.to_le_bytes());
     out.extend_from_slice(&1u16.to_le_bytes()); // PCM
     out.extend_from_slice(&1u16.to_le_bytes()); // モノラル
-    out.extend_from_slice(&RATE.to_le_bytes());
-    out.extend_from_slice(&(RATE * 2).to_le_bytes()); // byte rate
+    out.extend_from_slice(&rate.to_le_bytes());
+    out.extend_from_slice(&(rate * 2).to_le_bytes()); // byte rate
     out.extend_from_slice(&2u16.to_le_bytes()); // block align
     out.extend_from_slice(&16u16.to_le_bytes());
     out.extend_from_slice(b"data");
@@ -193,5 +210,28 @@ mod tests {
     #[test]
     fn join_single_part_is_unchanged() {
         assert_eq!(join(&[vec![9, 8, 7]], 150), vec![9, 8, 7]);
+    }
+
+    #[test]
+    fn half_rate_averages_pairs_and_writes_22050_hz() {
+        // ブラウザ向けに半分の点数へ落とす (隣り合う 2 点の平均)。端の 1 点は捨てる
+        let half = half_rate(&encode(&[10, 20, 30, 40, 5])).unwrap();
+        assert_eq!(u32::from_le_bytes(half[24..28].try_into().unwrap()), 22_050);
+        assert_eq!(u32::from_le_bytes(half[28..32].try_into().unwrap()), 44_100); // byte rate
+        let data: Vec<i16> = half[44..].chunks(2).map(|c| i16::from_le_bytes([c[0], c[1]])).collect();
+        assert_eq!(data, vec![15, 35]);
+        assert_eq!(u32::from_le_bytes(half[40..44].try_into().unwrap()), 4);
+    }
+
+    #[test]
+    fn half_rate_does_not_overflow_on_loud_samples() {
+        let half = half_rate(&encode(&[i16::MAX, i16::MAX, i16::MIN, i16::MIN])).unwrap();
+        let data: Vec<i16> = half[44..].chunks(2).map(|c| i16::from_le_bytes([c[0], c[1]])).collect();
+        assert_eq!(data, vec![i16::MAX, i16::MIN]);
+    }
+
+    #[test]
+    fn half_rate_rejects_broken_input() {
+        assert!(half_rate(b"not a wav").is_err());
     }
 }
