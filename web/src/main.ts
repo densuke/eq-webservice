@@ -22,7 +22,7 @@ import type { EewEvent, EqEvent, UserquakeEvent } from "./types.ts";
 import { confidenceGrade, latestUserquake, userquakeShown } from "./userquake.ts";
 import { type Warnings, topLevel, warningSummary } from "./warnings.ts";
 import { notifyVoice, mixerAudio } from "./broadcast.ts";
-import { enqueueVoice, voiceUrl } from "./voice.ts";
+import { enqueueAnnounce, enqueueVoice, isPriorityTsunami, tsunamiHistory, voiceUrl } from "./voice.ts";
 import { loadBgmConfig, updateBgm } from "./bgm.ts";
 import { loadBanners, updateBanner } from "./banner.ts";
 import { loadCityWeather, renderCityWeather } from "./weather-layer.ts";
@@ -51,11 +51,11 @@ function playAlert(level: AlertLevel): void {
 }
 
 /** 音声読み上げ (設定が ON のとき)。mixer ならサーバへ URL を知らせ、通常はページで鳴らす */
-function speak(id: string, group: string): void {
+function speak(id: string, group: string, priority = false): void {
   // 画面右上の「音」が OFF なら、警戒音と同じく読み上げも止める
   if (!app.settings.voice || !soundEnabled()) return;
   if (mixerAudio) notifyVoice(voiceUrl(id, location.href));
-  else enqueueVoice(id, group);
+  else enqueueVoice(id, group, priority);
 }
 
 let timer = 0;
@@ -143,7 +143,12 @@ export function onEvents(all: EqEvent[], live: boolean, target: World = liveWorl
       app.world.tsunami = latestTsunami(app.world.tsunami, e);
       const lv = live ? tsunamiAlert(prev, activeAreas(app.world.tsunami)) : null;
       if (lv && (!alert || RANK[lv] > RANK[alert])) alert = lv;
-      if (lv) speak(e.id, "tsunami");
+      if (lv) speak(e.id, "tsunami", isPriorityTsunami(e));
+    }
+    // 履歴の再生・デモ: 警戒音の判定が走らないので、報ごとに本文つきで読む (早送り中は読まない)
+    if (!live && (e.kind === "eew" || e.kind === "quake" || e.kind === "tsunami") && app.settings.voice && soundEnabled() && !mixerAudio && !fastForwarding()) {
+      if (e.kind === "tsunami") enqueueAnnounce(e, tsunamiHistory(app.world.store.list()), "tsunami");
+      else enqueueAnnounce(e, g.events, g.key);
     }
     if (!live) continue;
     // その地震の EEW で既に鳴らしていれば、地震情報では鳴らさない

@@ -16,7 +16,7 @@ mod geo;
 mod held;
 mod hindsight;
 mod icon;
-mod model;
+pub(crate) mod model;
 mod notice;
 mod paint;
 mod panel;

@@ -12,7 +12,7 @@ const CHANNEL_CAPACITY: usize = 256;
 /// 重複排除のために覚えておく ID 数
 const SEEN_CAPACITY: usize = 4096;
 /// 読み上げ (tts) のために覚えておく受信済みイベントの数。EEW の古い報は直近履歴から消えるので、こちらで引けるようにする
-const PUBLISHED_CAPACITY: usize = 64;
+const PUBLISHED_CAPACITY: usize = 256;
 
 pub struct Hub {
     tx: broadcast::Sender<Arc<Event>>,
@@ -72,6 +72,21 @@ impl Hub {
         let st = self.state.lock().unwrap();
         let pinned = st.tsunami.as_ref().filter(|t| !st.recent.iter().any(|e| e.id == t.id));
         pinned.into_iter().chain(st.recent.iter()).cloned().collect()
+    }
+
+    /// 知っている報すべて (届いた順)。直近履歴と受信した報の保持分を id で重複なくまとめる
+    pub fn snapshot(&self) -> Vec<Arc<Event>> {
+        let st = self.state.lock().unwrap();
+        let mut all: Vec<Arc<Event>> = st.published.iter().cloned().collect();
+        // 受信保持分から漏れた直近履歴・津波予報を足す
+        for e in st.recent.iter().chain(st.tsunami.as_ref()) {
+            if !all.iter().any(|a| a.id == e.id) {
+                all.push(e.clone());
+            }
+        }
+        // 安定ソートなので同時刻は並びを保つ
+        all.sort_by_key(|e| e.received_at_ms);
+        all
     }
 
     /// id でイベントを探す (範囲は `recent()` と同じ)
@@ -268,6 +283,22 @@ mod tests {
         hub.publish(eew("e1", "Q", "1"));
         hub.publish(eew("e2", "Q", "2"));
         assert_eq!(hub.get("e1").unwrap().id, "e1");
+    }
+
+    #[test]
+    fn snapshot_keeps_superseded_eew_in_arrival_order() {
+        let hub = Hub::new(10);
+        hub.publish(eew("e1", "Q", "1"));
+        hub.publish(ev("x"));
+        hub.publish(eew("e2", "Q", "2"));
+        // e1 は直近履歴から消えているが、snapshot には残る
+        let ids: Vec<_> = hub.snapshot().iter().map(|e| e.id.clone()).collect();
+        assert_eq!(ids, ["e1", "x", "e2"]);
+    }
+
+    #[test]
+    fn published_capacity_is_256() {
+        assert_eq!(PUBLISHED_CAPACITY, 256);
     }
 
     #[test]

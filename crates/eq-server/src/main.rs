@@ -99,12 +99,13 @@ async fn main() -> anyhow::Result<()> {
     routes.push(bgm::router(&cfg.bgm));
     routes.push(banner::router(&cfg.banner));
     // jsonl の sink があるときだけ、その記録を返す
-    if let Some(path) = archive::jsonl_path(&cfg.sinks) {
+    let archive_path = archive::jsonl_path(&cfg.sinks);
+    if let Some(path) = archive_path.clone() {
         routes.push(archive::router(path));
     }
 
     // 音声アナウンス。キーが無ければ警告して無効 (エンドポイントは 404)
-    let tts_cache = build_tts(&cfg.tts)?;
+    let tts_cache = build_tts(&cfg.tts, archive_path, cfg.server.static_dir.join("demo"))?;
     let tts_token = std::env::var("EQ_TTS_TOKEN").ok().filter(|t| !t.is_empty());
     routes.push(tts::http::router(hub.clone(), tts_cache, tts_token));
 
@@ -191,7 +192,11 @@ async fn shutdown_signal() {
 }
 
 /// `[tts]` からキャッシュを作る。無効、またはキー未設定なら None
-fn build_tts(cfg: &tts::TtsConfig) -> anyhow::Result<Option<Arc<tts::cache::Cache<tts::google::Google>>>> {
+fn build_tts(
+    cfg: &tts::TtsConfig,
+    archive: Option<std::path::PathBuf>,
+    demo_dir: std::path::PathBuf,
+) -> anyhow::Result<Option<Arc<tts::cache::Cache<tts::google::Google>>>> {
     if !cfg.enabled {
         return Ok(None);
     }
@@ -207,7 +212,7 @@ fn build_tts(cfg: &tts::TtsConfig) -> anyhow::Result<Option<Arc<tts::cache::Cach
         budget,
     ));
     if cfg.prewarm {
-        tts::prewarm::spawn_prewarm(cache.clone());
+        tts::prewarm::spawn_prewarm(cache.clone(), archive, Some(demo_dir));
     }
     tracing::info!(voice = %cfg.voice, "tts enabled");
     Ok(Some(cache))
