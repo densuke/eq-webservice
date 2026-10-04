@@ -23,8 +23,16 @@ export function announceBody(e: EqEvent, groupEvents: readonly EqEvent[]): strin
   return JSON.stringify({ event: e, priors });
 }
 
-export function announceUrl(base: string): string {
-  return new URL("api/tts/announce", base).href;
+/** ブラウザで鳴らすときの周波数。遠い回線 (n2 は米国西部) でも早く届くよう、44.1kHz の半分にする */
+export const BROWSER_RATE = 22050;
+
+/** rate を付けると、その周波数の WAV を受ける (無ければ 44.1kHz。配信の mixer はこちら) */
+function withRate(url: string, rate?: number): string {
+  return rate ? `${url}?rate=${rate}` : url;
+}
+
+export function announceUrl(base: string, rate?: number): string {
+  return withRate(new URL("api/tts/announce", base).href, rate);
 }
 
 export const MAX_VOICES = 4;
@@ -50,8 +58,8 @@ export function enqueue(queue: readonly Item[], item: Item): Item[] {
   return next;
 }
 
-export function voiceUrl(id: string, base: string): string {
-  return new URL("api/tts/event/" + encodeURIComponent(id), base).href;
+export function voiceUrl(id: string, base: string, rate?: number): string {
+  return withRate(new URL("api/tts/event/" + encodeURIComponent(id), base).href, rate);
 }
 
 let queue: Item[] = [];
@@ -73,11 +81,11 @@ function next(): void {
     next();
   };
   if (!head.body) {
-    play(new Audio(voiceUrl(head.id, location.href)), advance);
+    play(new Audio(voiceUrl(head.id, location.href, BROWSER_RATE)), advance);
     return;
   }
   // 履歴・デモ: 本文を POST して WAV を受け取る (サーバは未合成の部品を飛ばす)
-  fetch(announceUrl(location.href), { method: "POST", headers: { "Content-Type": "application/json" }, body: head.body })
+  fetch(announceUrl(location.href, BROWSER_RATE), { method: "POST", headers: { "Content-Type": "application/json" }, body: head.body })
     .then((res) => (res.ok ? res.blob() : Promise.reject(new Error(String(res.status)))))
     .then((blob) => {
       const url = URL.createObjectURL(blob);
