@@ -1,11 +1,12 @@
 //! 配信の音を eq-server の中で作る (mixer)。ページ (?broadcast=1&audio=mixer) は音を鳴らさず、window.eqBroadcast(JSON) で
 //! 「BGM を流す・止める」「警戒音」を知らせてくる (chrome.rs が受ける)。
-//! ここでは BGM (Icecast の MP3 を戻したもの) と警戒音 (合成) を足し、20ms ごとに実時間の速さで PCM
+//! ここでは BGM (Icecast の MP3 を戻したもの)・警戒音 (合成)・読み上げの声 (WAV を取ってきたもの。鳴る間は BGM を絞る) を足し、20ms ごとに実時間の速さで PCM
 //! (s16le・44.1kHz・ステレオ) を名前付きパイプへ出す。ffmpeg はそれを音の入力として読む。
 
 mod bgm;
 mod synth;
 
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -28,13 +29,26 @@ const FADE_IN_FRAMES: usize = RATE as usize;
 const DEFAULT_VOLUME: f32 = 0.4;
 /// 同時に鳴らせる警戒音の数 (ページが暴走しても音を積み上げない)
 const MAX_ALERTS: usize = 16;
+/// 声が鳴っている間の BGM の倍率
+const DUCK: f32 = 0.3;
+/// 声の待ち行列の長さ (あふれたら古いものを捨てる)
+const MAX_VOICES: usize = 4;
 
 /// ページからの知らせ (docs/broadcast-v2.md の W1)
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum Notice {
-    Bgm { play: bool, volume: Option<f32> },
-    Alert { level: AlertLevel },
+    Bgm {
+        play: bool,
+        volume: Option<f32>,
+    },
+    Alert {
+        level: AlertLevel,
+    },
+    /// 読み上げの音声 (WAV の URL)
+    Voice {
+        url: String,
+    },
 }
 
 struct Bgm {
@@ -53,6 +67,7 @@ pub struct AudioMixer {
     open_bgm: Box<dyn Fn() -> Option<Box<dyn PcmSource>> + Send>,
     bgm: Option<Bgm>,
     alerts: Vec<Playing>,
+    voices: VecDeque<Playing>,
 }
 
 impl AudioMixer {
@@ -62,6 +77,7 @@ impl AudioMixer {
             open_bgm: Box::new(open_bgm),
             bgm: None,
             alerts: Vec::new(),
+            voices: VecDeque::new(),
         }
     }
 
@@ -89,18 +105,48 @@ impl AudioMixer {
                 });
             }
             Notice::Alert { .. } => {}
+            // 声は取ってくるのが非同期なので run() が受けて push_voice する
+            Notice::Voice { .. } => {}
+        }
+    }
+
+    /// 声 (モノ) を待ち行列に積む。ステレオ (L=R) に広げる。待ちは 4 本まで (あふれたら古いものを捨てる)
+    pub fn push_voice(&mut self, mono: Vec<i16>) {
+        let pcm = mono.into_iter().flat_map(|s| [s, s]).collect();
+        self.voices.push_back(Playing { pcm, pos: 0 });
+        if self.voices.len() > MAX_VOICES {
+            self.voices.pop_front();
         }
     }
 
     /// frames フレーム分 (L R の交互) を混ぜて出す。足し算が i16 を超えたら飽和させる
     pub fn render(&mut self, frames: usize) -> Vec<i16> {
         let mut sum = vec![0i32; frames * 2];
+        // 声: 先頭の 1 本だけ鳴らし、終わったら同じ chunk の続きから次を鳴らす
+        let mut has_voice = vec![false; frames];
+        let mut f = 0;
+        while f < frames {
+            let Some(v) = self.voices.front_mut() else {
+                break;
+            };
+            let n = ((v.pcm.len() - v.pos) / 2).min(frames - f);
+            for (s, x) in sum[f * 2..(f + n) * 2].iter_mut().zip(&v.pcm[v.pos..v.pos + n * 2]) {
+                *s += *x as i32;
+            }
+            has_voice[f..f + n].fill(true);
+            v.pos += n * 2;
+            f += n;
+            if v.pos >= v.pcm.len() {
+                self.voices.pop_front();
+            }
+        }
         if let Some(b) = &mut self.bgm {
             let mut buf = vec![0i16; frames * 2];
             b.source.pull(&mut buf); // 足りない分は無音のまま
             for (i, s) in buf.iter().enumerate() {
                 let ramp = ((b.played + i / 2) as f32 / FADE_IN_FRAMES as f32).min(1.0);
-                sum[i] += (*s as f32 * b.volume * ramp) as i32;
+                let duck = if has_voice[i / 2] { DUCK } else { 1.0 };
+                sum[i] += (*s as f32 * b.volume * ramp * duck) as i32;
             }
             b.played += frames;
         }
@@ -144,11 +190,27 @@ async fn open_fifo(path: &Path) -> std::io::Result<pipe::Sender> {
     }
 }
 
+/// 声の WAV を取ってきて、モノの PCM にして送る。失敗したら警告だけ出して鳴らさない
+async fn fetch_voice(client: reqwest::Client, url: String, tx: mpsc::UnboundedSender<Vec<i16>>) {
+    let pcm = match crate::net::body(client.get(&url)).await {
+        Ok(bytes) => crate::tts::wav::parse(&bytes),
+        Err(e) => Err(e),
+    };
+    match pcm {
+        Ok(pcm) => {
+            let _ = tx.send(pcm);
+        }
+        Err(e) => tracing::warn!("broadcast: voice fetch failed ({e}): {url}"),
+    }
+}
+
 /// 知らせ (JSON の文字列) を受けて混ぜ、実時間の速さで PCM を fifo に書き続ける。ffmpeg が読み始めるまでは待つ。
 /// 書けなくなった (ffmpeg が止まった) ら終わる
 async fn run(mut notices: mpsc::UnboundedReceiver<String>, fifo: PathBuf, bgm_url: String) {
     let open = move || (!bgm_url.is_empty()).then(|| Box::new(BgmStream::start(bgm_url.clone())) as Box<dyn PcmSource>);
     let mut mixer = AudioMixer::new(open);
+    let http = crate::net::client(Duration::from_secs(10));
+    let (voice_tx, mut voice_rx) = mpsc::unbounded_channel::<Vec<i16>>();
     let Ok(mut out) = open_fifo(&fifo).await else {
         return;
     };
@@ -163,7 +225,14 @@ async fn run(mut notices: mpsc::UnboundedReceiver<String>, fifo: PathBuf, bgm_ur
                     return;
                 }
             }
+            Some(pcm) = voice_rx.recv() => mixer.push_voice(pcm),
             Some(json) = notices.recv() => match serde_json::from_str::<Notice>(&json) {
+                Ok(Notice::Voice { url }) => match &http {
+                    Ok(c) => {
+                        tokio::spawn(fetch_voice(c.clone(), url, voice_tx.clone()));
+                    }
+                    Err(e) => tracing::warn!("broadcast: voice client unavailable ({e}): {url}"),
+                },
                 Ok(n) => mixer.apply(n),
                 Err(e) => {
                     let head: String = json.chars().take(100).collect();
@@ -344,5 +413,61 @@ mod tests {
         let mut m = AudioMixer::new(|| None);
         m.apply(play(1.0));
         assert!(m.bgm.is_none());
+    }
+
+    #[test]
+    fn a_voice_notice_is_parsed() {
+        let n = serde_json::from_str::<Notice>(r#"{"type":"voice","url":"http://x/a.wav"}"#).unwrap();
+        assert_eq!(
+            n,
+            Notice::Voice {
+                url: "http://x/a.wav".into()
+            }
+        );
+    }
+
+    /// L と R を取り出して、フレームごとの値にする (L=R であることも確かめる)
+    fn mono_of(out: &[i16]) -> Vec<i16> {
+        out.chunks(2)
+            .map(|f| {
+                assert_eq!(f[0], f[1], "L と R は同じ");
+                f[0]
+            })
+            .collect()
+    }
+
+    #[test]
+    fn voices_play_one_after_another_never_overlapping() {
+        let mut m = AudioMixer::new(|| None);
+        m.push_voice(vec![1000; 30]);
+        m.push_voice(vec![2000; 20]);
+        let got = mono_of(&m.render(70));
+        assert_eq!(&got[..30], &[1000; 30]);
+        assert_eq!(&got[30..50], &[2000; 20]);
+        assert_eq!(&got[50..], &[0; 20]);
+    }
+
+    #[test]
+    fn bgm_is_ducked_only_while_a_voice_plays() {
+        let mut m = mixer_with_bgm(10_000);
+        m.apply(play(1.0));
+        settled(&mut m);
+        m.push_voice(vec![0; 50]); // 無音の声でも「鳴っている」扱い
+        let got = mono_of(&m.render(60));
+        for (i, v) in got.iter().enumerate() {
+            let want = if i < 50 { 3000 } else { 10_000 };
+            assert!((*v as i32 - want).abs() <= 2, "frame {i}: {v}");
+        }
+    }
+
+    #[test]
+    fn at_most_four_voices_wait_and_the_oldest_is_dropped() {
+        let mut m = AudioMixer::new(|| None);
+        for v in 1..=5i16 {
+            m.push_voice(vec![v; 10]);
+        }
+        let got = mono_of(&m.render(60));
+        let want: Vec<i16> = (2..=5i16).flat_map(|v| [v; 10]).chain([0; 20]).collect();
+        assert_eq!(got, want);
     }
 }
