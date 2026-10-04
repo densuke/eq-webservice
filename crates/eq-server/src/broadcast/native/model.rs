@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 
 use super::shaken::Point;
+use crate::broadcast::mixer::AlertLevel;
 use crate::quake::{jst, Event, EventBody, Hypocenter, Quake, Scale};
 
 /// 同じ地震とみなす発生時刻の差と震央の距離
@@ -252,12 +253,154 @@ pub fn tsunami_text(code: &str) -> &'static str {
     }
 }
 
+/// 生放送で、いま届いた報 (events の末尾) が警戒音を鳴らすか。鳴らすなら音の強さと、読み上げる報の id (末尾の報の id) を返す。
+/// events はここまでに届いた報すべて (到着順)。判断は動画の音の規則 (replay の alert_level) と同じ。
+pub fn live_alert(events: &[Event], now_ms: u64) -> Option<(AlertLevel, String)> {
+    let level = crate::broadcast::replay::sound::alert_level(events, now_ms)?;
+    Some((level, events.last()?.id.clone()))
+}
+
+/// 警戒音を鳴らさなくても読み上げる報か (津波は数が少なく重要)
+pub fn should_read_without_alert(ev: &Event) -> bool {
+    matches!(ev.body, EventBody::Tsunami(_))
+}
+
+/// 読み上げの声の URL (id は URL 用に % で符号化する)
+pub fn voice_url(base: &str, id: &str) -> String {
+    let mut enc = String::new();
+    for b in id.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {
+            enc.push(b as char);
+        } else {
+            enc.push_str(&format!("%{b:02X}"));
+        }
+    }
+    format!("{base}/api/tts/event/{enc}")
+}
+
+/// mixer への警戒音の知らせ
+pub fn alert_notice(level: AlertLevel) -> String {
+    format!(
+        r#"{{"type":"alert","level":"{}"}}"#,
+        format!("{level:?}").to_lowercase()
+    )
+}
+
+/// mixer への読み上げの知らせ
+pub fn voice_notice(url: &str) -> String {
+    serde_json::json!({"type": "voice", "url": url}).to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::quake::{ObservationPoint, QuakeInfoType};
 
     const T0: i64 = 1_790_000_000_000;
+
+    // ---- live_alert ----
+    use crate::quake::{Eew, Tsunami};
+
+    const LT: u64 = T0 as u64;
+
+    fn eew(event_id: &str, serial: u32, recv: u64, warning: bool, scale: Scale) -> Event {
+        Event {
+            id: format!("{event_id}-{serial}"),
+            source: "wolfx".into(),
+            received_at_ms: recv,
+            body: EventBody::Eew(Eew {
+                event_id: event_id.into(),
+                serial: serial.to_string(),
+                cancelled: false,
+                test: false,
+                warning,
+                issued_at: String::new(),
+                origin_time: None,
+                origin_time_ms: Some(T0),
+                hypocenter: None,
+                areas: vec![],
+                pref_max: vec![],
+                max_scale: scale,
+            }),
+        }
+    }
+
+    fn live_quake(recv: u64) -> Event {
+        let mut e = quake("q", recv, T0 - 20_000, Some((35.68, 139.76)), Scale::S4);
+        if let EventBody::Quake(q) = &mut e.body {
+            q.info_type = QuakeInfoType::ScalePrompt;
+        }
+        e
+    }
+
+    #[test]
+    fn live_alert_rings_for_the_first_eew_report_with_that_events_id() {
+        let ev = [eew("E", 1, LT, false, Scale::S4)];
+        assert_eq!(live_alert(&ev, LT), Some((AlertLevel::Medium, "E-1".to_string())));
+    }
+
+    #[test]
+    fn live_alert_is_silent_for_a_second_report_with_the_same_max_scale() {
+        let ev = [
+            eew("E", 1, LT, false, Scale::S4),
+            eew("E", 2, LT + 1_000, false, Scale::S4),
+        ];
+        assert_eq!(live_alert(&ev, LT + 1_000), None);
+    }
+
+    #[test]
+    fn live_alert_rings_when_the_max_scale_rises() {
+        let ev = [
+            eew("E", 1, LT, false, Scale::S2),
+            eew("E", 2, LT + 1_000, false, Scale::S4),
+        ];
+        assert_eq!(
+            live_alert(&ev, LT + 1_000),
+            Some((AlertLevel::Medium, "E-2".to_string()))
+        );
+    }
+
+    #[test]
+    fn live_alert_is_silent_for_a_cancelled_eew() {
+        let mut e = eew("E", 1, LT, false, Scale::S4);
+        if let EventBody::Eew(x) = &mut e.body {
+            x.cancelled = true;
+        }
+        assert_eq!(live_alert(&[e], LT), None);
+    }
+
+    #[test]
+    fn live_alert_is_silent_for_a_test_eew_from_p2pquake() {
+        // 訓練報 (test = true)。alert_level は source を見ず、test フラグだけで黙る
+        let mut e = eew("E", 1, LT, true, Scale::S5_LOWER);
+        e.source = "p2pquake".into();
+        if let EventBody::Eew(x) = &mut e.body {
+            x.test = true;
+        }
+        assert_eq!(live_alert(&[e], LT), None);
+    }
+
+    #[test]
+    fn live_alert_rings_for_a_first_quake_report_without_a_prior_eew() {
+        let ev = [live_quake(LT)];
+        assert_eq!(live_alert(&ev, LT), Some((AlertLevel::Medium, "q".to_string())));
+    }
+
+    #[test]
+    fn live_alert_is_silent_for_a_tsunami_event() {
+        // alert_level は津波情報を鳴らさない (Eew と Quake だけ)
+        let e = Event {
+            id: "t".into(),
+            source: "p2pquake".into(),
+            received_at_ms: LT,
+            body: EventBody::Tsunami(Tsunami {
+                cancelled: false,
+                issued_at: String::new(),
+                areas: vec![],
+            }),
+        };
+        assert_eq!(live_alert(&[e], LT), None);
+    }
 
     fn quake(id: &str, recv: u64, origin_ms: i64, at: Option<(f64, f64)>, scale: Scale) -> Event {
         Event {
@@ -433,5 +576,15 @@ mod tests {
         };
         assert_eq!(hypo_text(Some(&h)), "千葉県東方沖 / M5.0 / ごく浅い");
         assert_eq!(hypo_text(None), "震源調査中");
+    }
+
+    #[test]
+    fn voice_url_encodes_slash_and_space() {
+        assert_eq!(voice_url("http://h", "a/b c"), "http://h/api/tts/event/a%2Fb%20c");
+    }
+
+    #[test]
+    fn alert_notice_is_lowercase_level() {
+        assert_eq!(alert_notice(AlertLevel::Strong), r#"{"type":"alert","level":"strong"}"#);
     }
 }
