@@ -63,7 +63,7 @@
 ## S2. いつ読むか
 **チャイム (警戒音) が鳴るときに読む。** 判定ロジックは新しく作らない。
 - ブラウザ: `web/src/main.ts` で `alertLevel()` が非 null を返したイベント、または `tsunamiAlert()` が非 null のとき。
-- 配信 (native): `broadcast/replay/sound.rs` の `alert_level()` (再生と同じ判定) が音を出すとき。
+- 配信 (native): `broadcast/replay/sound.rs` の `alert_level()` (再生と同じ判定) が音を出すとき。津波の報は警戒音なしで読み上げだけ送る (`alert_level` は津波を扱わないため)。接続直後の hello の報では鳴らさない。
 - 読み上げキューは同時に 1 本だけ再生する。待っている間に同じ地震の新しい報が来たら、古いほうは捨てて新しいほうだけ残す (EEW の続報の連打対策)。
 
 ## S3. 音声形式とキャッシュ
@@ -133,3 +133,30 @@ prewarm = true
 - キューの上限は 4。超えたら古いものから捨てる。
 
 ---
+
+## 実装の場所
+
+| 役割 | ファイル |
+|---|---|
+| 部品化 (S1) | `crates/eq-server/src/tts/phrase.rs` |
+| WAV の読み書き・結合 | `crates/eq-server/src/tts/wav.rs` |
+| 予算 (S4) | `crates/eq-server/src/tts/budget.rs` |
+| Google 呼び出し | `crates/eq-server/src/tts/google.rs` |
+| キャッシュ・結合 (S3) | `crates/eq-server/src/tts/cache.rs` |
+| 事前合成 | `crates/eq-server/src/tts/prewarm.rs` (地名は `epicenters.txt`, `tsunami_areas.txt`。作り方は `tools/tts_places.py`) |
+| HTTP API (S5) | `crates/eq-server/src/tts/http.rs` |
+| 配信 mixer (S7) | `crates/eq-server/src/broadcast/mixer/mod.rs` |
+| native 配信の判定 | `crates/eq-server/src/broadcast/native/model.rs` (`live_alert`) |
+| ブラウザ | `web/src/voice.ts` |
+
+## 無料枠の見積もり
+
+- 事前合成は約 6,000 字 (固定句、震央地名 343、津波予報区 66、都道府県 47)。キャッシュが残っていれば 2 回目以降の起動では 0 字。
+- 発報時に合成が起きるのは、一覧に無い地名が出たときだけ。1 件あたり十数字。
+- 窓口 (`POST /api/tts`) は 1 回 500 字まで。同じ文はキャッシュされるので、課金は 1 回だけ。
+- 月 100 万字の無料枠に対して、上限 (`monthly_char_limit`) の既定は 90 万字。超えると合成を止める (キャッシュ済みの部品は引き続き使える)。
+
+## 後回しにしたこと
+
+- 地名の誤読を直す読み替え辞書。実際に聞いてから、必要になったものだけ `phrase.rs` に足す。
+- 本番 (`deploy/`) で mixer を有効にし、キーを置く作業。リリースのときに行う。

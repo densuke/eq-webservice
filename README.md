@@ -170,6 +170,38 @@ cargo run -p eq-server -- convert samples/scenarios web/public/demo
 - Firefox: アドレスバー左のアイコン → 「自動再生」を「音声と動画を許可」
 - Safari: Safari → 設定 → Web サイト → 自動再生 → このサイトを「すべてのメディアを自動再生」
 
+### 音声アナウンス
+
+緊急地震速報・地震情報・津波情報を、Google Cloud Text-to-Speech (Neural2) で読み上げます。
+
+- **鳴るタイミング**: 警戒音が鳴る報で、警戒音に続けて読み上げます。
+- **ブラウザ**: 設定の「音声で読み上げる」で ON にします (既定は OFF)。
+- **配信 (mixer)**: 配信モードでは常に ON です。読み上げの間は BGM の音量を下げます。
+
+文は「緊急地震速報。」「震源は能登半島沖。」のような部品に分けて合成し、`cache_dir` に保存します。
+起動時には、固定句・震央地名・津波予報区・県名をまとめて事前に合成します (約 6,000 字)。
+そのため発報時に API を呼ぶことはほとんどありません。
+
+```toml
+[tts]
+enabled = true
+voice = "ja-JP-Neural2-B"
+cache_dir = "data/tts"
+monthly_char_limit = 900000   # 月の合成文字数の上限 (無料枠 100 万字の 9 割)
+```
+
+秘密情報は環境変数で渡します。
+
+- `GOOGLE_TTS_API_KEY`: Text-to-Speech API を有効にした API キー。未設定なら読み上げは無効になります。
+- `EQ_TTS_TOKEN`: 任意の文を読ませる窓口 `POST /api/tts` の Bearer トークン。未設定なら窓口は無効です。
+
+```sh
+curl -H "Authorization: Bearer $EQ_TTS_TOKEN" -H "Content-Type: application/json" \
+  -d '{"text":"ただいま訓練放送中です。"}' http://127.0.0.1:8080/api/tts -o out.wav
+```
+
+仕様の詳細は [docs/tts.md](docs/tts.md) にあります。
+
 
 ### バナー (平時の案内・お知らせ)
 
