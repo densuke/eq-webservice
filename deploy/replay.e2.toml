@@ -55,3 +55,5 @@ label = "記録から再現"
 map_dir = "map"
 font = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
 ffmpeg = "ffmpeg"
+# 読み上げをもらうサーバの URL (docs/replay-video.md 7 章)。空なら入れない
+voice_server = ""

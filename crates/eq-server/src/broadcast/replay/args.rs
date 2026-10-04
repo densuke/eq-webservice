@@ -10,12 +10,13 @@ use super::super::BroadcastConfig;
 pub const USAGE: &str = "\
 usage: eq-server replay-video --from <ms> --to <ms> --out <x.mp4> (--events <jsonl> | --archive <URL>)
            [--quake <origin_ms>[,<lat>,<lon>]]... [--chapters <x.json>]
-           [--fps 5] [--no-zoom] [--label \"記録から再現\"] [--map-dir web/public] [--font <ttf/ttc>] [--ffmpeg ffmpeg]
+           [--voice <URL>] [--fps 5] [--no-zoom] [--label \"記録から再現\"] [--map-dir web/public] [--font <ttf/ttc>] [--ffmpeg ffmpeg]
   --from/--to   報を集める範囲 (received_at_ms。epoch ミリ秒)。--archive のときは 1 時間まで
   --events      eq-server の jsonl の記録 (sink が書いたもの) を直接読む。samples/scenarios の形も読める
   --archive     /api/archive から取る (例: https://eq.fuga.jp)
   --quake       動画に入れる地震 (発生時刻と、分かれば震源の緯度・経度)。何度でも書ける (連続地震)。省けば範囲で最大震度の 1 つ
   --chapters    各地震の始まりの、動画の中の時刻を JSON で書き出す
+  --voice       読み上げを入れる。サーバの URL (例: https://eq.fuga.jp)。キャッシュ済みの声だけをもらい、Google は呼ばない。省けば入れない
   --no-zoom     震源へ寄らず、常に日本全体を映す (既定は web と同じく震源へ寄る)";
 
 /// 報の取り方
@@ -34,6 +35,8 @@ pub struct Options {
     /// 動画に入れる地震。空なら範囲で最大震度の 1 つ
     pub quakes: Vec<Place>,
     pub chapters: Option<PathBuf>,
+    /// 読み上げをもらうサーバの URL。None なら入れない
+    pub voice: Option<String>,
     pub fps: u32,
     /// 地震のとき震源へ寄る
     pub zoom: bool,
@@ -54,6 +57,7 @@ pub fn parse(args: &[String]) -> anyhow::Result<Options> {
         source: Source::Events(PathBuf::new()),
         quakes: Vec::new(),
         chapters: None,
+        voice: None,
         fps: 5,
         zoom: true,
         label: "記録から再現".into(),
@@ -76,6 +80,7 @@ pub fn parse(args: &[String]) -> anyhow::Result<Options> {
             "--archive" => archive = Some(value("--archive")?.trim_end_matches('/').to_string()),
             "--quake" => o.quakes.push(quake(&value("--quake")?)?),
             "--chapters" => o.chapters = Some(PathBuf::from(value("--chapters")?)),
+            "--voice" => o.voice = Some(value("--voice")?.trim_end_matches('/').to_string()),
             "--fps" => o.fps = value("--fps")?.parse().context("--fps")?,
             "--no-zoom" => o.zoom = false,
             "--label" => o.label = value("--label")?,
@@ -159,6 +164,15 @@ mod tests {
         let base = ["--from", "1", "--to", "9", "--out", "x", "--events", "e"];
         assert!(parse_strs(&base).unwrap().zoom);
         assert!(!parse_strs(&[&base[..], &["--no-zoom"]].concat()).unwrap().zoom);
+    }
+
+    #[test]
+    fn voice_is_off_unless_a_server_is_given() {
+        let base = ["--from", "1", "--to", "9", "--out", "x", "--events", "e"];
+        assert_eq!(parse_strs(&base).unwrap().voice, None);
+        let o = parse_strs(&[&base[..], &["--voice", "https://eq.fuga.jp/"]].concat()).unwrap();
+        assert_eq!(o.voice.as_deref(), Some("https://eq.fuga.jp"));
+        assert!(parse_strs(&[&base[..], &["--voice"]].concat()).is_err());
     }
 
     #[test]

@@ -9,6 +9,7 @@ pub(crate) mod sound;
 mod source;
 #[cfg(test)]
 mod testkit;
+mod voice;
 mod worker;
 
 use std::path::PathBuf;
@@ -90,11 +91,37 @@ async fn make(o: &Options, audio: &std::path::Path) -> anyhow::Result<()> {
             .with_context(|| format!("writing {}", path.display()))?;
     }
     let mut throttle = crate::broadcast::psi::Throttle::default();
-    encode::encode_audio(o, &plan, audio, &mut throttle).await?;
+    let voices = fetch_voices(o, &series.events, &plan).await;
+    encode::encode_audio(o, &plan, &voices, audio, &mut throttle).await?;
     let mut stepper = Stepper::new(native::load_renderer(&renderer_config(o))?);
     encode::encode_video(o, &series.events, &plan, &mut stepper, audio, &mut throttle).await?;
     tracing::info!(out = %o.out.display(), "replay-video: できました");
     Ok(())
+}
+
+/// --voice があれば、読む報の声をサーバから取る。取れなければ (通信できないなど) 警告だけで、声なしで作る
+async fn fetch_voices(o: &Options, events: &[crate::quake::Event], plan: &plan::Plan) -> Vec<voice::Clip> {
+    let Some(base) = &o.voice else {
+        return Vec::new();
+    };
+    let api = match voice::Http::new(base) {
+        Ok(a) => a,
+        Err(e) => {
+            tracing::warn!("replay-video: 読み上げの接続を作れません。声なしで作ります: {e:#}");
+            return Vec::new();
+        }
+    };
+    let slots = voice::schedule(events, &plan.frames, o.fps);
+    let clips = voice::collect(&api, events, &slots, voice::PAUSE).await;
+    for c in &clips {
+        tracing::info!(
+            "replay-video: 声 {:>6.1}秒 ({:.1}秒分)",
+            c.at_ms as f64 / 1000.0,
+            c.pcm.len() as f64 / f64::from(crate::broadcast::mixer::RATE)
+        );
+    }
+    tracing::info!("replay-video: 読む報 {} 件のうち、声 {} 本", slots.len(), clips.len());
+    clips
 }
 
 /// 描画に要る設定 (地図・フォント)。ほかは配信の既定のまま
