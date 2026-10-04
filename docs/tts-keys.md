@@ -60,12 +60,13 @@ openssl rand -hex 32
 
 ## 3. 本番サーバに置く
 
-`deploy/eq-server.service` は `/etc/default/eq-server` を `EnvironmentFile` として読みます。
-そこに 2 つを書き、権限を 600 にします。
+本番 (n2) の eq-server はユーザー単位の systemd ユニット (`~/.config/systemd/user/eq-server.service`) で動いており、
+`EnvironmentFile=-%h/.config/eq-server/env` を読みます。そこに 2 つを書き、権限を 600 にします。
 
 ```bash
-sudo install -m 600 -o root -g root /dev/null /etc/default/eq-server   # 無ければ作る (既にあれば不要)
-sudoedit /etc/default/eq-server
+install -d -m 700 ~/.config/eq-server
+touch ~/.config/eq-server/env && chmod 600 ~/.config/eq-server/env
+${EDITOR:-vi} ~/.config/eq-server/env
 ```
 
 追記する内容 (値は自分のものに置き換える):
@@ -75,10 +76,10 @@ GOOGLE_TTS_API_KEY=AIza...
 EQ_TTS_TOKEN=0123abcd...
 ```
 
-ユーザー単位の systemd ユニットで動かしている場合は、`~/.config/` の下など、そのユニットの `EnvironmentFile` に書きます。
-`eq-broadcast.service` のストリームキーと同じ置き方です。
+リリース付属の `deploy/eq-server.service` (システムのユニット) で動かす場合は、`/etc/default/eq-server` に同じ内容を書きます。
 
 あわせて `config.toml` で読み上げを有効にします。
+`[tts]` を読めるのは TTS 入りのバイナリだけです。古いバイナリのまま書くと、起動に失敗します。
 
 ```toml
 [tts]
@@ -88,13 +89,16 @@ enabled = true
 最後に再起動し、ログを確かめます。
 
 ```bash
-sudo systemctl restart eq-server
-journalctl -u eq-server -n 50 | grep tts
+systemctl --user restart eq-server
+journalctl --user -u eq-server -n 50 | grep tts
 ```
 
 - `tts enabled voice=ja-JP-Neural2-B` と出れば有効です。
 - 続けて `tts prewarm 50/...` と事前合成の進み具合が出ます。
 - `GOOGLE_TTS_API_KEY is not set` と出たら、環境変数が渡っていません。
+
+配信でも読み上げるには、配信の設定 (`cast.toml`) に `mixer = true` を書きます。
+BGM を配信に流さないなら `bgm_url = ""` も書きます。既定では eq.fuga.jp の BGM を流します。
 
 ## 4. 動作確認
 
@@ -116,7 +120,7 @@ curl -fsS -H "Authorization: Bearer $EQ_TTS_TOKEN" -H "Content-Type: application
 
 ## 5. 鍵を替えるとき
 
-- **API キー**: 新しいキーを作って `/etc/default/eq-server` を書き換え、再起動してから古いキーを削除する。
+- **API キー**: 新しいキーを作って `~/.config/eq-server/env` を書き換え、再起動してから古いキーを削除する。
   - キャッシュ (`data/tts/`) はキーと関係ないので、そのまま使える。
 - **トークン**: `openssl rand -hex 32` で作り直し、サーバと窓口を使う側の両方を書き換える。
 - 漏れた疑いがあるときは、先に古いものを無効にする (Google 側でキーを削除、トークンは書き換えて再起動)。
