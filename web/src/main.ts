@@ -19,7 +19,7 @@ import { $, map } from "./dom.ts";
 import { type World, app, hooks, liveWorld, now, now as serverNow } from "./state.ts";
 import { activeAreas, latestTsunami, tsunamiAlert } from "./tsunami.ts";
 import type { EewEvent, EqEvent, UserquakeEvent } from "./types.ts";
-import { confidenceGrade, latestUserquake, userquakeShown } from "./userquake.ts";
+import { type UserquakeRead, confidenceGrade, latestUserquake, userquakeReadable, userquakeShown } from "./userquake.ts";
 import { type Warnings, topLevel, warningSummary } from "./warnings.ts";
 import { notifyVoice, mixerAudio } from "./broadcast.ts";
 import { enqueueAnnounce, enqueueVoice, isPriorityTsunami, tsunamiHistory, voiceRoute, voiceUrl } from "./voice.ts";
@@ -180,28 +180,45 @@ export function onEvents(all: EqEvent[], live: boolean, target: World = liveWorl
 }
 
 let toastTimer = 0;
+/** 届いた気象庁の地震の情報 (緊急地震速報・地震情報) の受信時刻 */
+function officialAt(): number[] {
+  return app.world.store
+    .list()
+    .filter((g) => g.kind === "eew" || g.kind === "quake")
+    .map((g) => g.updatedAt);
+}
+
+/** 前に地震感知情報を読んだ揺れとそのとき (10 分に 1 回、同じ揺れは 1 回だけ) */
+let lastUserquakeRead: UserquakeRead | null = null;
+
 /** 巡回で次の地震へ移ったとき、番号と名前を短く出す */
 function receiveUserquake(e: UserquakeEvent, live: boolean, target: World): void {
   const prev = target.userquake;
   target.userquake = latestUserquake(prev, e);
-  // 新しい揺れの報告が始まったときだけ知らせる (同じ揺れの評価の更新では鳴らさない)
-  if (!live || target !== app.world || prev?.started_at === e.started_at) return;
+  if (!live || target !== app.world) return;
+  // 信頼できる評価が届いたら、案内音のあとに 1 回だけ読む (同じ揺れの更新や 10 分以内は読まない。デモは間隔を見ない)
+  const demo = e.source === "demo";
+  if (userquakeReadable(e, serverNow(), officialAt(), lastUserquakeRead, !demo)) {
+    // デモは次の再生を 10 分待たせない (間隔の起点を無限の過去にする)
+    lastUserquakeRead = { startedAt: e.started_at, at: demo ? -Infinity : serverNow() };
+    playAlert("info");
+    speak(e, `userquake-${e.started_at}`, [e], live);
+  } else if (prev?.started_at !== e.started_at) {
+    // 読まない新しい揺れの報告は、控えめな音で知らせるだけ (同じ揺れの評価の更新では鳴らさない)
+    play("feel");
+  }
+  if (prev?.started_at === e.started_at) return;
   const names = [...e.areas]
     .sort((a, b) => b.count - a.count)
     .map((a) => app.userquakeAreas.get(a.code)?.[0])
     .filter((n): n is string => !!n);
-  play("feel");
   showToast(`揺れの報告: ${esc(names.slice(0, 3).join("、") || "地域不明")}${names.length > 3 ? " ほか" : ""}`);
 }
 
 /** 地震感知情報の印を地図に出す (出す間だけ)。出したかを返す */
 function renderUserquake(now: number): boolean {
   const u = app.world.userquake;
-  const official = app.world.store
-    .list()
-    .filter((g) => g.kind === "eew" || g.kind === "quake")
-    .map((g) => g.updatedAt);
-  if (!u || !userquakeShown(u, now, official)) {
+  if (!u || !userquakeShown(u, now, officialAt())) {
     map.setUserquake([]);
     return false;
   }

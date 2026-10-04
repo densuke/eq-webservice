@@ -403,6 +403,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn get_credible_userquake_returns_wav_even_after_a_newer_evaluation() {
+        use crate::quake::model::UserquakeArea;
+        let uq = |conf: f64| {
+            EventBody::Userquake(Userquake {
+                started_at: "2026/09/29 10:00:00.000".into(),
+                updated_at: "2026/09/29 10:00:10.000".into(),
+                count: 5,
+                confidence: conf,
+                areas: vec![UserquakeArea {
+                    code: 205,
+                    count: 3,
+                    confidence: 0.9,
+                }],
+            })
+        };
+        let e = env(1_000_000);
+        e.hub.publish(event("u1", uq(0.97)));
+        e.hub.publish(event("u2", uq(0.98)));
+        // 同じ揺れの古い評価も id で引ける (直近履歴からは消えても公開済みの記録に残る)
+        for id in ["u1", "u2"] {
+            let (parts, body) = get(app(&e), &format!("/api/tts/event/{id}")).await;
+            assert_wav(&parts, &body);
+        }
+    }
+
+    #[tokio::test]
     async fn get_event_without_segments_is_404() {
         let e = env(1_000_000);
         e.hub.publish(event(

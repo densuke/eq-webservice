@@ -1,7 +1,9 @@
 //! docs/tts.md を参照
 
-use crate::quake::model::{Event, EventBody, Hypocenter, QuakeInfoType, Tsunami, TsunamiGrade};
+use crate::quake::area::PREFS;
+use crate::quake::model::{Event, EventBody, Hypocenter, QuakeInfoType, Tsunami, TsunamiGrade, Userquake};
 use crate::quake::scale::Scale;
+use crate::quake::userquake;
 
 // 固定句。segments と fixed_segments で共有する。
 const EEW_CANCELLED: &str = "先ほどの緊急地震速報は取り消されました。";
@@ -17,6 +19,7 @@ const TSUNAMI_CANCELLED: &str = "津波予報は解除されました。";
 const TSUNAMI_MORE: &str = "ほかの地域。";
 const EVACUATE: &str = "海岸から離れ、高台に避難してください。";
 const WATCH_AREA_LIMIT: usize = 10;
+const USERQUAKE_REPORTED: &str = "揺れを感じたという報告が集まっています。";
 
 /// 震度の種類 (不明を除く)。46 は 5弱以上と推定。
 const SCALES: [Scale; 10] = [
@@ -123,6 +126,36 @@ fn tsunami_segments(t: &Tsunami) -> Vec<String> {
     out
 }
 
+/// 地震感知情報の文。信頼できる評価でなければ空。県名の部品は userquake_pref_segments と同じ形。
+/// 「揺れを感じたという報告」とだけ言う (機器の検知ではない)。docs/tts.md S12
+fn userquake_segments(u: &Userquake) -> Vec<String> {
+    if !userquake::credible(u) {
+        return vec![];
+    }
+    let prefs = userquake::credible_prefs(u);
+    let shown = &prefs[..prefs.len().min(userquake::MAX_PREFS)];
+    let more = prefs.len() > shown.len();
+    let mut out: Vec<String> = shown
+        .iter()
+        .enumerate()
+        .map(|(i, p)| match (i + 1 == shown.len(), more) {
+            (false, _) => format!("{p}、"),
+            (true, false) => format!("{p}で、"),
+            (true, true) => format!("{p}などで、"),
+        })
+        .collect();
+    out.push(USERQUAKE_REPORTED.to_string());
+    out
+}
+
+/// prewarm 用に、地震感知情報で読む県名の部品 (「{p}、」「{p}で、」「{p}などで、」) を返す。
+pub fn userquake_pref_segments() -> Vec<String> {
+    PREFS
+        .iter()
+        .flat_map(|p| [format!("{p}、"), format!("{p}で、"), format!("{p}などで、")])
+        .collect()
+}
+
 /// イベントを読み上げ部品 (1 部品 = 1 回の合成) に分ける。空は「読まない」。
 pub fn segments(ev: &Event) -> Vec<String> {
     match &ev.body {
@@ -170,7 +203,8 @@ pub fn segments(ev: &Event) -> Vec<String> {
                 .collect()
         }
         EventBody::Tsunami(t) => tsunami_segments(t),
-        EventBody::EewDetection(_) | EventBody::Userquake(_) => vec![],
+        EventBody::Userquake(u) => userquake_segments(u),
+        EventBody::EewDetection(_) => vec![],
     }
 }
 
@@ -189,6 +223,7 @@ pub fn fixed_segments() -> Vec<String> {
         TSUNAMI_CANCELLED,
         TSUNAMI_MORE,
         EVACUATE,
+        USERQUAKE_REPORTED,
     ]
     .map(String::from);
     let scales = SCALES.iter().flat_map(|s| [max_sentence(*s), expected_sentence(*s)]);
@@ -453,7 +488,8 @@ pub fn announce_segments(ev: &Event, priors: &[&Event]) -> Vec<String> {
         EventBody::Eew(_) => announce_eew(ev, priors),
         EventBody::Quake(_) => announce_quake(ev, priors),
         EventBody::Tsunami(_) => announce_tsunami(ev, priors),
-        EventBody::EewDetection(_) | EventBody::Userquake(_) => vec![],
+        EventBody::Userquake(_) => segments(ev),
+        EventBody::EewDetection(_) => vec![],
     }
 }
 
@@ -1106,5 +1142,84 @@ mod tests {
         let got = noto_announce("659268caf0f6de00075648b1");
         assert!(got.contains(&"マグニチュードは7.6に更新されました。".to_string()));
         assert!(got.iter().all(|x| !x.starts_with("震源は")));
+    }
+
+    // ---- 地震感知情報 (docs/tts.md S12) ----
+
+    fn uq_ev(areas: &[(u32, f64)], confidence: f64) -> Event {
+        let u = Userquake {
+            started_at: "2026/09/29 10:00:00.000".into(),
+            updated_at: "2026/09/29 10:00:10.000".into(),
+            count: 9,
+            confidence,
+            areas: areas
+                .iter()
+                .map(|&(code, c)| crate::quake::model::UserquakeArea {
+                    code,
+                    count: 3,
+                    confidence: c,
+                })
+                .collect(),
+        };
+        ev("p2pquake", EventBody::Userquake(u))
+    }
+
+    const UQ_TAIL: &str = "揺れを感じたという報告が集まっています。";
+
+    #[test]
+    fn userquake_one_prefecture() {
+        // 205 は茨城
+        assert_eq!(segments(&uq_ev(&[(205, 0.9)], 0.97)), s(&["茨城県で、", UQ_TAIL]));
+    }
+
+    #[test]
+    fn userquake_two_prefectures_in_confidence_order() {
+        // 241 は千葉。信頼度の高い茨城が先
+        assert_eq!(
+            segments(&uq_ev(&[(241, 0.7), (205, 0.9)], 0.97)),
+            s(&["茨城県、", "千葉県で、", UQ_TAIL])
+        );
+    }
+
+    #[test]
+    fn userquake_three_or_more_prefectures_keep_two_and_add_nado() {
+        // 215 は栃木。3 県目は読まず「など」
+        assert_eq!(
+            segments(&uq_ev(&[(241, 0.7), (205, 0.9), (215, 0.65)], 0.97)),
+            s(&["茨城県、", "千葉県などで、", UQ_TAIL])
+        );
+    }
+
+    #[test]
+    fn userquake_is_not_read_unless_credible() {
+        assert!(segments(&uq_ev(&[(205, 0.9)], 0.5)).is_empty());
+        assert!(segments(&uq_ev(&[(205, 0.59)], 0.97)).is_empty());
+        assert!(segments(&uq_ev(&[], 0.97)).is_empty());
+        // 続報の経路も同じ
+        assert_eq!(
+            announce_segments(&uq_ev(&[(205, 0.9)], 0.97), &[]),
+            s(&["茨城県で、", UQ_TAIL])
+        );
+    }
+
+    #[test]
+    fn userquake_wording_never_claims_detection() {
+        let all = userquake_pref_segments().join("") + UQ_TAIL;
+        assert!(!all.contains("検知") && !all.contains("観測"));
+    }
+
+    #[test]
+    fn userquake_parts_are_all_prewarmable() {
+        let pre = userquake_pref_segments();
+        assert_eq!(pre.len(), 47 * 3);
+        for areas in [
+            vec![(205, 0.9)],
+            vec![(241, 0.7), (205, 0.9)],
+            vec![(241, 0.7), (205, 0.9), (215, 0.65)],
+        ] {
+            for seg in segments(&uq_ev(&areas, 0.97)) {
+                assert!(pre.contains(&seg) || fixed_segments().contains(&seg), "{seg}");
+            }
+        }
     }
 }
