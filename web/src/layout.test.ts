@@ -44,3 +44,21 @@ for (const l of LAYOUTS) {
     for (const b of boxes(l.root)) assert.ok(BOXES[b], `unknown box ${b}`);
   });
 }
+
+test("every SLOTS/BOXES selector names an element of index.html (or an inset made by map.ts)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+  const mapTs = readFileSync(new URL("./map.ts", import.meta.url), "utf8");
+  for (const sel of [...Object.values(SLOTS), ...Object.values(BOXES)].flatMap((s) => s.split(","))) {
+    const m = /^\s*([a-z]*)([#.])([\w-]+)\s*$/.exec(sel);
+    assert.ok(m, `simple selector expected: ${sel}`);
+    const [, tag, kind, name] = m;
+    const inset = /^inset-(\w+)$/.exec(name);
+    if (inset) {
+      assert.match(mapTs, new RegExp(`id: "${inset[1]}"`), sel);
+      continue;
+    }
+    const attr = kind === "#" ? `id="${name}"` : `class="(?:[^"]* )?${name}(?: [^"]*)?"`;
+    assert.match(html, new RegExp(`<${tag || "[a-z]+"}\\b[^>]*\\b${attr}`), sel);
+  }
+});

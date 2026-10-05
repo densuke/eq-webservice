@@ -324,6 +324,8 @@ a.banner-item:hover p { text-decoration: underline; }
 .ld-top, .ld-bottom { left: 50%; transform: translateX(-50%); align-items: center; }
 .ld-top { top: 0; }
 .ld-bottom { bottom: 0; }
+/* 案内のボタンが無いときも、通知は前と同じ高さ (地図の下端から 60px) に出す */
+.ld-bottom > #tour-toast:has(+ #sound-hint[hidden]) { margin-bottom: 50px; }
 /* スマホ (compact) は、いまの見た目に合わせる: 時計は角から 6px、別枠と案内の間 4px・凡例まで 8px。
    寄って別枠が隠れても、凡例の位置は変えない (別枠の高さ 140px を空けておく) */
 body[data-layout="compact"] .ld-bottom-right { padding: 6px; }
