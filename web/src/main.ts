@@ -28,7 +28,7 @@ import { loadBanners, updateBanner } from "./banner.ts";
 import { loadCityWeather, renderCityWeather } from "./weather-layer.ts";
 import { numTag, renderBanner, renderDetail, renderList, renderMode, renderTsunamiBanner, updatePointsOpen } from "./view.ts";
 import { latestEew, summarizeQuake } from "./groups.ts";
-import { applyLayout } from "./layout-dom.ts";
+import { applyLayout, loadLayoutFile } from "./layout-dom.ts";
 
 /** この時間内に続けて届いた情報では、前より強い音のときだけ鳴らす */
 const ALERT_MERGE_MS = 3000;
@@ -383,8 +383,9 @@ hooks.renderAll = renderAll;
 hooks.onEvents = onEvents;
 hooks.playAlert = playAlert;
 
-// 画面の大きさに合うレイアウトの定義 (layout.ts) で並べる。大きさが変わって定義が変われば並べ直す
+// まず組み込みの定義で並べ、eq-server の定義ファイルが読めたらそれで並べ直す (ファイルを書き換えて再読み込みすれば変わる)
 applyLayout();
+void loadLayoutFile();
 window.addEventListener("resize", () => applyLayout());
 
 loadTelop();

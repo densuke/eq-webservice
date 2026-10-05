@@ -1,0 +1,137 @@
+{
+  "version": 1,
+  "note": "画面の並びの定義 (eq-server の [layout] file で差し替えられる)。書式は docs/ui-spec/layout-system.html の「定義ファイル」。上から順に、when に最初に合うものを使う",
+  "layouts": [
+    {
+      "name": "landscape",
+      "note": "横向きのスマホ (幅 801 以上・高さ 480 以下。高さの低い PC のウィンドウも)。高さが足りないので、帯を地図の左上に重ねる札にする (EEW は 1 件ずつ巡回)。別枠と凡例は横に並べる。上部バーは細く (CSS)",
+      "when": {"minWidth": 801, "maxHeight": 480},
+      "root": {
+        "dir": "column",
+        "children": [
+          {"slot": "topbar", "size": "auto"},
+          {
+            "box": "layout",
+            "dir": "row",
+            "size": "fill",
+            "children": [
+              {
+                "slot": "main",
+                "size": "fill",
+                "overlays": {
+                  "top-left": {
+                    "flow": "column",
+                    "items": [
+                      {"slot": "banners", "variant": "compact"},
+                      {"flow": "row", "items": ["inset", "legend", "caption"]},
+                      "countdown"
+                    ]
+                  },
+                  "bottom-right": {"flow": "column", "items": ["ogasawara", "clock"]},
+                  "bottom": {"flow": "column", "items": ["toast", "hint"]}
+                }
+              },
+              {
+                "box": "side",
+                "dir": "column",
+                "size": "300px",
+                "children": [
+                  {"slot": "settings", "size": "auto"},
+                  {"slot": "detail", "size": "auto"},
+                  {"slot": "history-head", "size": "auto"},
+                  {"slot": "history", "size": "fill"},
+                  {"slot": "notice", "size": "fill"},
+                  {"slot": "credit", "size": "auto"}
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "regular",
+      "note": "PC (幅 801 以上)。地図 + 右パネル 380px。別枠の右に天気の札の案内、その下にカウントダウン (別枠が隠れれば上に詰まる)",
+      "when": {"minWidth": 801},
+      "root": {
+        "dir": "column",
+        "children": [
+          {"slot": "topbar", "size": "auto"},
+          {"slot": "banners", "size": "auto"},
+          {
+            "box": "layout",
+            "dir": "row",
+            "size": "fill",
+            "children": [
+              {
+                "slot": "main",
+                "size": "fill",
+                "overlays": {
+                  "top-left": {"flow": "column", "items": [{"flow": "row", "items": ["inset", "caption"]}, "countdown"]},
+                  "bottom-left": {"flow": "column", "items": ["legend"]},
+                  "bottom-right": {"flow": "column", "items": ["ogasawara", "clock"]},
+                  "bottom": {"flow": "column", "items": ["toast", "hint"]}
+                }
+              },
+              {
+                "box": "side",
+                "dir": "column",
+                "size": "380px",
+                "children": [
+                  {"slot": "settings", "size": "auto"},
+                  {"slot": "detail", "size": "auto"},
+                  {"slot": "history-head", "size": "auto"},
+                  {"slot": "history", "size": "fill"},
+                  {"slot": "notice", "size": "fill"},
+                  {"slot": "credit", "size": "auto"}
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "compact",
+      "note": "スマホ縦 (幅 800 以下)。縦に積み、ページ全体がスクロール。別枠の右に案内、下に凡例 (地図が細いと凡例が九州に重なるため)。カウントダウンは時計の上に積む (横に並べると時計と重なる)",
+      "when": {"maxWidth": 800},
+      "scroll": "page",
+      "root": {
+        "dir": "column",
+        "children": [
+          {"slot": "topbar", "size": "auto"},
+          {"slot": "banners", "size": "auto"},
+          {
+            "box": "layout",
+            "dir": "column",
+            "size": "auto",
+            "children": [
+              {
+                "slot": "main",
+                "size": "60svh",
+                "overlays": {
+                  "top-left": {"flow": "column", "items": [{"flow": "row", "items": ["inset", "caption"]}, "legend"]},
+                  "bottom-right": {"flow": "column", "items": ["ogasawara", "countdown", "clock"]},
+                  "bottom": {"flow": "column", "items": ["toast", "hint"]}
+                }
+              },
+              {
+                "box": "side",
+                "dir": "column",
+                "size": "auto",
+                "children": [
+                  {"slot": "settings", "size": "auto"},
+                  {"slot": "detail", "size": "auto"},
+                  {"slot": "history-head", "size": "auto"},
+                  {"slot": "history", "size": "auto"},
+                  {"slot": "notice", "size": "auto"},
+                  {"slot": "credit", "size": "auto"}
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

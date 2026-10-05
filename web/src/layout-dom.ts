@@ -1,7 +1,7 @@
 // レイアウトの定義 (layout.ts) どおりに、いまのページの要素を並べ直す。
 // 部品の要素は index.html (と JapanMap が作る別枠) にあるものをそのまま使い、置き場所と大きさだけを決める。
 
-import { type Layout, type LayoutNode, type Part, type Stack, LAYOUTS, flexOf, pickLayout } from "./layout.ts";
+import { type Layout, type LayoutNode, type Part, type Stack, LAYOUTS, checkLayouts, flexOf, pickLayout } from "./layout.ts";
 
 /** 部品の名前 → 要素 (複数なら順に並べる) */
 export const SLOTS: Record<string, string> = {
@@ -109,10 +109,12 @@ function missing(node: LayoutNode): string[] {
 }
 
 let current: Layout | null = null;
+/** 使う定義 (はじめは組み込み。定義ファイルが読めたらそれ) */
+let layouts: readonly Layout[] = LAYOUTS;
 
 /** 画面の大きさに合う定義で並べる。前と同じ定義なら何もしない。
  *  部品や容器が見つからなければ、ログを出していまの並びのままにする (ページ全体を止めない) */
-export function applyLayout(layouts: readonly Layout[] = LAYOUTS): void {
+export function applyLayout(): void {
   const next = pickLayout(layouts, window.innerWidth, window.innerHeight);
   if (next === current) return;
   const lack = missing(next.root);
@@ -128,4 +130,28 @@ export function applyLayout(layouts: readonly Layout[] = LAYOUTS): void {
   document.body.dataset.layout = next.name;
   place(next.root, document.body, next.scroll === "page");
   for (const el of old) el.remove();
+}
+
+/**
+ * eq-server の定義ファイル (GET api/layout) を読み、正しければそれで並べ直す。
+ * 読めない (サーバの無い静的な配信など)・正しくないときは、ログを出して組み込みの定義のまま (ページは止めない)
+ */
+export async function loadLayoutFile(): Promise<void> {
+  try {
+    const res = await fetch("api/layout", { cache: "no-store" });
+    if (!res.ok) return;
+    const data: unknown = await res.json();
+    const errs = checkLayouts(data, Object.keys(SLOTS), Object.keys(BOXES));
+    if (errs.length) {
+      console.error(`layout: 定義ファイルが正しくないので、組み込みの定義を使う\n${errs.join("\n")}`);
+      return;
+    }
+    const next = (data as { layouts: Layout[] }).layouts;
+    if (JSON.stringify(next) === JSON.stringify(layouts)) return;
+    layouts = next;
+    current = null;
+    applyLayout();
+  } catch (e) {
+    console.error("layout: 定義ファイルを読めないので、組み込みの定義を使う", e);
+  }
 }
