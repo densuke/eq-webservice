@@ -345,3 +345,4 @@ body[data-layout="landscape"] .topbar .follow, body[data-layout="landscape"] .to
 [data-variant="compact"].tsunami-banner { padding: 2px 8px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 [data-variant="compact"].warn-banner { padding: 3px 10px; font-size: 12px; }
 body[data-layout="landscape"] .inset-okinawa { height: 140px; }
+body[data-layout="landscape"] .inset-ogasawara { height: 100px; }

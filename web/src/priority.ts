@@ -36,3 +36,11 @@ export function sameQuake(a: Place, b: Place): boolean {
 export function byPriority(a: { scale: Scale; at: number }, b: { scale: Scale; at: number }): number {
   return b.scale - a.scale || b.at - a.at;
 }
+
+/** 帯を 1 件ずつ見せる段階 (横向きのスマホ) で次の EEW へ切り替える間隔 */
+export const EEW_ROTATE_MS = 4000;
+
+/** n 件 (揺れの大きい順) を巡回するとき、いま見せる番号 (0 から)。時刻だけで決まる (描き直しても飛ばない) */
+export function rotationIndex(now: number, n: number, ms = EEW_ROTATE_MS): number {
+  return n > 0 ? Math.floor(now / ms) % n : 0;
+}

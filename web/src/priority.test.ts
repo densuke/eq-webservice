@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { MINOR_SETTLE_MS, SETTLE_MS, byPriority, sameQuake, settleMs } from "./priority.ts";
+import { EEW_ROTATE_MS, MINOR_SETTLE_MS, SETTLE_MS, byPriority, rotationIndex, sameQuake, settleMs } from "./priority.ts";
 
 const t0 = Date.UTC(2026, 8, 28, 3, 0, 0);
 
@@ -35,4 +35,13 @@ test("minor quakes (intensity 2 or less) go back to the calm view sooner", () =>
   assert.equal(settleMs(70), SETTLE_MS);
   // 最大震度が分からない (震源の情報だけ・EEW の予測なし) ものは通常どおり
   assert.equal(settleMs(-1), SETTLE_MS);
+});
+
+test("the compact EEW band shows each EEW in turn, by time alone", () => {
+  assert.equal(rotationIndex(0, 3), 0);
+  assert.equal(rotationIndex(EEW_ROTATE_MS - 1, 3), 0);
+  assert.equal(rotationIndex(EEW_ROTATE_MS, 3), 1);
+  assert.equal(rotationIndex(3 * EEW_ROTATE_MS, 3), 0);
+  assert.equal(rotationIndex(5 * EEW_ROTATE_MS, 1), 0);
+  assert.equal(rotationIndex(5 * EEW_ROTATE_MS, 0), 0);
 });

@@ -89,7 +89,7 @@ export const LAYOUTS: Layout[] = [
               },
             },
             {
-              box: "side", dir: "column", size: "380px",
+              box: "side", dir: "column", size: "300px",
               children: [
                 { slot: "settings", size: "auto" },
                 { slot: "detail", size: "auto" },

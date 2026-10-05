@@ -211,6 +211,9 @@ export class JapanMap {
     this.applyView();
     this.installPanZoom();
     new ResizeObserver(() => this.applyView()).observe(this.svg);
+    // 横向きでは帯が地図の上の札になる。出入りや中身で大きさが変わったら、天気の札を置き直す
+    const bands = new ResizeObserver(() => document.body.dataset.layout === "landscape" && this.thinCities());
+    for (const el of document.querySelectorAll("#eew-banner, #tsunami-banner, #warn-banner")) bands.observe(el);
   }
 
   async load(url: string): Promise<void> {
@@ -760,11 +763,13 @@ export class JapanMap {
   }
 
   /**
-   * 札が地図の上の重ね物 (凡例・別枠・案内・時計・帯の札など) や、優先の高い札と重なるときは海の上へ逃がし、置けなければ出さない
-   * (地図の大きさや範囲、凡例の行が変わるたびに置き直す)。重ね物は、レイアウトの定義で地図の隅に積んだものすべて (layout-dom.ts)
+   * 札が地図の上の重ね物 (凡例・別枠・案内・時計、横向きでは帯の札) や、優先の高い札と重なるときは海の上へ逃がし、置けなければ出さない
+   * (地図の大きさや範囲、凡例の行、横向きの帯が変わるたびに置き直す)
    */
   thinCities(): void {
-    const blockers = document.querySelectorAll(".ld-layer :is(.ld-corner, .ld-stack) > :not(.ld-stack):not([hidden])");
+    const blockers = document.querySelectorAll(
+      ".legend, .clock-panel, .weather-caption:not([hidden]), .inset:not([hidden]), body[data-layout=landscape] .ld-layer [data-variant]:not([hidden])",
+    );
     thinCityLayer(this.cityLayer, [...blockers], this.svg);
   }
 

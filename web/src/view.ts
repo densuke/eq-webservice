@@ -3,7 +3,7 @@
 import { type AreaScale, eewAreaScales, keepForecast, overlayForecast, quakeDetail } from "./detail.ts";
 import { type EewGroup, type Group, heldEew, latestEew, summarizeQuake } from "./groups.ts";
 import { esc } from "./html.ts";
-import { byPriority, sameQuake } from "./priority.ts";
+import { byPriority, rotationIndex, sameQuake } from "./priority.ts";
 import { activeEews, currentGroup, groupPlace, groupScale, relatedQuake } from "./quakes.ts";
 import { scaleColor, scaleLabel, scaleTextColor } from "./scale.ts";
 import { $, map } from "./dom.ts";
@@ -14,8 +14,6 @@ import type { Hypocenter, PrefScale, Scale, TsunamiEvent } from "./types.ts";
 
 /** EEW バナーに並べる件数 (残りは「ほか N 件」) */
 const EEW_BANNER_MAX = 3;
-/** 帯を 1 件ずつ見せる段階 (data-variant="compact"、横向きのスマホ) で次の EEW へ切り替える間隔 */
-const EEW_ROTATE_MS = 4000;
 
 export function numTag(key: string): string {
   const n = app.numbers.get(key);
@@ -268,9 +266,14 @@ export function renderBanner(now: number): void {
       e.warning ? "強い揺れに警戒" : `予測最大震度${scaleLabel(e.max_scale)}`
     }: ${esc(prefs || "—")}</div>`;
   };
-  // 1 件ずつ見せる段階: 揺れの大きい順に巡回し、何件目かを出す (色はいま見せている報で決める)
+  // 帯は role="alert" (読み上げは即時)。巡回で中身を書き換えるたびに読み上げ直さないよう、巡回中だけ止める。
+  // ponytail: 巡回中に増えた EEW も読み上げない (音声の読み上げの設定は別にある)。要るなら新しい報だけを別の読み上げ欄へ
+  const rotating = banner.dataset.variant === "compact" && eews.length > 1;
+  if (rotating) banner.setAttribute("aria-live", "off");
+  else banner.removeAttribute("aria-live");
+  // 1 件ずつ見せる段階 (data-variant="compact"、横向きのスマホ): 揺れの大きい順に巡回し、何件目かを出す (色はいま見せている報で決める)
   if (banner.dataset.variant === "compact" && eews.length > 0) {
-    const i = Math.floor(now / EEW_ROTATE_MS) % eews.length;
+    const i = rotationIndex(now, eews.length);
     banner.classList.toggle("forecast", !eews[i].warning);
     const html = (eews.length > 1 ? `<span class="eew-count">${i + 1}/${eews.length}</span>` : "") + row(eews[i]);
     if (banner.innerHTML !== html) banner.innerHTML = html;
