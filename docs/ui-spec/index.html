@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>画面部品 仕様書 (現状分析)</title>
+  <meta name="description" content="eq-webservice の画面を「部品」として捉え直し、将来レイアウト (通常版・モバイル版) を入れ替えられるようにするための現状分析と設計の叩き台">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<button class="menu-btn" id="menu-btn" type="button" aria-expanded="false" aria-controls="nav">目次</button>
+<div class="shell">
+  <nav class="nav" id="nav" aria-label="目次">
+    <h1>画面部品 仕様書<br><span class="muted" style="font-weight:400">現状分析</span></h1>
+    <div class="ver">v0.31.0 / f208e1e / 2026-10-05</div>
+    <ol id="toc"></ol>
+    <div class="tools">
+      <button type="button" id="theme-btn" title="ライト / ダークを切り替え">表示: 自動</button>
+    </div>
+  </nav>
+
+  <main>
+    <header>
+      <p class="lead small" style="margin:0">eq-webservice ドキュメント</p>
+      <h1 style="font-size:30px;line-height:1.35;margin:4px 0 8px">画面部品 仕様書 (現状分析)</h1>
+      <p class="lead">画面に出ているものを「部品」として洗い出し、将来、通常版とモバイル版で並べ方を変えられるようにするための土台となる資料です。
+      <b>今回は現状の分析が中心</b>で、実装の変更はしていません。最後の章に、部品化の設計の叩き台 (提案) を置いています。</p>
+      <div class="meta">
+        <span>対象: <b>eq-webservice v0.31.0</b> (commit f208e1e)</span>
+        <span>作成: <b>2026-10-05</b></span>
+        <span>状態: <b>分析ドラフト</b> (レビュー記録は第 13 章)</span>
+      </div>
+      <p class="small"><b>関連:</b> <a href="data-sources.html">データ源の調査メモ</a> — 観測点震度・台風・レーダー・既存データの利用条件 (要確認を明記)。</p>
+      <p class="small muted">各記述の確からしさを <span class="tag sure">確</span> (コードを読み、実測でも確認) / <span class="tag maybe">中</span> (コードからの読み取り。全状態の実機確認はしていない) / <span class="tag unknown">要</span> (推測を含む・未確認) で示します。まとめは第 12 章。</p>
+    </header>
+
+    <section id="s1">
+      <h2><span class="num">1</span>要旨</h2>
+      <div class="grid2">
+        <div class="card">
+          <h4 style="margin-top:0">分かったこと</h4>
+          <ul>
+            <li>画面は <b>上部バー / 帯 (EEW・津波・警報) / 地図 + 地図の上の重ね物 / 右パネル</b> の 4 領域で、部品は約 <b id="cnt-components">—</b> 個 (第 4 章)。</li>
+            <li>PC の並びは CSS grid で素直だが、<b>地図の上の重ね物は px の直書き</b>で互いに依存している (南西諸島の別枠の寸法が、案内・カウントダウン・凡例の位置に手計算で入っている)。</li>
+            <li>表示の出し分けは<b>状態 (平時 / EEW / 地震情報 / 津波 / 揺れの報告 / 再生 / デモ) の組み合わせ</b>で決まる。条件は複数のファイルに散っている (第 6 章)。</li>
+            <li>モバイル対応は <b>幅 800px の 1 本のブレークポイント</b>と高さの 2 段。横向きスマホ (844×390) では別枠と凡例が重なる (実測)。</li>
+            <li>配信 (native) は<b>別実装</b> (Rust・1280×720 固定) で、座標や文言を二重に持つ。</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h4 style="margin-top:0">部品化の前にほどくべきこと (第 11 章)</h4>
+          <ol>
+            <li>重ね物の<b>位置の手計算</b>を、隅ごとのスタックなど宣言的な置き方に</li>
+            <li>描画関数が <code>$("#id")</code> に直接書く作りを、<b>部品単位 (mount / update)</b> に</li>
+            <li>地図の描画と、地図の上の重ね物を<b>別のクラスに分ける</b></li>
+            <li>札の「避け合い」を、部品の宣言 (keepOut) で</li>
+            <li>表示条件を、<b>状態から決まる述語</b>として 1 か所に</li>
+          </ol>
+          <p class="small muted" style="margin-bottom:0">段階的な進め方の案と、先に決めておくべき論点は第 11 章。</p>
+        </div>
+      </div>
+      <div class="note warn"><b>最も効く実測の発見:</b> 横向きスマホ (844×390) は幅が 801px 以上なので PC の配置になり、高さ 220px の南西諸島の別枠が地図の大半を占め、<b>凡例の震度ゲージを覆い隠す</b> (図 7-3)。「通常版とモバイル版」の 2 つに分けるだけでは足りない可能性を示す。</div>
+    </section>
+
+    <section id="s2">
+      <h2><span class="num">2</span>現状の構造</h2>
+      <h3>2.1 画面を描く実装は 3 つ</h3>
+      <div class="tablewrap"><table>
+        <thead><tr><th>実装</th><th>場所</th><th>描き方</th><th>備考</th></tr></thead>
+        <tbody>
+          <tr><td><b>web (通常)</b></td><td><code>web/public/index.html</code> + <code>web/src/*.ts</code> → <code>dist/app.js</code></td><td>静的 HTML 1 枚 + TypeScript が DOM / SVG を直接更新 (フレームワークなし)</td><td>本書の主な対象。ビルドは esbuild で 1 ファイルにまとめる</td></tr>
+          <tr><td><b>web (配信用)</b></td><td>同じページに <code>?broadcast=1</code></td><td>操作ボタン 8 個を CSS で隠し、音を自動で有効にする</td><td>以前の配信方式 (画面の無い Chrome で開く)。現在の本番配信は native (<code>docs/broadcast-native.md</code>)</td></tr>
+          <tr><td><b>native</b></td><td><code>crates/eq-server/src/broadcast/native/</code></td><td>Rust (tiny-skia) で 1280×720 の絵を直接描き、ffmpeg へ渡す</td><td>web の見た目に「寄せる」方針。web とは座標・色・文言を別々に持つ (第 10 章)</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>2.2 web の層構造 <span class="tag sure">確</span></h3>
+      <div class="tablewrap"><table>
+        <thead><tr><th>層</th><th>主なファイル</th><th>性質</th></tr></thead>
+        <tbody>
+          <tr><td>起動・周期・受信</td><td><code>main.ts</code> (tick / onEvents / renderAll)、<code>connection.ts</code>、<code>state.ts</code></td><td>単一の変更可能な状態 <code>app</code> と、生の World / デモの World。循環参照を避けるため <code>hooks</code> 経由で呼び合う</td></tr>
+          <tr><td>純粋ロジック (DOM に触らない)</td><td><code>groups / quakes / priority / alert / tsunami / warnings / weather / thin / cluster / labels / camera / waves / scale / personal / userquake / fade / clock / history / voice …</code></td><td>28 本の <code>*.test.ts</code> が node --test で検証。<b>DOM・レイアウトのテストは無い</b></td></tr>
+          <tr><td>DOM 描画 (部品に当たる)</td><td><code>view.ts</code> (一覧・詳細・帯・モード)、<code>chrome.ts</code> (時計・テロップ・音)、<code>weather-layer.ts</code>、<code>banner.ts</code>、<code>bgm.ts</code>、<code>personal-ui.ts</code> (設定・カウントダウン)、<code>demo-ui.ts</code></td><td><code>$("#id")</code> で固定の要素を引いて innerHTML / textContent / hidden を書く。クリックなどのイベントは import した時点で付く</td></tr>
+          <tr><td>地図</td><td><code>map.ts</code> (JapanMap・916 行)、<code>scene.ts</code>、<code>map.css</code></td><td>SVG を自前で描く。層・カメラ・別枠・ツールチップ・画面外の矢印を 1 つのクラスが持つ</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>2.3 描画のサイクル <span class="tag sure">確</span></h3>
+      <ul>
+        <li><b><code>tick()</code></b> (main.ts) が全部品の <code>render*()</code> を順に呼ぶ命令的な更新。波を描いている間は <code>requestAnimationFrame</code>、それ以外は 1 秒ごとの <code>setTimeout</code> (デモ再生中は 200ms)。</li>
+        <li>無駄な書き換えは、文字列の署名 (<code>sig</code>)・<code>textContent</code> / <code>innerHTML</code> の比較で止める。部品ごとの「前回の値」は各ファイルのモジュール変数に散っている。</li>
+        <li>受信 (<code>onEvents</code>) は <code>renderAll()</code> で一覧・詳細・津波の帯・デモパネルを描き直し、そのまま <code>tick()</code> を呼ぶ。</li>
+        <li>時刻は <code>Connection.now()</code> (サーバ時刻との差を保持) で、デモ中はデモの時計に置き換わる。</li>
+      </ul>
+    </section>
+
+    <section id="s3">
+      <h2><span class="num">3</span>画面の領域と配置 <span class="tag sure">確</span></h2>
+      <p>実際に v0.31.0 をビルドして Chromium で開き、各部品の座標を測って描いた模式図です (付録 A)。下の切り替えで、PC・スマホ・横向きスマホ・native を見比べられます。<b>箱を押す</b>と部品の詳細が出ます。</p>
+      <div class="wf-controls" id="wf-controls" role="group" aria-label="表示する画面"></div>
+      <div class="wf-legend" id="wf-legend"></div>
+      <div class="wf-stage" id="wf-stage"><div class="wf-canvas" id="wf-canvas"></div></div>
+      <div class="wf-info card" id="wf-info"><span class="muted">箱を押すと、ここに部品の詳細が出ます。</span></div>
+      <p class="small muted">スマホの「EEW 中」はデモ (標準の場面) を 24 秒再生した時点で、デモパネルが開いたまま (地図の下がデモの一覧で長くなっている)。native の履歴・お知らせ・出典の高さは推定です。</p>
+
+      <h3>3.1 領域の要点</h3>
+      <ul>
+        <li><b>上部バー</b>: 題・モード札・操作ボタン・テロップ・時計以外の状態表示。PC は 1 行 (約 37px)、スマホは折り返して 2〜3 行 (約 91px) + sticky。</li>
+        <li><b>帯</b>: EEW・津波・警報の 3 本。<b>通常のフロー</b>で上部バーの下に出て、出ると地図と右パネルを押し下げる。native は逆に「重ねる」。</li>
+        <li><b>地図の枠</b>: SVG の地図 + 重ね物 (時計・凡例・別枠・案内・カウントダウン・トースト・矢印・ツールチップ) がすべて <code>position:absolute</code>。</li>
+        <li><b>右パネル</b>: 設定 / デモ / 詳細 / 履歴 / お知らせ / 出典。PC は幅 380px で縦に flex、スマホは地図の下へ縦積み。</li>
+      </ul>
+    </section>
+
+    <section id="s4">
+      <h2><span class="num">4</span>部品カタログ</h2>
+      <p>画面に出ているものを部品として一覧にしました。行を押すと詳細が開きます。「部品化の難しさ」は、現状の作りのまま別の場所へ置く・複製する・無効にする難しさの見立てです (<span class="tag lo">低</span> そのまま動かせる / <span class="tag mid">中</span> 周辺に依存あり / <span class="tag hi">高</span> 位置や寸法が他の部品と結びついている)。</p>
+      <div class="toolbar">
+        <input type="search" id="cat-q" placeholder="部品名・ID・ファイル名で絞り込み" aria-label="絞り込み">
+        <span id="cat-regions" role="group" aria-label="領域で絞り込み"></span>
+        <span id="cat-count" class="small muted"></span>
+      </div>
+      <div class="tablewrap"><table id="cat-table">
+        <thead><tr><th>部品</th><th>ID / セレクタ</th><th>領域</th><th>表示条件 (要約)</th><th class="c">難しさ</th><th class="c">確度</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+      <div class="detail-card card" id="cat-detail" hidden></div>
+
+      <h3>4.1 画面の見た目に関わらない出力 (部品化の対象外)</h3>
+      <p>次のものは画面のレイアウトには出ませんが、状態に応じて動く「出力」です。部品の再定義とは別の系統として扱うのが自然です。</p>
+      <ul>
+        <li><b>警戒音・案内音</b> (<code>sound.ts</code>): 新しい情報・波の広がり中の 2 秒ごとの短い音・揺れの報告の控えめな音。</li>
+        <li><b>BGM</b> (<code>bgm.ts</code>): 平時のみ。ボタン・曲名の部品だけ画面にある。</li>
+        <li><b>読み上げ</b> (<code>voice.ts</code>): サーバの音声 (<code>/api/tts/…</code>)。設定で ON/OFF。</li>
+        <li><b>ブラウザ通知</b> (<code>personal-ui.ts notify()</code>): 画面が裏にあるときだけ。</li>
+      </ul>
+    </section>
+
+    <section id="s5">
+      <h2><span class="num">5</span>地図 SVG の層 <span class="tag sure">確</span></h2>
+      <p>地図の中身は 1 枚の SVG で、層の順 (下から) と出す条件は次のとおりです。「別枠に複製」の列が ● の層は <code>&lt;use href="#map-base"&gt;</code> で南西諸島・小笠原の別枠に映ります (それ以外は別枠用に個別に描く)。</p>
+      <div class="tablewrap"><table id="layer-table">
+        <thead><tr><th class="c">順</th><th>層</th><th>内容</th><th>元データ</th><th>出す条件</th><th class="c">別枠に複製</th><th>備考</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </section>
+
+    <section id="s6">
+      <h2><span class="num">6</span>表示条件 (状態 × 部品) <span class="tag maybe">中</span></h2>
+      <p>どの状態でどの部品が出るかを、コード (<code>main.ts calmState()</code>、各 <code>render*()</code> の条件) から読み取った表です。<b>状態は排他ではありません</b> (たとえば EEW と津波予報は同時に出うる)。各行を指すと補足が出ます。</p>
+      <div class="legend-inline small"><span>● 出る</span><span style="color:var(--warn)">○ 条件つきで出る</span><span class="muted">－ 出ない</span></div>
+      <div class="tablewrap"><table class="matrix" id="matrix-table"><thead></thead><tbody></tbody></table></div>
+      <h3>6.1 状態の定義</h3>
+      <dl id="state-defs" class="card" style="display:grid;grid-template-columns:8em 1fr;gap:6px 14px;margin:0"></dl>
+      <h3>6.2 判定の中心 (<code>calmState</code>)</h3>
+      <pre><code>// web/src/quakes.ts
+quiet = !app.demo &amp;&amp; !feeling &amp;&amp; !tsunami &amp;&amp; settled   // settled: 優先する地震・EEW・波がすべて終わっている
+calm  = quiet &amp;&amp; !app.selectedKey                      // 過去の地震を選んでいない
+</code></pre>
+      <ul>
+        <li><b>calm</b> のときだけ: 気象警報・注意報の塗りと帯、天気の札と案内、アメダスの雨、「警報・注意報」ボタンを隠す側の判断。</li>
+        <li><b>quiet</b> のときだけ: お知らせ (バナー) と BGM。</li>
+        <li>この 2 つ以外 (EEW の帯・津波の帯・凡例の行・カウントダウンなど) は、各 <code>render*()</code> が自分で条件を持つ。</li>
+      </ul>
+      <div class="note"><b>部品化への含意:</b> 条件が「calm / quiet / 個別」の 3 種に分かれている。部品が増えると、どの層で判断するかが散らばりやすい。部品ごとの <code>visible(state)</code> として 1 か所に集めると、レイアウト側は「出るか出ないか」だけを見ればよくなる。</div>
+    </section>
+
+    <section id="s7">
+      <h2><span class="num">7</span>配置の結合 (暗黙の依存) <span class="tag sure">確</span></h2>
+      <p>部品の並べ方を変えるときに壊れる場所の一覧です。いずれも「ある部品の寸法を、別の部品の位置に手で写している」形になっています。</p>
+      <div id="coupling-list"></div>
+
+      <h3>7.1 実測のスクリーンショット</h3>
+      <div class="shots">
+        <figure><img src="img/pc-calm.png" alt="PC 1440×900 の平時の画面" loading="lazy"><figcaption>図 7-1 PC 1440×900・平時 (気象警報と天気の札・お知らせあり。接続は無いので時計は「切断中」)。左上に南西諸島の別枠、その右に案内、左下に凡例、右下に時計。</figcaption></figure>
+        <figure><img src="img/pc-eew.png" alt="PC 1440×900 の緊急地震速報中の画面" loading="lazy"><figcaption>図 7-2 PC・EEW 中 (デモ)。帯が 2 行ぶん地図を押し下げ、別枠は寄ると隠れ、凡例に P波・S波の行が増える。右パネルはデモの一覧が上を占め、履歴が潰れている。</figcaption></figure>
+        <figure><img src="img/phone-landscape-calm.png" alt="横向きスマホ 844×390 の平時の画面" loading="lazy"><figcaption><b>図 7-3 横向きスマホ 844×390。</b>幅が 801px 以上なので PC の配置になり、地図は 464px 幅。別枠 (226×220) が地図の大半を占め、凡例の震度ゲージが別枠の下に隠れる。</figcaption></figure>
+        <figure><img src="img/phone-calm.png" alt="スマホ縦 390 の平時の画面" loading="lazy"><figcaption>図 7-4 スマホ縦 390 幅・平時。ページ全体がスクロール。凡例は別枠の下 (top:158px)、天気の札は引き出し線で逃がして間引く。</figcaption></figure>
+        <figure><img src="img/phone-eew.png" alt="スマホ縦の緊急地震速報中の画面" loading="lazy"><figcaption>図 7-5 スマホ縦・EEW 中 (デモ)。凡例が地図の左に載り、揺れた地域の一部に重なる。</figcaption></figure>
+      </div>
+    </section>
+
+    <section id="s8">
+      <h2><span class="num">8</span>レスポンシブの現状 <span class="tag sure">確</span></h2>
+      <div class="tablewrap"><table id="bp-table">
+        <thead><tr><th>条件</th><th>対象</th><th>変わること</th><th>場所</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+      <h3>8.1 観察</h3>
+      <ul>
+        <li>幅の境目は <b>800px の 1 本</b>。それ以外は高さ (520px / 440px 以下) の補正で、どちらも <code>min-width:801px</code> と組になっている。向き (orientation) は使っていない。</li>
+        <li>スマホは<b>ページ全体がスクロール</b>する作りに切り替わり (<code>html,body{height:auto}</code>)、PC は viewport に固定して内側で流す。ここが「2 つのモード」の本質的な違い。</li>
+        <li>幅 801px 以上の横向きスマホ (実測は 844×390) は PC の配置のままで、別枠と凡例が重なる (図 7-3)。</li>
+        <li>幅 800px ちょうどのタブレット縦 (800×1000) は「スマホ」側に入る。専用の並びは無い。</li>
+        <li>部品の大きさ (別枠の高さ・時計の文字・凡例の行高) は、@media の中で個別に上書きされている。部品側が「小さい版の寸法」を持つ形にはなっていない。</li>
+      </ul>
+    </section>
+
+    <section id="s9">
+      <h2><span class="num">9</span>データ・通信・永続化 <span class="tag sure">確</span></h2>
+      <div class="tablewrap"><table id="flow-table">
+        <thead><tr><th>種類</th><th>パス</th><th>いつ</th><th>受け取る側</th><th>反映先の部品</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+      <p class="small muted">サーバ側 (<code>crates/eq-server</code>) は P2P地震情報・Wolfx の WebSocket と気象庁のデータを受け、<code>/ws</code> と上の <code>/api/*</code> で配る。静的ファイル (<code>dist/</code>) も同じサーバが配信する (<code>ServeDir</code>)。</p>
+    </section>
+
+    <section id="s10">
+      <h2><span class="num">10</span>native (配信) との対応 <span class="tag maybe">中</span></h2>
+      <p>配信の画面は Rust で別に描かれています。部品の考え方を native まで広げるかどうかで設計が変わるため、差を表にしました。座標は <code>draw.rs / frame.rs / panel.rs / notice.rs / chip.rs / banner.rs</code> の定数から読んだものです。</p>
+      <div class="tablewrap"><table id="native-table">
+        <thead><tr><th>項目</th><th>web</th><th>native</th><th>備考</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+      <div class="note"><b>要点:</b> 領域の分け方 (上部バー / 地図 / 右パネル幅 380px) と、別枠・時計の寸法はすでにそろっている。ただし<b>そろえているのは人の手</b>で、片方を変えたときの検知がない (docs/nansei-inset.md など、変更のたびに両方を直す指示が docs にある)。</div>
+    </section>
+
+    <section id="s11">
+      <h2><span class="num">11</span>部品化への論点と設計の叩き台 <span class="tag proposal">提案・未決</span></h2>
+      <p class="lead">ここから先は<b>分析に基づく提案</b>で、決定事項ではありません。今すぐ実装する話ではない、という前提で、先に決めておくとよいことと、小さく安全に進める順序の案をまとめました。</p>
+
+      <h3>11.1 現状から見た障壁 <span class="tag sure">確</span></h3>
+      <div id="obstacles"></div>
+
+      <h3>11.2 部品の契約 (案) <span class="tag proposal">提案</span></h3>
+      <p>部品を「自分で DOM を作り、状態から表示を決め、大きさと優先度を宣言する」ものに揃える案です。いまの <code>$("#id")</code> への直書きを置き換える狙い。</p>
+      <pre><code id="p-contract"></code></pre>
+
+      <h3>11.3 レイアウトプロファイル (案) <span class="tag proposal">提案</span></h3>
+      <p>並べ方を<b>宣言</b>として持ち、プロファイル (desktop / mobile / 必要なら landscape) を切り替える案です。重ね物は「隅のスタック」で置くので、第 7 章の C1〜C4 の手計算は不要になります。</p>
+      <pre><code id="p-profile"></code></pre>
+
+      <h3>11.4 進め方の案 (小さく安全な順) <span class="tag proposal">提案</span></h3>
+      <ol class="steps" id="p-steps"></ol>
+      <div class="note ok">どの段階も、直前の段階の「見た目が変わらない」ことを、実測のスナップショット (付録 B) の差分で確認できる順に並べています。</div>
+
+      <h3>11.5 先に決めておきたい論点 <span class="tag proposal">要相談</span></h3>
+      <ol id="p-questions"></ol>
+
+      <h3>11.5b 設計上の追加論点 (レビューで追加) <span class="tag proposal">提案</span></h3>
+      <div id="gaps"></div>
+
+      <h3>11.6 参照したい画面 (要望): JDQ <span class="tag maybe">8 枚のスクリーンショットから</span> / JQuake <span class="tag maybe">11 枚のスクリーンショットから</span></h3>
+      <p>レイアウトの参考として、YouTube の <b>JDQ</b> と <b>JQuake</b> のチャンネルの画面を尊重したい (特に JDQ)、という要望をいただいています。JDQ は共有いただいた <b>8 枚のスクリーンショット</b> (通常時、EEW 予報、EEW 警報 + 震度速報、EEW 最終報 + 震度速報、地震情報 (確定)、2026/04/20 の EEW 警報と津波予報の発表直後 3 枚) から要素を読み取りました。警報 (赤)・津波予報・揺れの報告などほかの場面の見た目は未確認です。JQuake も共有いただいたスクリーンショット (通常時 2 枚 + EEW 予報から警報への 4 枚 + 津波警報の発表直後と 4 分後 2 枚 + 能登半島地震 3 枚 (EEW 3 件同時・日本海側の津波警報・大津波警報)) から読み取りました (リポジトリには、南西諸島の別枠を JQuake のように見せたいという記述もあります: <code>docs/nansei-inset.md</code>)。</p>
+      <p class="small muted">参考: JDQ のリプレイ動画の例 (<a href="https://www.youtube.com/watch?v=_pc90LvjUcE" rel="noopener">YouTube</a>)。この調査では動画を再生・取得できていないため、内容は未分析です (動きのある場面は、いただいたスクリーンショットから読み取っています)。</p>
+      <p class="small muted">画像そのものはリポジトリに入れていません (他者の配信画面のため)。ライブカメラ枠 (水槽など) は、ご意向のとおり対象外です。</p>
+      <h4>JDQ の画面の構成</h4>
+      <ul id="jdq-summary"></ul>
+      <h4>JDQ の要素と、いまの部品との対応</h4>
+      <div class="tablewrap"><table id="jdq-table">
+        <thead><tr><th>JDQ の要素</th><th>位置</th><th>いまの対応</th><th>ギャップ</th><th class="c">確度</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+      <h4>設計への含意</h4>
+      <ul id="jdq-takeaways"></ul>
+      <h4>JQuake の画面の構成 <span class="small muted">(所感: 「今の私達のに近いが、右上が細かい表示」)</span></h4>
+      <ul id="jq-summary"></ul>
+      <h4>JQuake の要素と、いまの部品との対応</h4>
+      <div class="tablewrap"><table id="jq-table">
+        <thead><tr><th>JQuake の要素</th><th>位置</th><th>いまの対応</th><th>ギャップ</th><th class="c">確度</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+      <h4>JQuake から見た設計への含意</h4>
+      <ul id="jq-takeaways"></ul>
+      <h4>次に確認したい場面 (参照画面の探索のお願い)</h4>
+      <p class="small">参照画面から「必要なパーツ」を探していただいた結果、<b>EEW → 震度速報 → 地震情報 → 平時への戻り、津波予報 (JDQ は発表直後、JQuake は 3 等級)、EEW が複数同時 (JQuake)</b> までは確認できました。JDQ の津波の沿岸表示・注意報のみの時間帯・解除、JDQ の複数同時、気象警報パネルの別の場面、離島・遠地の地震は、取得できた映像の範囲外のため<b>未確認</b>です (下は設計に効く順の元のリスト)。</p>
+      <ol id="wanted"></ol>
+      <p class="small muted">この対応表の確度は、少数の画像からの読み取りなので、データ源の有無 (強震モニタ系・雨雲レーダー) は「要」としています。JDQ・JQuake とも <code>data.js</code> の <code>window.JDQ</code> / <code>window.JQUAKE</code> に同じ形で書いてあります。ほかの参照画面も同じ書式で足せます。</p>
+    </section>
+
+    <section id="s12">
+      <h2><span class="num">12</span>確度: 言えること / まだ分からないこと</h2>
+      <div class="grid2">
+        <div class="card"><h4 style="margin-top:0"><span class="tag sure">確</span> 自信を持って言えること</h4><ul id="cf-sure"></ul></div>
+        <div class="card"><h4 style="margin-top:0"><span class="tag maybe">中</span> 読み取りだが、変わりうること</h4><ul id="cf-maybe"></ul></div>
+      </div>
+      <div class="card" style="margin-top:14px"><h4 style="margin-top:0"><span class="tag unknown">要</span> まだ調べていないこと (調べると結論が変わるかもしれない)</h4><ul id="cf-unknown"></ul></div>
+    </section>
+
+    <section id="s13">
+      <h2><span class="num">13</span>レビュー記録 (Fable による不足の確認)</h2>
+      <div id="review-body">
+        <p>ドラフトを Fable に渡し、コードと突き合わせて「欠けている部品・状態」「誤りや根拠不足」「native の対応表」「設計上の抜け」を確認してもらいました (読み取りのみ。ファイルは変更していません)。指摘の主な内容と、この版での扱いは次のとおりです。</p>
+        <div class="tablewrap"><table>
+          <thead><tr><th>区分</th><th>指摘</th><th>扱い</th></tr></thead>
+          <tbody>
+            <tr><td>欠落</td><td>地図の操作 (パン・ズーム・地点選択)、押せる震央の印、「のちに判明する震源」、SVG の標準ツールチップが部品に無い</td><td>カタログへ追加 (<code>map-interaction / epicenter / svg-title</code>)</td></tr>
+            <tr><td>欠落</td><td>詳細は 3 通りでなく 6 通り、履歴の行は 3 種、各部品の状態 (arrived・running・waiting など)</td><td>詳細・履歴の記述を修正。細かい状態の網羅は未了 (今後の課題)</td></tr>
+            <tr><td>欠落</td><td>「履歴再生」に 2 つの仕組み (demo.history と selectedKey) がある</td><td>状態の定義と確度の章に明記</td></tr>
+            <tr><td>誤り</td><td>天気の札の案内は native でも別枠の「右」(y が違う)</td><td>修正</td></tr>
+            <tr><td>誤り</td><td>小笠原の別枠は「作らないと決定」でなく「先送り」</td><td>修正</td></tr>
+            <tr><td>誤り</td><td>表示条件: カウントダウンは履歴再生中も出る / EEW の帯は地震情報の間も 3 分残る / テロップは平時でも一時的に消える</td><td>3 行を修正 (確度「中」の表で誤りが見つかったので、同種の誤りが残りうると注記)</td></tr>
+            <tr><td>誤り</td><td>別枠を隠す条件、CSS 変数の数 (13→14)、<code>$("#…")</code> の件数の数え方、時計の接続状態 (web 3 / native 2)、C3 の原因の書き方</td><td>修正</td></tr>
+            <tr><td>native</td><td>表に無い要素: 寄り、EEW の見出し札・予測最大震度札、早送り、hindsight。「要確認」は解消</td><td>表へ追加・確認済みに更新</td></tr>
+            <tr><td>設計</td><td>z-index・pointer-events・DOM 実測への依存・副作用・UiState・起動順・配信のプロファイル化・a11y・テスト・性能など 14 項目</td><td>11.5b に全件を記載。契約 (11.2) に z / interactive / a11y / states を追加、手順に「派生状態を 1 回計算」を追加</td></tr>
+          </tbody>
+        </table></div>
+        <p class="small muted">このレビューも読み取りに基づくもので、全コードの通読ではありません。確認した主張 (寸法・条件・座標など約 20 件) の多くは正しいと確認されています。</p>
+      </div>
+    </section>
+
+    <section id="sA">
+      <h2><span class="num">A</span>付録 A: 実測値</h2>
+      <p>Chromium (Playwright) で <code>web/dist</code> を開いて <code>getBoundingClientRect()</code> を取った値です (単位 px。y はページ上端から)。<code>/api/warnings</code>・<code>/api/weather</code>・<code>/api/banners</code>・<code>/api/telop</code> は固定の値で差し替え、WebSocket は接続できないので時計は「切断中」の見た目です。EEW 中はデモ「標準」を 24 秒再生した時点。</p>
+      <div class="toolbar"><label for="m-sel" class="small">画面:</label><select id="m-sel"></select><span id="m-doc" class="small muted"></span></div>
+      <div class="tablewrap"><table id="m-table">
+        <thead><tr><th>セレクタ</th><th>部品</th><th class="c">x</th><th class="c">y</th><th class="c">幅</th><th class="c">高さ</th><th>position</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </section>
+
+    <section id="sB">
+      <h2><span class="num">B</span>付録 B: 実測の再現手順</h2>
+      <p>再配置の前後で座標を比べる土台として、測定のスクリプトを <code>docs/ui-spec/tools/measure.mjs</code> に置きました (Node 22 + Playwright が必要。リポジトリの依存には追加していません)。</p>
+      <pre><code>cd web &amp;&amp; npm ci &amp;&amp; npm run build            # web/dist を作る
+(cd dist &amp;&amp; python3 -m http.server 8099 &amp;)     # 静的に配る (API は無くてよい)
+node docs/ui-spec/tools/measure.mjs            # 実測して docs/ui-spec/measured.js と img/ を作り直す</code></pre>
+      <p class="small muted">スクリプトは API を固定値で差し替える (気象警報・天気・お知らせ・テロップ)。デモの EEW 中は 24 秒待ってから測る。出力先は <code>--out</code> で変えられる (既定は <code>docs/ui-spec</code>)。</p>
+    </section>
+
+    <section id="sC">
+      <h2><span class="num">C</span>付録 C: web/src の主なファイル対応</h2>
+      <div class="tablewrap"><table>
+        <thead><tr><th>ファイル</th><th>担当する部品・役割</th></tr></thead>
+        <tbody>
+          <tr><td><code>main.ts</code></td><td>起動、<code>tick()</code>、受信、気象警報の帯と塗り、トースト、カウントダウン以外のほぼ全体の司令塔</td></tr>
+          <tr><td><code>view.ts</code></td><td>履歴 (list)、詳細 (detail)、EEW の帯、津波の帯、モード札、地図の塗り分けの指示</td></tr>
+          <tr><td><code>chrome.ts</code></td><td>時計、接続状態、テロップ、音ボタン、音の案内</td></tr>
+          <tr><td><code>map.ts</code> / <code>map.css</code></td><td>JapanMap: 全層、カメラ、別枠、ツールチップ、画面外の矢印、札の避け合い</td></tr>
+          <tr><td><code>scene.ts</code></td><td>震央の印、P波・S波の円、カメラの目標 (波の経過時間の表示も)</td></tr>
+          <tr><td><code>weather-layer.ts</code> / <code>weather.ts</code> / <code>thin.ts</code></td><td>天気の札・案内・雨の点、札の置き場所の探索</td></tr>
+          <tr><td><code>banner.ts</code></td><td>お知らせ (平時のバナー)</td></tr>
+          <tr><td><code>bgm.ts</code></td><td>BGM のボタン・曲名・音量</td></tr>
+          <tr><td><code>personal-ui.ts</code> / <code>personal.ts</code></td><td>設定パネル、ブラウザ通知、カウントダウン、設定の保存</td></tr>
+          <tr><td><code>demo-ui.ts</code> / <code>demo.ts</code> / <code>history.ts</code></td><td>デモ・履歴再生のパネルと再生計画</td></tr>
+          <tr><td><code>broadcast.ts</code></td><td><code>?broadcast=1</code> の処理 (音の出力先・mixer への通知)</td></tr>
+          <tr><td><code>state.ts</code> / <code>dom.ts</code></td><td>共有状態 <code>app</code> と <code>$()</code>、地図のインスタンス (<code>map</code>)</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <footer class="page">
+      <p>この文書は <code>docs/ui-spec/</code> の静的な HTML (index.html + style.css + data.js + app.js + measured.js) です。ブラウザでそのまま開けます (サーバ不要)。表と図は <code>data.js</code> から組み立てているので、部品の追加・修正は <code>data.js</code> を直してください。</p>
+    </footer>
+  </main>
+</div>
+<script src="measured.js"></script>
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
