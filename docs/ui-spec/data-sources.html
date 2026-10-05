@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>データ源の調査メモ</title>
+  <meta name="description" content="観測点のリアルタイム震度・台風情報・降水ナウキャストなど、新しく使えそうなデータ源と利用条件の調査メモ (未確認を明記)">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="shell" style="grid-template-columns:minmax(0,1fr)">
+  <main style="margin:0 auto">
+    <header>
+      <p class="lead small" style="margin:0"><a href="index.html">← 現状分析の仕様書</a></p>
+      <h1 style="font-size:30px;line-height:1.35;margin:4px 0 8px">データ源の調査メモ</h1>
+      <p class="lead">参照画面 (JDQ・JQuake) の表示に必要なデータが、うちの現在のデータ源には無いため、使えそうな情報源と<b>利用条件</b>を調べたメモです。<b>取得できなかった項目は「要確認」</b>のまま残しています。</p>
+      <div class="meta"><span>調査日: <b>2026-10-05</b></span><span>方法: <b>公式ページの取得 + 検索</b> (一部のページは 503 / 404 で取得できず)</span><span class="tag maybe">暫定</span></div>
+      <div class="note warn"><b>最も大事な点:</b> 観測点のリアルタイム震度 (防災科研の強震モニタ) は、<b>公式の規約・エンドポイントを今回は確認できていません</b>。規約を確認するまで、非公式な叩き方を実装に取り込むことは避けてください。</div>
+    </header>
+
+    <section>
+      <h2>1. 要約 (使えるか)</h2>
+      <div class="tablewrap"><table>
+        <thead><tr><th>データ</th><th>必要な部品</th><th>情報源の候補</th><th>使えそうか</th><th class="c">確度</th></tr></thead>
+        <tbody>
+          <tr><td><b>観測点のリアルタイム震度・加速度</b></td><td>全国図の点群・計測震度ゲージ・「強震最大震度」「最大加速度」・付近観測点データ</td><td>防災科研 強震モニタ</td><td>データは公開されているとされる (検索結果の要約。公式ページでは未確認)。<b>公式のエンドポイント・利用条件・二次利用の可否は未確認</b></td><td class="c"><span class="tag unknown">要</span></td></tr>
+          <tr><td><b>台風情報</b></td><td>JDQ の「台風情報」パネル</td><td>気象庁 防災情報 XML (台風解析・予報情報)</td><td>うちが気象警報で使っている <b>防災情報 XML の枠組みの内側</b>。使える見込み</td><td class="c"><span class="tag maybe">中</span></td></tr>
+          <tr><td><b>雨雲レーダー</b></td><td>JDQ の右下のレーダー</td><td>気象庁 高解像度降水ナウキャスト</td><td>規約上は、出典と加工の明示を守れば可と読める。<b>サーバの定期取得は「原則ご遠慮」とされている文言</b>があり、運用に注意</td><td class="c"><span class="tag maybe">中</span></td></tr>
+          <tr><td>EEW・地震情報 (既存)</td><td>—</td><td>P2P地震情報 / Wolfx</td><td>すでに使用中。<b>再配布の条件は、公式ページで確認できず</b> (P2P)。Wolfx は元データの規約に従う旨を確認</td><td class="c"><span class="tag maybe">中</span></td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section>
+      <h2>2. 観測点のリアルタイム震度: 強震モニタ <span class="tag unknown">要確認が多い</span></h2>
+      <ul>
+        <li><b>提供物</b>: 全国の強震観測網のリアルタイムの揺れ (震度・加速度) を表示するサービス。公式の説明ページは <code>https://www.kyoshin.bosai.go.jp/kyoshin/docs/new_kyoshinmonitor.html</code> と案内されているが、<b>今回は HTTP 503 で取得できず</b> (トップページと docs の目次も 503)。</li>
+        <li><b>JSON の WebAPI があるか・エンドポイント・画像タイルの形式・更新頻度</b>: 公式ページから確認できず。前回の回答で「JSON の WebAPI として提供」と書いたのは、<b>気象庁の検討会資料の検索結果の要約</b>に基づくもので、<b>公式の仕様ページでの確認は取れていません</b>。</li>
+        <li><b>利用規約・二次利用・YouTube 配信・サーバ側での定期取得・負荷の目安・クレジットの条件</b>: 確認できず。</li>
+        <li>参考 (強震モニタ本体の規約ではない): 検索結果の要約に、K-NET・KiK-net のデータについて「利用者を不特定として制限なく使用できる」「謝辞等に防災科研の K-NET・KiK-net の情報を利用したことを明示」とあった。原文は未確認で、強震モニタにそのまま当てはまるかも不明。</li>
+        <li>参考: JQuake (デスクトップソフト) は、強震モニタの観測点データを表示する (検索結果の要約。JQuake の公式ページ <code>https://www.jquake.net/en/about.html</code> は未取得で、確認は要)。</li>
+      </ul>
+      <div class="note bad"><b>次にやること (要・人の判断):</b> ① 公式の docs ページが復旧したら取り直す。② 規約が読めない場合は、防災科研へ問い合わせる (二次利用・YouTube 配信・サーバ経由の再配信の可否)。③ 負荷の目安 (取得間隔)。</div>
+    </section>
+
+    <section>
+      <h2>3. 台風情報: 気象庁 防災情報 XML <span class="tag maybe">中</span></h2>
+      <ul>
+        <li><b>提供物</b>: 台風解析・予報情報 (VPTW60〜65 など。5 日予報を含む)、台風に関する情報 (VPTI50〜52)。</li>
+        <li><b>入手方法</b>: PULL 型の XML 配信で、<b>登録は不要</b> (<code>https://www.data.jma.go.jp/developer/index.html</code> で確認)。うちがすでに気象警報で使っている仕組みと同じ。</li>
+        <li><b>JSON での配信</b>、更新頻度、具体的なフィードの URL: 今回の調査では確認できず (要確認)。</li>
+        <li><b>利用条件</b>: 気象庁ホームページの利用規約に準拠 (次の 4 章)。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>4. 雨雲レーダー: 高解像度降水ナウキャスト <span class="tag maybe">中</span></h2>
+      <ul>
+        <li><b>提供物</b>: 250m 格子、30 分先まで (35〜60 分先は 1km)、5 分ごとの更新。GRIB2 (gzip) での提供 (検索結果の要約。出典の資料の原文は未確認で、要確認)。</li>
+        <li><b>タイル配信</b>: 気象庁サイトのタイルのエンドポイントと、タイルの利用に関する個別の規定は、今回取得したページでは確認できず (要確認)。<code>https://www.jma.go.jp/bosai/nowc/</code> は画像の参照のみで API の情報なし。<code>/developer/gpv_tile.html</code> は 404。</li>
+      </ul>
+      <h3>気象庁のコンテンツの利用条件 (取得できた規約)</h3>
+      <p class="small">出典: <code>https://www.jma.go.jp/jma/kishou/info/coment.html</code></p>
+      <ul>
+        <li>「<b>公共データ利用規約 (第 1.0 版)</b>」に準拠する。個別の法令により利用に制約がある場合がある、とも明記。</li>
+        <li><b>出典は必須</b>。例:「出典：気象庁ホームページ（当該ページの URL）」。</li>
+        <li><b>加工した場合は、編集・加工を行ったことを記載</b>する。加工した情報を、あたかも国が作成したかのような態様で公表・利用してはいけない。</li>
+        <li>リンクフリー。情報を用いて行う一切の行為について、気象庁は責任を負わない。</li>
+      </ul>
+      <h3>自動収集についての文言 (注意)</h3>
+      <p class="small">出典: <code>https://www.data.jma.go.jp/niigata/menu/policy.html</code> (新潟地方気象台の同旨の規定。本庁ページの原文は未確認)</p>
+      <blockquote style="margin:8px 0;padding:8px 14px;border-left:4px solid var(--warn);background:var(--soft)">「自動巡回ソフト等による、定期的、自動的な気象データの収集等は、サーバーに負荷がかかる等の理由から、原則としてご遠慮いただいております」</blockquote>
+      <p>サーバが定期的に取りに行く運用は、この文言に当たりうる。うちは気象警報 (防災情報 XML、5 分ごと) と天気 (アメダス 10 分ごと・天気予報 1 時間ごと、<code>jma.go.jp/bosai</code> の JSON) を定期取得している。「ご遠慮」の文言がより直接当たるのは、<b>防災情報 XML ではなく bosai の JSON (天気)</b> 側。<b>既存の取得も含めて、取得間隔を長めに・キャッシュして配信側に一本化する運用</b>が無難。気象庁の「防災情報 XML」のように、公式に自動取得が想定されている入口を使うのが望ましい。</p>
+    </section>
+
+    <section>
+      <h2>5. すでに使っているデータ源の条件 <span class="tag maybe">中</span></h2>
+      <h3>P2P地震情報</h3>
+      <ul>
+        <li>開発者向けのページ (<code>https://www.p2pquake.net/develop/</code>、<code>/develop/json_api_v2/</code>) には、<b>利用規約・再配布・クレジット・アクセス頻度の記述が見当たらない</b> (<code>/terms/</code> は 404)。</li>
+        <li>確認できたのは「緊急地震速報 (警報) を含む全情報が利用可能な API です。WebSocket API は、低遅延で受信可能です。」という説明のみ。</li>
+        <li>EPSP の仕様のリポジトリ (<code>github.com/p2pquake/epsp-specifications</code>) は MIT ライセンスだが、<b>これはプロトコル仕様のライセンスで、配信されるデータの再配布条件ではない</b>。</li>
+        <li><b>再配布の条件は未確認</b>。運営者へ確認するのが確実。</li>
+      </ul>
+      <h3>Wolfx Open API</h3>
+      <p class="small">出典: <code>https://wolfx.jp/en/legal/terms</code></p>
+      <ul>
+        <li>個別のドキュメントまたは<b>元データの規約が許さない再提供・再販売・再利用は禁止</b> (原文: "re-provide, resell, or otherwise reuse data in a manner not permitted by the Service-Specific Documentation or applicable data-source terms")。</li>
+        <li>レート制限・接続数の制限をプロジェクトが設けうる。回避は禁止。</li>
+        <li>気象庁など元データの権利は各権利者に帰属。<b>公式の警報として提示すること・公式や提供元へのなりすましは禁止</b>。</li>
+        <li>API のドキュメントには「reference only」の免責がある。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>6. そのほかの観測点震度の候補 <span class="tag unknown">未確認</span></h2>
+      <ul>
+        <li><b>DM-D.S.S (dmdata.jp)</b>: 地震・津波関連の WebSocket API を提供する、との案内のみ確認。契約形態・料金・観測点ごとのリアルタイム震度の有無・再配布条件は<b>未確認</b>。</li>
+        <li><b>気象庁の震度データ</b>: 防災情報 XML の枠組みは確認できたが、1 秒値の観測点データではないはず (未確認)。</li>
+        <li><b>K-NET / KiK-net / Hi-net (防災科研)</b>: リアルタイム配信の可否・条件は<b>未確認</b>。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>7. 次の確認 (優先順)</h2>
+      <ol>
+        <li><b>強震モニタ</b>: 公式 docs の復旧後の再取得 / 防災科研への問い合わせ (二次利用・YouTube 配信・サーバ経由の再配信)。</li>
+        <li><b>P2P地震情報の再配布条件</b>: 運営者へ。</li>
+        <li><b>気象庁の自動取得の方針</b>: 本庁ページの原文確認と、既存の取得間隔の見直し。</li>
+        <li><b>台風情報の XML</b>: 具体のフィード URL・更新頻度 (実装に入る前に)。</li>
+      </ol>
+      <p class="small muted">この調査は、公式ページから取得できた範囲だけを書いています。取得できなかった項目を、記憶や推測で補ってはいません。</p>
+    </section>
+  </main>
+</div>
+</body>
+</html>
