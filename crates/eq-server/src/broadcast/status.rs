@@ -3,7 +3,7 @@
 //! B. 途切れた: 起動のとき、前の最後のコマから 30 秒以上あいていたら、起動から 10 分のあいだ出す。
 //! 時計と /proc に触れる所は薄くして、判断は時刻と文字を受け取る関数に分けてある。
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -59,19 +59,80 @@ fn hhmm(ms: u64) -> String {
     jst::format(ms as i64).get(11..16).unwrap_or("--:--").to_string()
 }
 
-/// コマの予定からの遅れと、書き込みにかかった時間から、遅いか
-pub fn is_slow(lag: Duration, write: Duration) -> bool {
-    lag > LAG_LIMIT || write > WRITE_LIMIT
+/// 前の見張りから今までの、コマの遅れと書き込みの長さの最大
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Window {
+    /// コマの予定の時刻からの遅れの最大
+    pub lag: Duration,
+    /// 1 コマの書き込みの長さの最大 (終わっていない書き込みは、今までの長さ)
+    pub write: Duration,
+    /// 書き込みが終わらないまま WRITE_LIMIT を超えていたか
+    pub stuck: bool,
 }
 
-/// この 1 秒が遅いか。PSI (読めなければ遅くない) か、コマの遅れ・書き込みの遅れのどれか
-pub fn is_busy(io: Option<&str>, memory: Option<&str>, slow: bool) -> bool {
-    let pressed = [io, memory]
+/// 見張りの記録 (1 秒の分でも、遅い状態が続いた間の分でも。値は最大)。遅いかの判定はここで決める
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Worst {
+    pub window: Window,
+    /// PSI io の full の 10 秒平均 (%)。読めなければ 0
+    pub io: f64,
+    /// PSI memory の full の 10 秒平均 (%)。読めなければ 0
+    pub memory: f64,
+}
+
+impl Worst {
+    pub fn of(window: Window, io: Option<&str>, memory: Option<&str>) -> Self {
+        let avg = |t: Option<&str>| t.and_then(psi::full_avg10).unwrap_or(0.0);
+        Worst {
+            window,
+            io: avg(io),
+            memory: avg(memory),
+        }
+    }
+
+    pub fn merge(self, o: Worst) -> Worst {
+        Worst {
+            window: Window {
+                lag: self.window.lag.max(o.window.lag),
+                write: self.window.write.max(o.window.write),
+                stuck: self.window.stuck || o.window.stuck,
+            },
+            io: self.io.max(o.io),
+            memory: self.memory.max(o.memory),
+        }
+    }
+
+    /// 遅いと判定した理由 (無ければ遅くない)。PSI は読めなければ遅くない
+    pub fn reasons(&self) -> Vec<&'static str> {
+        [
+            ("frame_lag", self.window.lag > LAG_LIMIT),
+            ("write_slow", self.window.write > WRITE_LIMIT),
+            ("write_stuck", self.window.stuck),
+            ("psi_io", self.io > PSI_LIMIT),
+            ("psi_memory", self.memory > PSI_LIMIT),
+        ]
         .into_iter()
-        .flatten()
-        .filter_map(psi::full_avg10)
-        .any(|v| v > PSI_LIMIT);
-    pressed || slow
+        .filter_map(|(name, hit)| hit.then_some(name))
+        .collect()
+    }
+
+    pub fn is_busy(&self) -> bool {
+        !self.reasons().is_empty()
+    }
+
+    /// ログの 1 行 (札の出入りと、混雑中の 1 分ごと)
+    pub fn line(&self, head: &str) -> String {
+        let reasons = self.reasons();
+        format!(
+            "{head} reasons={} lag_ms={} write_ms={} write_stuck={} psi_io_full_avg10={:.1} psi_memory_full_avg10={:.1}",
+            if reasons.is_empty() { "-".to_string() } else { reasons.join(",") },
+            self.window.lag.as_millis(),
+            self.window.write.as_millis(),
+            self.window.stuck,
+            self.io,
+            self.memory,
+        )
+    }
 }
 
 /// 遅い・遅くないの 1 秒ごとの判定から、札を出すか決める (ちらつき止め)。
@@ -119,11 +180,13 @@ pub fn notice_of(busy: bool, outage: Option<Outage>, now_ms: u64) -> Option<Noti
         .map(Notice::Outage)
 }
 
-/// コマを送る側 (配信の本線) が書き残す、遅さの印。コマごとの仕事は、時計を 2 回読んで旗を立てるだけ
+/// コマを送る側 (配信の本線) が書き残す、遅さの印。コマごとの仕事は、時計を 2 回読んで最大を更新するだけ
 pub struct Load {
     origin: Instant,
-    /// 前の見張りから今までに、遅いコマがあったか
-    slow: AtomicBool,
+    /// 前の見張りから今までの、コマの遅れの最大 (マイクロ秒)
+    max_lag_us: AtomicU64,
+    /// 前の見張りから今までの、書き込みの長さの最大 (マイクロ秒)
+    max_write_us: AtomicU64,
     /// 書き込み中なら、始めた時刻 (origin からのミリ秒 + 1。0 は書いていない)
     writing_since: AtomicU64,
 }
@@ -132,7 +195,8 @@ impl Load {
     pub fn new() -> Arc<Load> {
         Arc::new(Load {
             origin: Instant::now(),
-            slow: AtomicBool::new(false),
+            max_lag_us: AtomicU64::new(0),
+            max_write_us: AtomicU64::new(0),
             writing_since: AtomicU64::new(0),
         })
     }
@@ -153,18 +217,26 @@ impl Load {
 
     fn end_write_at(&self, at: Duration, lag: Duration) {
         let since = self.writing_since.swap(0, Ordering::Relaxed);
-        let wrote = at.saturating_sub(Duration::from_millis(since.saturating_sub(1)));
-        if since != 0 && is_slow(lag, wrote) || since == 0 && is_slow(lag, Duration::ZERO) {
-            self.slow.store(true, Ordering::Relaxed);
+        self.max_lag_us.fetch_max(lag.as_micros() as u64, Ordering::Relaxed);
+        if since != 0 {
+            let wrote = at.saturating_sub(Duration::from_millis(since - 1));
+            self.max_write_us.fetch_max(wrote.as_micros() as u64, Ordering::Relaxed);
         }
     }
 
-    /// 前の見張りから今までに遅いコマがあったか (旗は下ろす)。書き込みが終わらないまま 1 秒たっていても遅い
-    fn take_slow_at(&self, at: Duration) -> bool {
-        let flagged = self.slow.swap(false, Ordering::Relaxed);
-        let since = self.writing_since.load(Ordering::Relaxed);
-        let stuck = since != 0 && at.saturating_sub(Duration::from_millis(since - 1)) > WRITE_LIMIT;
-        flagged || stuck
+    /// 前の見張りから今までの最大 (最大は 0 に戻す)。書き込みが終わらないまま 1 秒たっていても遅い
+    fn take_window_at(&self, at: Duration) -> Window {
+        let lag = Duration::from_micros(self.max_lag_us.swap(0, Ordering::Relaxed));
+        let done = Duration::from_micros(self.max_write_us.swap(0, Ordering::Relaxed));
+        let running = match self.writing_since.load(Ordering::Relaxed) {
+            0 => Duration::ZERO,
+            since => at.saturating_sub(Duration::from_millis(since - 1)),
+        };
+        Window {
+            lag,
+            write: done.max(running),
+            stuck: running > WRITE_LIMIT,
+        }
     }
 }
 
@@ -181,10 +253,18 @@ impl Feed {
     }
 }
 
-/// 1 秒ごとの見張り: 遅いかを判定して、札を出すかを決める
+/// 混雑中のあいだ、まとめのログを出す間隔
+const SUMMARY_EVERY_MS: u64 = 60_000;
+
+/// 1 秒ごとの見張り: 遅いかを判定して、札を出すかを決める。札の出入りと、出ている間の 1 分ごとのまとめを、ログの文で返す
 pub struct Monitor {
     load: Arc<Load>,
     hysteresis: Hysteresis,
+    on: bool,
+    /// 札が出る前: 遅い状態が続いた間の最大。札が出ている間: 前のまとめからの最大
+    worst: Worst,
+    /// 札が出ている間: 次のまとめを出す時刻 (epoch ミリ秒)
+    next_summary_ms: u64,
 }
 
 impl Monitor {
@@ -192,13 +272,39 @@ impl Monitor {
         Monitor {
             load,
             hysteresis: Hysteresis::default(),
+            on: false,
+            worst: Worst::default(),
+            next_summary_ms: 0,
         }
     }
 
-    /// 1 回見張る。now_ms は epoch ミリ秒、at は Load の origin からの経過、io・memory は PSI の文
-    fn sample(&mut self, now_ms: u64, at: Duration, io: Option<&str>, memory: Option<&str>) -> bool {
-        let busy = is_busy(io, memory, self.load.take_slow_at(at));
-        self.hysteresis.update(now_ms, busy)
+    /// 1 回見張る。now_ms は epoch ミリ秒、at は Load の origin からの経過、io・memory は PSI の文。
+    /// 返すのは、札を出すか・出すログの文 (札が出ない間は何も出さない)
+    fn sample(&mut self, now_ms: u64, at: Duration, io: Option<&str>, memory: Option<&str>) -> (bool, Option<String>) {
+        let now = Worst::of(self.load.take_window_at(at), io, memory);
+        let on = self.hysteresis.update(now_ms, now.is_busy());
+        let was = std::mem::replace(&mut self.on, on);
+        // 札が出る前は、遅い状態が途切れたら数え直す (ヒステリシスと同じ)
+        self.worst = if on || now.is_busy() {
+            self.worst.merge(now)
+        } else {
+            Worst::default()
+        };
+        let head = match (was, on) {
+            (false, true) => {
+                self.next_summary_ms = now_ms + SUMMARY_EVERY_MS;
+                "broadcast: busy chip ON (slow for 10s+)"
+            }
+            (true, false) => "broadcast: busy chip OFF (clear for 60s+, worst since last summary)",
+            (true, true) if now_ms >= self.next_summary_ms => {
+                self.next_summary_ms = now_ms + SUMMARY_EVERY_MS;
+                "broadcast: busy chip still ON, last minute"
+            }
+            _ => return (on, None),
+        };
+        let line = self.worst.line(head);
+        self.worst = Worst::default();
+        (on, Some(line))
     }
 }
 
@@ -214,12 +320,15 @@ pub fn spawn(load: Arc<Load>) -> (watch::Receiver<bool>, JoinHandle<()>) {
             tick.tick().await;
             let read = |p: &str| std::fs::read_to_string(p).ok();
             let (io, mem) = (read("/proc/pressure/io"), read("/proc/pressure/memory"));
-            let busy = monitor.sample(
+            let (busy, line) = monitor.sample(
                 super::calm_state::now_ms(),
                 origin.elapsed(),
                 io.as_deref(),
                 mem.as_deref(),
             );
+            if let Some(line) = line {
+                tracing::info!("{line}");
+            }
             tx.send_if_modified(|b| std::mem::replace(b, busy) != busy);
             if tx.is_closed() {
                 return;
@@ -241,29 +350,64 @@ mod tests {
     /// 60 秒平均だけ高い (今は落ち着いている)
     const OLD_BUSY: &str = "full avg10=0.50 avg60=80.00 avg300=0.00 total=0\n";
 
-    fn secs(n: u64) -> Duration {
-        Duration::from_secs(n)
+    fn ms(n: u64) -> Duration {
+        Duration::from_millis(n)
+    }
+
+    fn win(lag: u64, write: u64, stuck: bool) -> Window {
+        Window {
+            lag: ms(lag),
+            write: ms(write),
+            stuck,
+        }
     }
 
     #[test]
     fn slow_when_the_frame_lags_over_2s_or_the_write_takes_over_1s() {
-        assert!(!is_slow(secs(2), secs(1)));
-        assert!(is_slow(Duration::from_millis(2001), Duration::ZERO));
-        assert!(is_slow(Duration::ZERO, Duration::from_millis(1001)));
-        assert!(!is_slow(Duration::ZERO, Duration::ZERO));
+        let r = |w| Worst::of(w, None, None).reasons();
+        assert!(r(win(2000, 1000, false)).is_empty());
+        assert_eq!(r(win(2001, 0, false)), vec!["frame_lag"]);
+        assert_eq!(r(win(0, 1001, false)), vec!["write_slow"]);
+        assert_eq!(r(win(0, 0, true)), vec!["write_stuck"]);
+        assert!(r(Window::default()).is_empty());
     }
 
     #[test]
     fn busy_when_psi_ten_second_average_is_over_10_or_slow() {
-        assert!(!is_busy(Some(IDLE), Some(IDLE), false));
-        assert!(is_busy(Some(IDLE), Some(HIGH), false));
-        assert!(is_busy(Some(HIGH), None, false));
+        let idle = Window::default();
+        let r = |io, mem, w| Worst::of(w, io, mem).reasons();
+        assert!(r(Some(IDLE), Some(IDLE), idle).is_empty());
+        assert_eq!(r(Some(IDLE), Some(HIGH), idle), vec!["psi_memory"]);
+        assert_eq!(r(Some(HIGH), None, idle), vec!["psi_io"]);
         // ちょうど 10.0 は遅くない。60 秒平均は見ない
-        assert!(!is_busy(Some(EDGE), None, false));
-        assert!(!is_busy(Some(OLD_BUSY), None, false));
+        assert!(r(Some(EDGE), None, idle).is_empty());
+        assert!(r(Some(OLD_BUSY), None, idle).is_empty());
         // /proc が読めない (Mac) ときは、PSI では遅くならない。コマの遅れだけが効く
-        assert!(!is_busy(None, None, false));
-        assert!(is_busy(None, None, true));
+        assert!(r(None, None, idle).is_empty());
+        assert_eq!(
+            r(None, Some(HIGH), win(3000, 0, false)),
+            vec!["frame_lag", "psi_memory"]
+        );
+    }
+
+    #[test]
+    fn the_log_line_names_the_reasons_and_the_worst_values() {
+        let w = Worst::of(win(3100, 120, false), Some(HIGH), Some(IDLE));
+        assert_eq!(
+            w.line("head"),
+            "head reasons=frame_lag,psi_io lag_ms=3100 write_ms=120 write_stuck=false psi_io_full_avg10=10.0 psi_memory_full_avg10=0.0"
+        );
+        assert!(Worst::default().line("h").contains("reasons=-"));
+        // 合わせると、どちらの最大も残る
+        let m = Worst::of(win(100, 2000, true), None, Some(HIGH)).merge(w);
+        assert_eq!(
+            (m.window.lag, m.window.write, m.window.stuck),
+            (ms(3100), ms(2000), true)
+        );
+        assert_eq!(
+            m.reasons(),
+            vec!["frame_lag", "write_slow", "write_stuck", "psi_io", "psi_memory"]
+        );
     }
 
     /// 1 秒ごとに判定を入れて、(秒, 札あり) の変わり目を返す
@@ -347,30 +491,31 @@ mod tests {
     }
 
     #[test]
-    fn a_slow_frame_sets_the_flag_once_and_a_stuck_write_counts_while_it_runs() {
+    fn the_load_keeps_the_max_since_the_last_take_and_a_stuck_write_counts_while_it_runs() {
         let l = Load::new();
-        let at = |ms| Duration::from_millis(ms);
-        // 速いコマは旗を立てない
-        l.begin_write_at(at(100));
-        l.end_write_at(at(150), at(10));
-        assert!(!l.take_slow_at(at(200)));
-        // 予定から 2 秒を超えて遅れたコマ
-        l.begin_write_at(at(300));
-        l.end_write_at(at(310), at(2500));
-        assert!(l.take_slow_at(at(400)));
-        // 旗は 1 回読むと下りる
-        assert!(!l.take_slow_at(at(500)));
-        // 書き込みに 1 秒を超えかかったコマ
-        l.begin_write_at(at(1000));
-        l.end_write_at(at(2200), at(0));
-        assert!(l.take_slow_at(at(2300)));
-        // 書き込みが終わらないままのとき: 1 秒まではまだ、超えたら遅い
-        l.begin_write_at(at(5000));
-        assert!(!l.take_slow_at(at(5900)));
-        assert!(l.take_slow_at(at(6100)));
-        // 終われば (遅れ・長さは今の時刻で決まる) 旗が立つ
-        l.end_write_at(at(9000), at(0));
-        assert!(l.take_slow_at(at(9100)));
+        // 速いコマ
+        l.begin_write_at(ms(100));
+        l.end_write_at(ms(150), ms(10));
+        assert_eq!(l.take_window_at(ms(200)), win(10, 50, false));
+        // 予定から 2.5 秒遅れたコマと、速いコマ。最大が残る
+        l.begin_write_at(ms(300));
+        l.end_write_at(ms(310), ms(2500));
+        l.begin_write_at(ms(320));
+        l.end_write_at(ms(330), ms(5));
+        assert_eq!(l.take_window_at(ms(400)), win(2500, 10, false));
+        // 1 回読むと 0 に戻る
+        assert_eq!(l.take_window_at(ms(500)), Window::default());
+        // 書き込みに 1.2 秒かかったコマ
+        l.begin_write_at(ms(1000));
+        l.end_write_at(ms(2200), ms(0));
+        assert_eq!(l.take_window_at(ms(2300)), win(0, 1200, false));
+        // 書き込みが終わらないままのとき: 1 秒まではまだ、超えたら詰まり
+        l.begin_write_at(ms(5000));
+        assert_eq!(l.take_window_at(ms(5900)), win(0, 900, false));
+        assert_eq!(l.take_window_at(ms(6100)), win(0, 1100, true));
+        // 終われば長さが残る
+        l.end_write_at(ms(9000), ms(0));
+        assert_eq!(l.take_window_at(ms(9100)), win(0, 4000, false));
     }
 
     #[test]
@@ -379,12 +524,17 @@ mod tests {
         let mut m = Monitor::new(l.clone());
         let mut on_at = None;
         let mut off_at = None;
-        for t in 0..100u64 {
-            // 最初の 20 秒は毎秒遅いコマがある。そのあとは落ち着く
-            if t < 20 {
-                l.end_write_at(Duration::from_secs(t), Duration::from_secs(3));
+        // (秒, 札の出入りと、まとめのログ)
+        let mut lines = Vec::new();
+        for t in 0..200u64 {
+            // 最初の 100 秒は毎秒遅いコマがある (遅れは秒ごとに違う)。そのあとは落ち着く
+            if t < 100 {
+                l.end_write_at(Duration::from_secs(t), ms(3000 + t));
             }
-            let on = m.sample(t * 1000, Duration::from_secs(t), Some(IDLE), None);
+            let (on, line) = m.sample(t * 1000, Duration::from_secs(t), Some(IDLE), None);
+            if let Some(line) = line {
+                lines.push((t, line));
+            }
             if on && on_at.is_none() {
                 on_at = Some(t);
             }
@@ -392,13 +542,22 @@ mod tests {
                 off_at = Some(t);
             }
         }
-        assert_eq!((on_at, off_at), (Some(10), Some(80)));
+        assert_eq!((on_at, off_at), (Some(10), Some(160)));
+        let ts: Vec<u64> = lines.iter().map(|(t, _)| *t).collect();
+        // 出たとき、出ている間の 1 分ごと、消えたとき。落ち着いているあいだは何も出さない
+        assert_eq!(ts, vec![10, 70, 130, 160]);
+        // 出たときは、遅い状態が続いた間 (0〜10 秒) の最大
+        assert!(lines[0].1.contains("ON") && lines[0].1.contains("lag_ms=3010 "));
+        assert!(lines[1].1.contains("still ON") && lines[1].1.contains("lag_ms=3070 "));
+        assert!(lines[3].1.contains("OFF"));
         // PSI だけでも効く
         let mut m = Monitor::new(Load::new());
-        assert!((0..=10)
+        let out: Vec<_> = (0..=10)
             .map(|t| m.sample(t * 1000, Duration::from_secs(t), None, Some(HIGH)))
-            .last()
-            .unwrap());
+            .collect();
+        assert!(out[10].0);
+        assert!(out[10].1.as_deref().unwrap().contains("reasons=psi_memory"));
+        assert!(out[..10].iter().all(|(on, l)| !on && l.is_none()));
     }
 
     /// 2026-10 の JST の日・時・分の epoch ミリ秒
