@@ -42,9 +42,9 @@ body {
 .topbar > .telop { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font-size: 12px; transition: opacity 0.4s; }
 .telop.fading { opacity: 0; }
 
-/* 日時表示 (地図の右下。全体図で北海道に重ならないよう、海の側に置く)。枠の色で接続状態を示す: 緑=オンライン / 赤=切断中 */
+/* 日時表示 (置き場所は web/src/layout.ts。地図の右下)。枠の色で接続状態を示す: 緑=オンライン / 赤=切断中 */
 .clock-panel {
-  position: absolute; bottom: 10px; right: 10px; z-index: 1; pointer-events: none;
+  pointer-events: none;
   background: rgba(13, 17, 23, 0.85); border: 2px solid #d29922; border-radius: 8px;
   padding: 4px 10px 6px; line-height: 1.1; font-variant-numeric: tabular-nums;
 }
@@ -74,7 +74,6 @@ body {
 }
 @keyframes blink { 50% { background: #8b0f1f; } }
 
-.layout { flex: 1; display: grid; grid-template-columns: 1fr 380px; min-height: 0; }
 .map-wrap { position: relative; background: var(--sea); min-height: 0; overflow: hidden; }
 .map { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
 .map:active { cursor: grabbing; }
@@ -97,7 +96,7 @@ body {
 
 /* 音の設定は ON だが、ブラウザの制限でまだ鳴らせないときの案内 */
 .sound-hint {
-  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 2;
+  pointer-events: auto;
   background: #b35900; color: #fff; border: 0; border-radius: 999px; padding: 8px 16px;
   font: 600 14px/1.2 system-ui, sans-serif; cursor: pointer; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
 }
@@ -112,18 +111,17 @@ body {
 
 /* 離島の別枠 (日本全体を表示しているときだけ) */
 .inset {
-  position: absolute; z-index: 1; pointer-events: none; background: var(--sea);
+  position: relative; pointer-events: none; background: var(--sea);
   border: 1px solid #3a4452; border-radius: 4px; overflow: hidden;
 }
 .inset::before { content: attr(data-title); position: absolute; left: 4px; top: 2px; font-size: 10px; color: var(--muted); }
 .inset svg { display: block; height: 100%; width: auto; }
-.inset-okinawa { left: 10px; top: 10px; height: 220px; }
-/* 小笠原は右下の日時表示の上 */
-.inset-ogasawara { right: 10px; bottom: 96px; height: 150px; }
+.inset-okinawa { height: 220px; }
+.inset-ogasawara { height: 150px; }
 
-/* 天気の札が今何を出しているかの案内 (地図の左上、南西諸島の別枠のすぐ右の日本海の上) */
+/* 天気の札が今何を出しているかの案内 (南西諸島の別枠のすぐ右の日本海の上) */
 .weather-caption {
-  position: absolute; left: 246px; top: 10px; z-index: 1; pointer-events: none; white-space: nowrap;
+  pointer-events: none; white-space: nowrap;
   background: rgba(13, 17, 23, 0.8); padding: 4px 9px; border-radius: 6px; font-size: 12px; font-weight: 600; color: var(--text);
 }
 
@@ -141,7 +139,7 @@ body {
 
 /* 凡例 (地図の左下、日本の西の海の上に縦長に)。震度は縦のゲージ (上ほど強い)、津波・P波 S波・警報は必要なときだけ足す */
 .legend {
-  position: absolute; left: 10px; bottom: 10px; z-index: 1; pointer-events: none;
+  pointer-events: none;
   background: rgba(13, 17, 23, 0.8); padding: 6px 7px; border-radius: 6px; font-size: 10px; color: var(--muted);
 }
 .scale { display: flex; gap: 5px; }
@@ -216,7 +214,7 @@ body {
 .mode[data-mode="tour"] { background: #0e7c7b; }
 /* 巡回で次の地震へ移ったときの案内 */
 .tour-toast {
-  position: absolute; left: 50%; bottom: 60px; transform: translateX(-50%); z-index: 2; pointer-events: none;
+  pointer-events: none;
   background: rgba(14, 124, 123, 0.92); color: #fff; border-radius: 999px; padding: 6px 16px; font-weight: 700; white-space: nowrap;
 }
 .tour-toast.show { animation: toast 2.5s ease-out forwards; }
@@ -231,13 +229,10 @@ body {
 .map.picking { cursor: crosshair; }
 /* 自分の地点に主要動が届くまで (緊急地震速報を受けているとき) */
 .countdown {
-  /* 左上に置く (寄っている間は左上の離島の別枠も隠れる) */
-  position: absolute; left: 12px; top: 12px; z-index: 2; pointer-events: none; max-width: calc(100% - 24px);
+  pointer-events: none;
   background: rgba(90, 10, 16, 0.92); border: 2px solid #f85149; border-radius: 8px; padding: 6px 14px;
   font-weight: 700; text-align: center; white-space: nowrap;
 }
-/* 全体図で南西諸島の別枠が出ているときは、その下に置く */
-.map-wrap:has(.inset-okinawa:not([hidden])) .countdown { top: 242px; }
 .countdown .cd-sec { font-size: 28px; font-variant-numeric: tabular-nums; }
 .countdown .cd-sub { font-size: 11px; font-weight: 400; color: #ffb3ad; }
 .countdown.arrived { border-color: #d29922; background: rgba(60, 40, 5, 0.92); }
@@ -292,27 +287,45 @@ a.banner-item:hover p { text-decoration: underline; }
   .topbar h1 { font-size: 14px; }
   .version { display: none; }
   .mode { font-size: 11px; padding: 2px 6px; }
-  .clock-panel { bottom: 6px; right: 6px; padding: 3px 8px 4px; }
-  .inset-ogasawara { bottom: 70px; }
+  .clock-panel { padding: 3px 8px 4px; }
   .inset-okinawa { height: 140px; }
   .inset-ogasawara { height: 100px; }
-  .weather-caption { left: 158px; font-size: 11px; padding: 3px 7px; }
-  /* 地図が細いと左下の凡例が九州に重なるので、南西諸島の別枠の下 (日本海の上) へ移して小さくする */
-  .legend { bottom: auto; top: 158px; padding: 4px 5px; }
+  .weather-caption { font-size: 11px; padding: 3px 7px; }
+  /* 地図が細いと凡例が九州に重なるので、南西諸島の別枠の下 (日本海の上) へ移す (layout.ts) うえで小さくする */
+  .legend { padding: 4px 5px; }
   .gauge i, .gauge-labels span { height: 11px; line-height: 11px; }
   .c-hm { font-size: 26px; }
   .c-day { font-size: 20px; }
   .eew-banner { font-size: 14px; }
-  .countdown { top: auto; bottom: 64px; left: 50%; transform: translateX(-50%); }
-  .layout { display: block; }
-  .map-wrap { height: 60vh; height: 60svh; }
   .side { border-left: none; border-top: 1px solid var(--line); }
   .detail { max-height: none; }
   .list { overflow: visible; }
-  .banner { flex: none; max-height: 50vh; }
+  .banner { max-height: 50vh; }
   .banner-item img { max-height: 40vh; }
 }
 
 /* 配信用の表示 (?broadcast=1): 操作するものは出さない */
 .broadcast #settings-open, .broadcast #demo-open, .broadcast #sound, .broadcast #bgm, .broadcast #overview,
 .broadcast #calm-now, .broadcast #back-live, .broadcast #sound-hint { display: none !important; }
+
+/* レイアウトの定義 (web/src/layout.ts) で並べる容器と、地図の上の重ね物を積む隅。
+   重ね物どうしの位置は、隅から積む順番で決まる (px で手計算しない) */
+.ld-box { display: flex; min-width: 0; min-height: 0; }
+.ld-layer { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+.ld-corner, .ld-stack { display: flex; gap: 10px; pointer-events: none; }
+.ld-corner { position: absolute; padding: 10px; max-width: 100%; }
+.ld-stack { align-items: inherit; }
+/* 中身が全部隠れている積み (別枠と案内の行など) は、間隔も取らない */
+.ld-stack:not(:has(> :not([hidden]))) { display: none; }
+.ld-top-left { left: 0; top: 0; align-items: flex-start; }
+.ld-top-right { right: 0; top: 0; align-items: flex-end; }
+.ld-bottom-left { left: 0; bottom: 0; align-items: flex-start; }
+.ld-bottom-right { right: 0; bottom: 0; align-items: flex-end; }
+.ld-top, .ld-bottom { left: 50%; transform: translateX(-50%); align-items: center; }
+.ld-top { top: 0; }
+.ld-bottom { bottom: 0; }
+/* スマホ (compact) は、いまの見た目に合わせる: 時計は角から 6px、別枠と案内の間 4px・凡例まで 8px。
+   寄って別枠が隠れても、凡例の位置は変えない (別枠の高さ 140px を空けておく) */
+body[data-layout="compact"] .ld-bottom-right { padding: 6px; }
+body[data-layout="compact"] .ld-top-left { gap: 8px; }
+body[data-layout="compact"] .ld-top-left > .ld-stack { display: flex; gap: 4px; min-height: 140px; }
