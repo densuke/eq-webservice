@@ -1,5 +1,8 @@
-// 画面の構成の定義 (どの領域に、どの部品を、どの大きさで置くか)。並べるのは layout-dom.ts。
-// DOM には触らない (テストから読み込めるように)。書式の説明は docs/ui-spec/layout-preview.html。
+// 画面の構成の定義 (どの領域に、どの部品を、どの大きさで置くか) の型・選び方・確かめ方。並べるのは layout-dom.ts。
+// 定義そのものは layout.json (組み込み) と、eq-server の定義ファイル (GET api/layout)。
+// DOM には触らない (テストから読み込めるように)。書式の説明は docs/ui-spec/layout-system.html の「定義ファイル」。
+
+import BUILTIN from "./layout.json" with { type: "json" };
 
 /** "fill" (残りを分ける。"fill:2" は重み 2) / "auto" (部品の中身の大きさ。足りなければ縮む) / CSS の長さ ("380px"・"70%"・"60svh" など。縮まない) */
 export type Size = string;
@@ -58,116 +61,87 @@ export function flexOf(size: Size | undefined, pageColumn: boolean): string {
   return `0 0 ${s}`;
 }
 
-const OVERLAYS_MAP_PC: LayoutNode["overlays"] = {
-  // 別枠の右に天気の札の案内、その下にカウントダウン (別枠が隠れれば上に詰まる)
-  "top-left": { flow: "column", items: [{ flow: "row", items: ["inset", "caption"] }, "countdown"] },
-  "bottom-left": { flow: "column", items: ["legend"] },
-  "bottom-right": { flow: "column", items: ["ogasawara", "clock"] },
-  bottom: { flow: "column", items: ["toast", "hint"] },
-};
+/** 組み込みの定義 (layout.json)。eq-server の定義ファイル (GET api/layout) が読めない・正しくないときにも使う */
+export const LAYOUTS: readonly Layout[] = (BUILTIN as unknown as { layouts: Layout[] }).layouts;
 
-/** いまの web の配置。横向きのスマホ (高さ 480 以下)・PC (幅 801 以上)・スマホ。上から順に最初に合うもの */
-export const LAYOUTS: Layout[] = [
-  {
-    // 高さが足りないので、帯を地図の上に重ねる (EEW は 1 件ずつ巡回)。上部バーは細く (CSS)
-    name: "landscape",
-    when: { minWidth: 801, maxHeight: 480 },
-    root: {
-      dir: "column",
-      children: [
-        { slot: "topbar", size: "auto" },
-        {
-          box: "layout", dir: "row", size: "fill",
-          children: [
-            {
-              slot: "main", size: "fill",
-              overlays: {
-                // 帯の下に別枠と凡例を横に並べる (縦に積むと高さが足りない)
-                "top-left": { flow: "column", items: [{ slot: "banners", variant: "compact" }, { flow: "row", items: ["inset", "legend", "caption"] }, "countdown"] },
-                "bottom-right": { flow: "column", items: ["ogasawara", "clock"] },
-                bottom: { flow: "column", items: ["toast", "hint"] },
-              },
-            },
-            {
-              box: "side", dir: "column", size: "300px",
-              children: [
-                { slot: "settings", size: "auto" },
-                { slot: "detail", size: "auto" },
-                { slot: "history-head", size: "auto" },
-                { slot: "history", size: "fill" },
-                { slot: "notice", size: "fill" },
-                { slot: "credit", size: "auto" },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-  },
-  {
-    name: "regular",
-    when: { minWidth: 801 },
-    root: {
-      dir: "column",
-      children: [
-        { slot: "topbar", size: "auto" },
-        { slot: "banners", size: "auto" },
-        {
-          box: "layout", dir: "row", size: "fill",
-          children: [
-            { slot: "main", size: "fill", overlays: OVERLAYS_MAP_PC },
-            {
-              box: "side", dir: "column", size: "380px",
-              children: [
-                { slot: "settings", size: "auto" },
-                { slot: "detail", size: "auto" },
-                { slot: "history-head", size: "auto" },
-                { slot: "history", size: "fill" },
-                { slot: "notice", size: "fill" },
-                { slot: "credit", size: "auto" },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-  },
-  {
-    name: "compact",
-    when: { maxWidth: 800 },
-    scroll: "page",
-    root: {
-      dir: "column",
-      children: [
-        { slot: "topbar", size: "auto" },
-        { slot: "banners", size: "auto" },
-        {
-          box: "layout", dir: "column", size: "auto",
-          children: [
-            {
-              slot: "main", size: "60svh",
-              overlays: {
-                // 別枠の右に案内、下に凡例 (地図が細いと凡例が九州に重なるため)
-                "top-left": { flow: "column", items: [{ flow: "row", items: ["inset", "caption"] }, "legend"] },
-                // カウントダウンは時計の上に積む (横に並べると時計と重なる)
-                "bottom-right": { flow: "column", items: ["ogasawara", "countdown", "clock"] },
-                bottom: { flow: "column", items: ["toast", "hint"] },
-              },
-            },
-            {
-              box: "side", dir: "column", size: "auto",
-              children: [
-                { slot: "settings", size: "auto" },
-                { slot: "detail", size: "auto" },
-                { slot: "history-head", size: "auto" },
-                { slot: "history", size: "auto" },
-                { slot: "notice", size: "auto" },
-                { slot: "credit", size: "auto" },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-  },
-];
+const CORNERS: readonly string[] = ["top-left", "top-right", "bottom-left", "bottom-right", "top", "bottom"];
+const WHEN: readonly string[] = ["minWidth", "maxWidth", "minHeight", "maxHeight"];
+/** fill・fill:n・auto・数 + 単位・calc() などの CSS の関数 */
+const SIZE = /^(?:fill(?::\d+(?:\.\d+)?)?|auto|\d+(?:\.\d+)?(?:px|%|vw|vh|svw|svh|dvw|dvh|lvw|lvh|em|rem)|(?:calc|clamp|min|max)\([\w\s.,%+*/()-]*\))$/;
+
+/**
+ * 定義ファイル ({ version: 1, layouts: [...] }) を確かめ、正しくないところを返す (正しければ空)。
+ * 部品の名前は slots、容器の名前は boxes にあるものだけ。各定義は部品をすべて、1 回ずつ置く。
+ * 知らないキーも誤りにする (書き間違いに気づけるように)。説明には "note" をどこにでも書ける
+ */
+export function checkLayouts(data: unknown, slots: readonly string[], boxes: readonly string[]): string[] {
+  const errs: string[] = [];
+  const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+  const keys = (v: Record<string, unknown>, at: string, allowed: string[]) => {
+    for (const k of Object.keys(v)) if (k !== "note" && !allowed.includes(k)) errs.push(`${at}: 知らないキー「${k}」`);
+  };
+  const part = (name: unknown, at: string, placed: string[]) => {
+    if (typeof name === "string" && slots.includes(name)) placed.push(name);
+    else errs.push(`${at}: 知らない部品 ${JSON.stringify(name)}`);
+  };
+  const stack = (s: unknown, at: string, placed: string[]): void => {
+    if (!isObj(s)) return void errs.push(`${at}: 重ね方がオブジェクトでない`);
+    keys(s, at, ["flow", "items"]);
+    if (s.flow !== "row" && s.flow !== "column") errs.push(`${at}: flow は "row" か "column"`);
+    if (!Array.isArray(s.items)) return void errs.push(`${at}: items が配列でない`);
+    s.items.forEach((it, i) => {
+      const a = `${at}.items[${i}]`;
+      if (typeof it === "string") part(it, a, placed);
+      else if (isObj(it) && "slot" in it) {
+        keys(it, a, ["slot", "variant"]);
+        part(it.slot, a, placed);
+        if (typeof it.variant !== "string") errs.push(`${a}: variant が文字列でない`);
+      } else stack(it, a, placed);
+    });
+  };
+  const node = (n: unknown, at: string, placed: string[]): void => {
+    if (!isObj(n)) return void errs.push(`${at}: オブジェクトでない`);
+    keys(n, at, ["slot", "variant", "dir", "box", "size", "children", "overlays"]);
+    if (n.size !== undefined && !(typeof n.size === "string" && SIZE.test(n.size))) errs.push(`${at}: 大きさ ${JSON.stringify(n.size)} は使えない`);
+    if (n.slot !== undefined) {
+      part(n.slot, at, placed);
+      if (n.variant !== undefined && typeof n.variant !== "string") errs.push(`${at}: variant が文字列でない`);
+      if (n.children !== undefined || n.box !== undefined) errs.push(`${at}: 部品 (slot) に children・box は付けられない`);
+    } else {
+      if (n.dir !== undefined && n.dir !== "row" && n.dir !== "column") errs.push(`${at}: dir は "row" か "column"`);
+      if (n.box !== undefined && !(typeof n.box === "string" && boxes.includes(n.box))) errs.push(`${at}: 知らない容器 ${JSON.stringify(n.box)}`);
+      if (!Array.isArray(n.children)) errs.push(`${at}: 容器に children (配列) が無い`);
+      else n.children.forEach((c, i) => node(c, `${at}.children[${i}]`, placed));
+    }
+    if (n.overlays === undefined) return;
+    if (!isObj(n.overlays)) return void errs.push(`${at}: overlays がオブジェクトでない`);
+    for (const [corner, s] of Object.entries(n.overlays)) {
+      if (CORNERS.includes(corner)) stack(s, `${at}.overlays.${corner}`, placed);
+      else errs.push(`${at}: 知らない隅「${corner}」`);
+    }
+  };
+
+  if (!isObj(data)) return ["定義ファイルが JSON のオブジェクトでない"];
+  keys(data, "定義ファイル", ["version", "layouts"]);
+  if (data.version !== 1) errs.push(`version は 1 (いまは ${JSON.stringify(data.version)})`);
+  if (!Array.isArray(data.layouts) || data.layouts.length === 0) return [...errs, "layouts が空か、配列でない"];
+  data.layouts.forEach((l, i) => {
+    const at = `layouts[${i}]`;
+    if (!isObj(l)) return void errs.push(`${at}: オブジェクトでない`);
+    const name = `${at} (${String(l.name)})`;
+    keys(l, name, ["name", "when", "scroll", "root"]);
+    if (typeof l.name !== "string" || !l.name) errs.push(`${at}: name が無い`);
+    if (l.when !== undefined) {
+      if (!isObj(l.when)) errs.push(`${name}: when がオブジェクトでない`);
+      else for (const [k, v] of Object.entries(l.when)) if (!WHEN.includes(k) || typeof v !== "number") errs.push(`${name}: when.${k} は使えない (${WHEN.join("・")} に数)`);
+    }
+    if (l.scroll !== undefined && l.scroll !== "page") errs.push(`${name}: scroll は "page" だけ`);
+    const placed: string[] = [];
+    node(l.root, `${name}.root`, placed);
+    for (const s of slots) {
+      const n = placed.filter((p) => p === s).length;
+      if (n !== 1) errs.push(`${name}: 部品「${s}」を${n === 0 ? "置いていない" : ` ${n} 回置いている`}`);
+    }
+  });
+  return errs;
+}

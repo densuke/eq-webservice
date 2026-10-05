@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { type LayoutNode, type Stack, LAYOUTS, flexOf, pickLayout } from "./layout.ts";
+import { readFileSync } from "node:fs";
+import { type LayoutNode, type Stack, LAYOUTS, checkLayouts, flexOf, pickLayout } from "./layout.ts";
 import { BOXES, SLOTS } from "./layout-dom.ts";
 
 test("the layout is picked by the screen size (same 800px boundary as the CSS)", () => {
@@ -50,8 +51,7 @@ for (const l of LAYOUTS) {
   });
 }
 
-test("every SLOTS/BOXES selector names an element of index.html (or an inset made by map.ts)", async () => {
-  const { readFileSync } = await import("node:fs");
+test("every SLOTS/BOXES selector names an element of index.html (or an inset made by map.ts)", () => {
   const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
   const mapTs = readFileSync(new URL("./map.ts", import.meta.url), "utf8");
   for (const sel of [...Object.values(SLOTS), ...Object.values(BOXES)].flatMap((s) => s.split(","))) {
@@ -66,4 +66,40 @@ test("every SLOTS/BOXES selector names an element of index.html (or an inset mad
     const attr = kind === "#" ? `id="${name}"` : `class="(?:[^"]* )?${name}(?: [^"]*)?"`;
     assert.match(html, new RegExp(`<${tag || "[a-z]+"}\\b[^>]*\\b${attr}`), sel);
   }
+});
+
+const check = (data: unknown) => checkLayouts(data, Object.keys(SLOTS), Object.keys(BOXES));
+const shipped = () => JSON.parse(readFileSync(new URL("./layout.json", import.meta.url), "utf8"));
+
+test("the shipped layout file (layout.json) passes the check and is the built-in", () => {
+  assert.deepEqual(check(shipped()), []);
+  assert.deepEqual(shipped().layouts, LAYOUTS);
+});
+
+test("the check names what is wrong in a layout file", () => {
+  const broken = (edit: (d: any) => void) => {
+    const d = shipped();
+    edit(d);
+    return check(d).join("\n");
+  };
+  // 知らない部品・置いていない部品・2 回置いた部品
+  assert.match(broken((d) => (d.layouts[1].root.children[0].slot = "topbarr")), /知らない部品 "topbarr"[\s\S]*「topbar」を置いていない/);
+  assert.match(broken((d) => d.layouts[2].root.children.splice(1, 1)), /compact\): 部品「banners」を置いていない/);
+  assert.match(broken((d) => d.layouts[1].root.children.push({ slot: "clock" })), /「clock」を 2 回置いている/);
+  // 大きさ・向き・容器・隅・条件・キーの書き間違い
+  for (const size of ["380", "big", "fill:x", "1px; color: red", ""]) {
+    assert.match(broken((d) => (d.layouts[1].root.children[2].children[1].size = size)), /大きさ .* は使えない/, size);
+  }
+  for (const size of ["380px", "fill:2", "auto", "60svh", "30%", "clamp(260px, 25vw, 380px)"]) {
+    assert.equal(broken((d) => (d.layouts[1].root.children[2].children[1].size = size)), "", size);
+  }
+  assert.match(broken((d) => (d.layouts[1].root.children[2].dir = "grid")), /dir は "row" か "column"/);
+  assert.match(broken((d) => (d.layouts[1].root.children[2].box = "aside")), /知らない容器 "aside"/);
+  assert.match(broken((d) => (d.layouts[1].root.children[2].children[0].overlays.middle = { flow: "row", items: [] })), /知らない隅「middle」/);
+  assert.match(broken((d) => (d.layouts[1].when = { minWidht: 801 })), /when\.minWidht は使えない/);
+  assert.match(broken((d) => (d.layouts[1].root.sise = "auto")), /知らないキー「sise」/);
+  assert.match(broken((d) => (d.version = 2)), /version は 1/);
+  // ファイルの形そのもの
+  assert.deepEqual(check(null), ["定義ファイルが JSON のオブジェクトでない"]);
+  assert.match(check({ version: 1, layouts: [] }).join(), /layouts が空/);
 });

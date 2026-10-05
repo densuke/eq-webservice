@@ -87,7 +87,7 @@
       <h2><span class="num">6</span>第 1 段階: いまの web を定義で再現 <span class="tag sure">実装済み</span></h2>
       <p>レイアウトの定義を web 本体に持ち込み、いまのページを<b>定義どおりに並べ直す</b>形に置き換えました。見た目は変えず、仕組みだけを置き換えるのが目的です。</p>
       <ul>
-        <li><b>定義</b>: <code>web/src/layout.ts</code> の <code>LAYOUTS</code> (<code>regular</code> = 幅 801 以上、<code>compact</code> = 800 以下)。部品の名前と、いまの要素の対応は <code>web/src/layout-dom.ts</code> の <code>SLOTS</code>。</li>
+        <li><b>定義</b>: <code>web/src/layout.ts</code> の <code>LAYOUTS</code> (<code>regular</code> = 幅 801 以上、<code>compact</code> = 800 以下)。段階 0.5 からは <code>web/src/layout.json</code> (下の「定義ファイル」)。部品の名前と、いまの要素の対応は <code>web/src/layout-dom.ts</code> の <code>SLOTS</code>。</li>
         <li><b>並べ方</b>: 起動時と画面の大きさが変わったときに、合う定義を選び、要素を容器 (flex) と地図の隅の積み (重ね物) へ入れ直す。</li>
         <li><b>CSS から外したもの</b>: 重ね物の位置の手計算 (<code>left: 246px</code>・<code>:has()</code> で <code>top: 242px</code>・<code>bottom: 96px</code> など) と、本体の grid。部品の見た目 (色・大きさ・文字) はそのまま。</li>
         <li><b>テスト</b>: <code>web/src/layout.test.ts</code> (定義の選び方・大きさの変換・全部品が 1 回ずつ置かれていること)。</li>
@@ -114,13 +114,35 @@
       <p class="small muted">スマホの「時計は角から 6px」「別枠と案内の間 4px・凡例まで 8px」「寄って別枠が隠れても凡例は動かない」は、いまの見た目に合わせるため CSS で補っている (<code>body[data-layout="compact"]</code>)。第 2 段階で書式に「余白」「場所を空けておく」を足せば、定義に移せる。</p>
       <h3>横向きのスマホ (landscape) を追加 <span class="tag sure">実装済み</span></h3>
       <ul>
-        <li>条件: 幅 801px 以上・高さ 480px 以下 (<code>web/src/layout.ts</code> の <code>landscape</code>)。PC とスマホ縦の見た目は変えていない (実測で ±1px 一致を確認)。</li>
+        <li>条件: 幅 801px 以上・高さ 480px 以下 (定義の <code>landscape</code>)。PC とスマホ縦の見た目は変えていない (実測で ±1px 一致を確認)。</li>
         <li>帯 (EEW・津波・気象警報) を地図の左上に重ねる札にした。EEW は 1 件ずつ 4 秒ごとに巡回し、「5/6」のように何件目かを出す。津波・気象警報は小さな札。</li>
         <li>上部バーを細く (題と版を隠し、ボタンを小さく)。南西諸島の別枠は 140px。別枠の右に凡例を並べる。</li>
         <li>書式に「見せ方の段階」(<code>{ slot: "banners", variant: "compact" }</code>) を足した。部品の要素に <code>data-variant</code> が付き、部品の側 (EEW の帯の描き方・CSS) がそれを見て見せ方を変える。</li>
         <li>天気の札が避ける相手を、セレクタの直書きから「地図の隅に積んだ部品すべて」に変えた (仕様書 第 7 章 C5 の解消)。</li>
         <li>結果: 915×350 で EEW 6 件 + 津波注意報のとき、地図の高さが 174px → 322px。</li>
       </ul>
+      <h3 id="layout-file">定義ファイル (段階 0.5) <span class="tag sure">実装済み</span></h3>
+      <p>レイアウトの定義を、ビルドに入れるコードから<b>外のファイル (JSON)</b> に出しました。部品そのもの (web の <code>app.js</code>・Rust の native) はこれまでどおりビルドに入れ、<b>並びだけ</b>をファイルで変えます (Rust の動的ライブラリの部品は、ABI が安定しないので採らない)。</p>
+      <ul>
+        <li><b>組み込みの定義</b>: <code>web/src/layout.json</code>。web の <code>app.js</code> と eq-server の両方に入る (同じファイル)。</li>
+        <li><b>差し替え</b>: eq-server の設定 <code>[layout] file = "data/layout.json"</code>。<code>GET /api/layout</code> が毎回ファイルを読み直して返すので、<b>ファイルを書き換えてブラウザを再読み込みすれば変わる</b> (npm のビルド・Rust のビルド・サーバの再起動は要らない)。設定が無い・読めない・JSON でないときは、警告を出して組み込みの定義を返す。</li>
+        <li><b>確かめ方</b>: web が読み込んだ定義を確かめ (<code>web/src/layout.ts</code> の <code>checkLayouts</code>)、正しくなければブラウザのコンソールに理由を出して組み込みの定義のまま並べる (ページは止めない)。</li>
+        <li><b>テスト</b>: 同梱の <code>layout.json</code> が確かめを通り、組み込みと同じであること。知らない部品・置いていない部品・2 回置いた部品・使えない大きさ・知らない容器 / 隅 / キーを見つけること。組み込みの定義で、PC・スマホ縦・横向きの 5 つの画面の大きさで main と位置が一致することを実測で確認。</li>
+      </ul>
+      <div class="tablewrap"><table>
+        <thead><tr><th>キー</th><th>中身</th></tr></thead>
+        <tbody>
+          <tr><td><code>version</code></td><td><code>1</code> (書式を変えたら上げる)</td></tr>
+          <tr><td><code>layouts[]</code></td><td>上から順に、<code>when</code> に最初に合うものを使う。どれにも合わなければ先頭</td></tr>
+          <tr><td><code>name</code> / <code>when</code> / <code>scroll</code></td><td>名前 (<code>body[data-layout]</code> になる) / <code>minWidth</code>・<code>maxWidth</code>・<code>minHeight</code>・<code>maxHeight</code> (px) / <code>"page"</code> (ページ全体がスクロール)</td></tr>
+          <tr><td><code>root</code> とその下の節</td><td>容器 <code>{ dir, box?, size?, children, overlays? }</code> か、部品 <code>{ slot, variant?, size?, overlays? }</code>。<code>box</code> は既存の要素 (<code>layout</code>・<code>side</code>)</td></tr>
+          <tr><td><code>size</code></td><td><code>fill</code>・<code>fill:2</code> (残りを重みで分ける)・<code>auto</code> (中身の大きさ)・数 + 単位 (<code>px</code>・<code>%</code>・<code>svh</code>・<code>vw</code> など)・<code>calc()</code>・<code>clamp()</code>・<code>min()</code>・<code>max()</code></td></tr>
+          <tr><td><code>overlays</code></td><td>隅 (<code>top-left</code>・<code>top-right</code>・<code>bottom-left</code>・<code>bottom-right</code>・<code>top</code>・<code>bottom</code>) → <code>{ flow, items }</code>。<code>items</code> は部品の名前・<code>{ slot, variant }</code>・入れ子の <code>{ flow, items }</code></td></tr>
+          <tr><td><code>note</code></td><td>説明 (どこにでも書ける。JSON にはコメントが無いため)</td></tr>
+        </tbody>
+      </table></div>
+      <p class="small muted">各定義は、部品 (<code>web/src/layout-dom.ts</code> の <code>SLOTS</code>) をすべて 1 回ずつ置く。知らないキーも誤りにする (書き間違いに気づけるように)。</p>
+      <p><b>配信 (native) が同じファイルを読むために要るもの</b> (段階 4。いまは native を変えていない): 定義の型を serde で持ち、web と同じ確かめ方をする / 部品の名前 → native の描き方の対応 / 固定の 1280×720 で選ぶ条件 (例: <code>when: { target: "broadcast" }</code>。web はそれを選ばない) / <code>fill</code>・<code>auto</code>・<code>px</code>・<code>%</code> を native の矩形の割り付けに直す処理 (<code>svh</code>・<code>vw</code>・<code>clamp()</code> は画面の大きさで計算するか、native では使えない値として扱う)。</p>
       <p class="note"><b>今後の課題</b>は、リポジトリの <code>docs/ui-layout-backlog.md</code> に一覧で残しています (実機での確認・書式の拡張・縦画面の改善・2 地図・データ源の確認など)。</p>
       <h3>第 2 段階以降の候補 (要望)</h3>
       <ul>
@@ -128,7 +150,7 @@
         <li><b>スクロールすると地図が一時的に小さくなり</b>、情報の部分を縦に広く使えるようにする。定義では、地図の大きさを幅で持つ (例: いつもは 60svh、スクロール中は 30svh)。CSS のスクロール連動か、少しのスクリプトで実現できる見込み。</li>
         <li>どちらも「普段の表示の移行 (第 1 段階)」が済んでから。地図の大きさが変わると、地図のカメラと天気の札の置き直しが走るので、その負荷の確認が要る。</li>
       </ul>
-      <p class="small muted">このページの「レイアウト定義プレビュー」の定義 (<code>layout-def.js</code>) は書式を試したときの下書きで、実際に使っている定義は <code>web/src/layout.ts</code>。</p>
+      <p class="small muted">このページの「レイアウト定義プレビュー」の定義 (<code>layout-def.js</code>) は書式を試したときの下書きで、実際に使っている定義は <code>web/src/layout.json</code> (と eq-server の定義ファイル)。</p>
     </section>
 
     <section id="l6">

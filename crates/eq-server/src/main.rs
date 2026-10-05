@@ -9,6 +9,7 @@ mod config;
 mod demo;
 mod http;
 mod hub;
+mod layout;
 mod net;
 mod plugins;
 mod quake;
@@ -103,6 +104,7 @@ async fn main() -> anyhow::Result<()> {
     routes.push(http::source_router(cfg.source.kind()));
     routes.push(bgm::router(&cfg.bgm));
     routes.push(banner::router(&cfg.banner));
+    routes.push(layout::router(&cfg.layout));
     // jsonl の sink があるときだけ、その記録を返す
     let archive_path = archive::jsonl_path(&cfg.sinks);
     if let Some(path) = archive_path.clone() {

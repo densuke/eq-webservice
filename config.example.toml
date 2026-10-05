@@ -88,6 +88,12 @@ dir = ""
 # dir = "/home/eq/banner"
 interval_sec = 20
 
+# 画面の並びの定義 (JSON)。書き換えてブラウザを再読み込みすれば変わる (再起動は不要)。
+# 空なら組み込みの定義 (web/src/layout.json)。正しくない定義は、画面が組み込みの定義を使う
+[layout]
+file = ""
+# file = "data/layout.json"
+
 # 音声アナウンス (Google Cloud Text-to-Speech)。秘密情報は設定ファイルに書かず、環境変数で渡す
 #   GOOGLE_TTS_API_KEY: Google の API キー (未設定なら enabled = true でも警告を出して無効)
 #   EQ_TTS_TOKEN: POST /api/tts の Bearer トークン (未設定ならこの窓口は無効)

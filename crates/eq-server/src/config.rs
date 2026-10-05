@@ -24,6 +24,9 @@ pub struct Config {
     /// 平時のバナー (案内・お知らせ)
     #[serde(default)]
     pub banner: crate::banner::BannerConfig,
+    /// 画面の並びの定義ファイル
+    #[serde(default)]
+    pub layout: crate::layout::LayoutConfig,
     /// 音声アナウンス (Google TTS)
     #[serde(default)]
     pub tts: crate::tts::TtsConfig,
