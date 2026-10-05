@@ -70,7 +70,8 @@ function overlays(host: HTMLElement, spec: LayoutNode["overlays"]): void {
     const box = stack(s, `ld-corner ld-${corner}`);
     layer.append(box);
   }
-  host.append(layer);
+  // 地図の中の他の重ね物 (画面外の地震の矢印など。同じ z-index) より下に置く
+  host.prepend(layer);
   made.push(layer);
 }
 
@@ -96,12 +97,29 @@ function place(node: LayoutNode, parent: HTMLElement, pageColumn: boolean): void
   overlays(box, node.overlays);
 }
 
+/** 定義の中で、ページに見つからない部品と容器 (並べる前に確かめ、一つでもあれば並べ直さない) */
+function missing(node: LayoutNode): string[] {
+  const names = (s: Stack): string[] => s.items.flatMap((i) => (typeof i === "string" ? [i] : "slot" in i ? [(i as Part).slot] : names(i)));
+  const used = [...(node.slot ? [node.slot] : []), ...Object.values(node.overlays ?? {}).flatMap((s) => (s ? names(s) : []))];
+  return [
+    ...used.filter((n) => !SLOTS[n] || elements(n).length === 0).map((n) => `部品「${n}」`),
+    ...(node.box && !document.querySelector(BOXES[node.box] ?? "") ? [`容器「${node.box}」`] : []),
+    ...(node.children ?? []).flatMap(missing),
+  ];
+}
+
 let current: Layout | null = null;
 
-/** 画面の大きさに合う定義で並べる。前と同じ定義なら何もしない */
+/** 画面の大きさに合う定義で並べる。前と同じ定義なら何もしない。
+ *  部品や容器が見つからなければ、ログを出していまの並びのままにする (ページ全体を止めない) */
 export function applyLayout(layouts: readonly Layout[] = LAYOUTS): void {
   const next = pickLayout(layouts, window.innerWidth, window.innerHeight);
   if (next === current) return;
+  const lack = missing(next.root);
+  if (lack.length) {
+    console.error(`layout: ${next.name} で並べられない (${lack.join("・")} が無い)`);
+    return;
+  }
   current = next;
   // 定義が変わると、見せ方の段階も変わりうる (帯の巡回など)。描き直しを待たずに次の tick で反映される
   // 要素を新しい容器へ入れ直してから、前の容器と層 (もう空) を消す

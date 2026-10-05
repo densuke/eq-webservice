@@ -378,14 +378,14 @@ $("#back-live").addEventListener("click", () => {
   }
 });
 
-// 画面の大きさに合うレイアウトの定義 (layout.ts) で並べる。大きさが変わって定義が変われば並べ直す
-applyLayout();
-window.addEventListener("resize", () => applyLayout());
-
 // ほかのモジュールから呼ぶ処理を登録する
 hooks.renderAll = renderAll;
 hooks.onEvents = onEvents;
 hooks.playAlert = playAlert;
+
+// 画面の大きさに合うレイアウトの定義 (layout.ts) で並べる。大きさが変わって定義が変われば並べ直す
+applyLayout();
+window.addEventListener("resize", () => applyLayout());
 
 loadTelop();
 // 気象警報・注意報は 5 分ごとに取り直す
