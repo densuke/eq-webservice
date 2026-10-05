@@ -329,3 +329,17 @@ a.banner-item:hover p { text-decoration: underline; }
 body[data-layout="compact"] .ld-bottom-right { padding: 6px; }
 body[data-layout="compact"] .ld-top-left { gap: 8px; }
 body[data-layout="compact"] .ld-top-left > .ld-stack { display: flex; gap: 4px; min-height: 140px; }
+
+/* 横向きのスマホ (landscape): 帯は地図の左上に重ねる札にする (EEW は 1 件ずつ巡回、view.ts)。上部バーは細く */
+body[data-layout="landscape"] .topbar { padding: 3px 10px; gap: 6px; }
+body[data-layout="landscape"] .topbar h1 { display: none; }
+body[data-layout="landscape"] .topbar .follow, body[data-layout="landscape"] .topbar .mode, body[data-layout="landscape"] .back-live { font-size: 11px; padding: 1px 7px; }
+[data-variant="compact"].eew-banner, [data-variant="compact"].tsunami-banner, [data-variant="compact"].warn-banner {
+  max-width: min(560px, 100%); border-radius: 8px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5); pointer-events: none;
+}
+[data-variant="compact"].eew-banner { display: flex; align-items: center; gap: 6px; padding: 6px 10px; font-size: 13px; }
+[data-variant="compact"].eew-banner > div { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.eew-count { flex: none; font-size: 11px; font-weight: 700; padding: 0 5px; border-radius: 4px; background: rgba(255, 255, 255, 0.25); }
+[data-variant="compact"].tsunami-banner { padding: 2px 8px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+[data-variant="compact"].warn-banner { padding: 3px 10px; font-size: 12px; }
+body[data-layout="landscape"] .inset-okinawa { height: 140px; }

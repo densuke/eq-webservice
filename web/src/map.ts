@@ -759,9 +759,12 @@ export class JapanMap {
     this.thinCities();
   }
 
-  /** 札が凡例・別枠・案内・時計や、優先の高い札と重なるときは海の上へ逃がし、置けなければ出さない (地図の大きさや範囲、凡例の行が変わるたびに置き直す) */
+  /**
+   * 札が地図の上の重ね物 (凡例・別枠・案内・時計・帯の札など) や、優先の高い札と重なるときは海の上へ逃がし、置けなければ出さない
+   * (地図の大きさや範囲、凡例の行が変わるたびに置き直す)。重ね物は、レイアウトの定義で地図の隅に積んだものすべて (layout-dom.ts)
+   */
   thinCities(): void {
-    const blockers = document.querySelectorAll(".legend, .clock-panel, .weather-caption:not([hidden]), .inset:not([hidden])");
+    const blockers = document.querySelectorAll(".ld-layer :is(.ld-corner, .ld-stack) > :not(.ld-stack):not([hidden])");
     thinCityLayer(this.cityLayer, [...blockers], this.svg);
   }
 

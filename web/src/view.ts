@@ -14,6 +14,8 @@ import type { Hypocenter, PrefScale, Scale, TsunamiEvent } from "./types.ts";
 
 /** EEW バナーに並べる件数 (残りは「ほか N 件」) */
 const EEW_BANNER_MAX = 3;
+/** 帯を 1 件ずつ見せる段階 (data-variant="compact"、横向きのスマホ) で次の EEW へ切り替える間隔 */
+const EEW_ROTATE_MS = 4000;
 
 export function numTag(key: string): string {
   const n = app.numbers.get(key);
@@ -260,15 +262,20 @@ export function renderBanner(now: number): void {
   banner.hidden = eews.length === 0;
   // 予報だけなら警報と色を分ける
   banner.classList.toggle("forecast", eews.length > 0 && eews.every((e) => !e.warning));
+  const row = (e: (typeof eews)[number]) => {
+    const prefs = e.pref_max.map((p) => p.pref).join("・");
+    return `<div>${numTag(`e:${e.event_id}`)}<b>${e.test ? "【テスト】" : ""}緊急地震速報 (${e.warning ? "警報" : "予報"})</b> ${esc(e.hypocenter?.name ?? "")} で地震 ・ ${
+      e.warning ? "強い揺れに警戒" : `予測最大震度${scaleLabel(e.max_scale)}`
+    }: ${esc(prefs || "—")}</div>`;
+  };
+  // 1 件ずつ見せる段階: 揺れの大きい順に巡回し、何件目かを出す (色はいま見せている報で決める)
+  if (banner.dataset.variant === "compact" && eews.length > 0) {
+    const i = Math.floor(now / EEW_ROTATE_MS) % eews.length;
+    banner.classList.toggle("forecast", !eews[i].warning);
+    const html = (eews.length > 1 ? `<span class="eew-count">${i + 1}/${eews.length}</span>` : "") + row(eews[i]);
+    if (banner.innerHTML !== html) banner.innerHTML = html;
+    return;
+  }
   const rest = eews.length - EEW_BANNER_MAX;
-  banner.innerHTML =
-    eews
-      .slice(0, EEW_BANNER_MAX)
-      .map((e) => {
-        const prefs = e.pref_max.map((p) => p.pref).join("・");
-        return `<div>${numTag(`e:${e.event_id}`)}<b>${e.test ? "【テスト】" : ""}緊急地震速報 (${e.warning ? "警報" : "予報"})</b> ${esc(e.hypocenter?.name ?? "")} で地震 ・ ${
-          e.warning ? "強い揺れに警戒" : `予測最大震度${scaleLabel(e.max_scale)}`
-        }: ${esc(prefs || "—")}</div>`;
-      })
-      .join("") + (rest > 0 ? `<div>ほか ${rest} 件の緊急地震速報</div>` : "");
+  banner.innerHTML = eews.slice(0, EEW_BANNER_MAX).map(row).join("") + (rest > 0 ? `<div>ほか ${rest} 件の緊急地震速報</div>` : "");
 }

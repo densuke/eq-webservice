@@ -1,7 +1,7 @@
 // レイアウトの定義 (layout.ts) どおりに、いまのページの要素を並べ直す。
 // 部品の要素は index.html (と JapanMap が作る別枠) にあるものをそのまま使い、置き場所と大きさだけを決める。
 
-import { type Layout, type LayoutNode, type Stack, LAYOUTS, flexOf, pickLayout } from "./layout.ts";
+import { type Layout, type LayoutNode, type Part, type Stack, LAYOUTS, flexOf, pickLayout } from "./layout.ts";
 
 /** 部品の名前 → 要素 (複数なら順に並べる) */
 export const SLOTS: Record<string, string> = {
@@ -37,12 +37,23 @@ function elements(slot: string): HTMLElement[] {
   return found.get(slot)!;
 }
 
+/** 部品の要素を取り出し、見せ方の段階を付け直す (前の定義の段階は消す) */
+function part(slot: string, variant?: string): HTMLElement[] {
+  const els = elements(slot);
+  for (const el of els) {
+    if (variant) el.dataset.variant = variant;
+    else delete el.dataset.variant;
+  }
+  return els;
+}
+
 function stack(spec: Stack, cls: string): HTMLElement {
   const box = document.createElement("div");
   box.className = cls;
   box.style.flexDirection = spec.flow;
   for (const item of spec.items) {
-    if (typeof item === "string") box.append(...elements(item));
+    if (typeof item === "string") box.append(...part(item));
+    else if ("slot" in item) box.append(...part((item as Part).slot, (item as Part).variant));
     else box.append(stack(item, "ld-stack"));
   }
   return box;
@@ -66,7 +77,7 @@ function overlays(host: HTMLElement, spec: LayoutNode["overlays"]): void {
 function place(node: LayoutNode, parent: HTMLElement, pageColumn: boolean): void {
   const flex = flexOf(node.size, pageColumn);
   if (node.slot) {
-    const els = elements(node.slot);
+    const els = part(node.slot, node.variant);
     for (const el of els) {
       el.style.flex = flex;
       parent.append(el);
@@ -92,6 +103,7 @@ export function applyLayout(layouts: readonly Layout[] = LAYOUTS): void {
   const next = pickLayout(layouts, window.innerWidth, window.innerHeight);
   if (next === current) return;
   current = next;
+  // 定義が変わると、見せ方の段階も変わりうる (帯の巡回など)。描き直しを待たずに次の tick で反映される
   // 要素を新しい容器へ入れ直してから、前の容器と層 (もう空) を消す
   const old = made;
   made = [];

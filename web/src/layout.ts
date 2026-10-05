@@ -4,10 +4,16 @@
 /** "fill" (残りを分ける。"fill:2" は重み 2) / "auto" (部品の中身の大きさ。足りなければ縮む) / CSS の長さ ("380px"・"70%"・"60svh" など。縮まない) */
 export type Size = string;
 
+/** 部品の見せ方の段階を指定して置く (例: 帯を 1 件ずつ巡回する "compact")。部品の要素に data-variant として付く */
+export interface Part {
+  slot: string;
+  variant: string;
+}
+
 /** 隅に積む重ね物。items は上から下 (左から右) の順 */
 export interface Stack {
   flow: "row" | "column";
-  items: (string | Stack)[];
+  items: (string | Part | Stack)[];
 }
 
 export type Corner = "top-left" | "top-right" | "bottom-left" | "bottom-right" | "top" | "bottom";
@@ -15,6 +21,8 @@ export type Corner = "top-left" | "top-right" | "bottom-left" | "bottom-right" |
 export interface LayoutNode {
   /** 部品 (SLOTS の名前)。無ければ容器 */
   slot?: string;
+  /** 部品の見せ方の段階 (Part と同じ) */
+  variant?: string;
   /** 容器の向き */
   dir?: "row" | "column";
   /** 容器に使う既存の要素 (BOXES の名前)。無ければ div を作る */
@@ -58,8 +66,44 @@ const OVERLAYS_MAP_PC: LayoutNode["overlays"] = {
   bottom: { flow: "column", items: ["toast", "hint"] },
 };
 
-/** いまの web の配置。PC (幅 801 以上) とスマホ */
+/** いまの web の配置。横向きのスマホ (高さ 480 以下)・PC (幅 801 以上)・スマホ。上から順に最初に合うもの */
 export const LAYOUTS: Layout[] = [
+  {
+    // 高さが足りないので、帯を地図の上に重ねる (EEW は 1 件ずつ巡回)。上部バーは細く (CSS)
+    name: "landscape",
+    when: { minWidth: 801, maxHeight: 480 },
+    root: {
+      dir: "column",
+      children: [
+        { slot: "topbar", size: "auto" },
+        {
+          box: "layout", dir: "row", size: "fill",
+          children: [
+            {
+              slot: "main", size: "fill",
+              overlays: {
+                // 帯の下に別枠と凡例を横に並べる (縦に積むと高さが足りない)
+                "top-left": { flow: "column", items: [{ slot: "banners", variant: "compact" }, { flow: "row", items: ["inset", "legend", "caption"] }, "countdown"] },
+                "bottom-right": { flow: "column", items: ["ogasawara", "clock"] },
+                bottom: { flow: "column", items: ["toast", "hint"] },
+              },
+            },
+            {
+              box: "side", dir: "column", size: "380px",
+              children: [
+                { slot: "settings", size: "auto" },
+                { slot: "detail", size: "auto" },
+                { slot: "history-head", size: "auto" },
+                { slot: "history", size: "fill" },
+                { slot: "notice", size: "fill" },
+                { slot: "credit", size: "auto" },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  },
   {
     name: "regular",
     when: { minWidth: 801 },
