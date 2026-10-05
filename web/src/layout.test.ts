@@ -8,6 +8,11 @@ test("the layout is picked by the screen size (same 800px boundary as the CSS)",
   assert.equal(pickLayout(LAYOUTS, 801, 600).name, "regular");
   assert.equal(pickLayout(LAYOUTS, 800, 1000).name, "compact");
   assert.equal(pickLayout(LAYOUTS, 390, 844).name, "compact");
+  // 横向きのスマホ (幅 801 以上で高さ 480 以下) は landscape
+  assert.equal(pickLayout(LAYOUTS, 915, 350).name, "landscape");
+  assert.equal(pickLayout(LAYOUTS, 844, 390).name, "landscape");
+  assert.equal(pickLayout(LAYOUTS, 801, 480).name, "landscape");
+  assert.equal(pickLayout(LAYOUTS, 801, 481).name, "regular");
 });
 
 test("sizes become flex values", () => {
@@ -23,7 +28,7 @@ test("sizes become flex values", () => {
 
 /** 定義の中の部品の名前 (重ね物を含む) */
 function slots(n: LayoutNode): string[] {
-  const fromStack = (s: Stack): string[] => s.items.flatMap((i) => (typeof i === "string" ? [i] : fromStack(i)));
+  const fromStack = (s: Stack): string[] => s.items.flatMap((i) => (typeof i === "string" ? [i] : "slot" in i ? [i.slot] : fromStack(i)));
   return [
     ...(n.slot ? [n.slot] : []),
     ...Object.values(n.overlays ?? {}).flatMap((s) => (s ? fromStack(s) : [])),

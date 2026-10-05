@@ -3,7 +3,7 @@
 import { type AreaScale, eewAreaScales, keepForecast, overlayForecast, quakeDetail } from "./detail.ts";
 import { type EewGroup, type Group, heldEew, latestEew, summarizeQuake } from "./groups.ts";
 import { esc } from "./html.ts";
-import { byPriority, sameQuake } from "./priority.ts";
+import { byPriority, rotationIndex, sameQuake } from "./priority.ts";
 import { activeEews, currentGroup, groupPlace, groupScale, relatedQuake } from "./quakes.ts";
 import { scaleColor, scaleLabel, scaleTextColor } from "./scale.ts";
 import { $, map } from "./dom.ts";
@@ -260,15 +260,25 @@ export function renderBanner(now: number): void {
   banner.hidden = eews.length === 0;
   // 予報だけなら警報と色を分ける
   banner.classList.toggle("forecast", eews.length > 0 && eews.every((e) => !e.warning));
+  const row = (e: (typeof eews)[number]) => {
+    const prefs = e.pref_max.map((p) => p.pref).join("・");
+    return `<div>${numTag(`e:${e.event_id}`)}<b>${e.test ? "【テスト】" : ""}緊急地震速報 (${e.warning ? "警報" : "予報"})</b> ${esc(e.hypocenter?.name ?? "")} で地震 ・ ${
+      e.warning ? "強い揺れに警戒" : `予測最大震度${scaleLabel(e.max_scale)}`
+    }: ${esc(prefs || "—")}</div>`;
+  };
+  // 帯は role="alert" (読み上げは即時)。巡回で中身を書き換えるたびに読み上げ直さないよう、巡回中だけ止める。
+  // ponytail: 巡回中に増えた EEW も読み上げない (音声の読み上げの設定は別にある)。要るなら新しい報だけを別の読み上げ欄へ
+  const rotating = banner.dataset.variant === "compact" && eews.length > 1;
+  if (rotating) banner.setAttribute("aria-live", "off");
+  else banner.removeAttribute("aria-live");
+  // 1 件ずつ見せる段階 (data-variant="compact"、横向きのスマホ): 揺れの大きい順に巡回し、何件目かを出す (色はいま見せている報で決める)
+  if (banner.dataset.variant === "compact" && eews.length > 0) {
+    const i = rotationIndex(now, eews.length);
+    banner.classList.toggle("forecast", !eews[i].warning);
+    const html = (eews.length > 1 ? `<span class="eew-count">${i + 1}/${eews.length}</span>` : "") + row(eews[i]);
+    if (banner.innerHTML !== html) banner.innerHTML = html;
+    return;
+  }
   const rest = eews.length - EEW_BANNER_MAX;
-  banner.innerHTML =
-    eews
-      .slice(0, EEW_BANNER_MAX)
-      .map((e) => {
-        const prefs = e.pref_max.map((p) => p.pref).join("・");
-        return `<div>${numTag(`e:${e.event_id}`)}<b>${e.test ? "【テスト】" : ""}緊急地震速報 (${e.warning ? "警報" : "予報"})</b> ${esc(e.hypocenter?.name ?? "")} で地震 ・ ${
-          e.warning ? "強い揺れに警戒" : `予測最大震度${scaleLabel(e.max_scale)}`
-        }: ${esc(prefs || "—")}</div>`;
-      })
-      .join("") + (rest > 0 ? `<div>ほか ${rest} 件の緊急地震速報</div>` : "");
+  banner.innerHTML = eews.slice(0, EEW_BANNER_MAX).map(row).join("") + (rest > 0 ? `<div>ほか ${rest} 件の緊急地震速報</div>` : "");
 }
