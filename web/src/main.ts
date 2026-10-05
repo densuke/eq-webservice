@@ -28,6 +28,7 @@ import { loadBanners, updateBanner } from "./banner.ts";
 import { loadCityWeather, renderCityWeather } from "./weather-layer.ts";
 import { numTag, renderBanner, renderDetail, renderList, renderMode, renderTsunamiBanner, updatePointsOpen } from "./view.ts";
 import { latestEew, summarizeQuake } from "./groups.ts";
+import { applyLayout } from "./layout-dom.ts";
 
 /** この時間内に続けて届いた情報では、前より強い音のときだけ鳴らす */
 const ALERT_MERGE_MS = 3000;
@@ -381,6 +382,10 @@ $("#back-live").addEventListener("click", () => {
 hooks.renderAll = renderAll;
 hooks.onEvents = onEvents;
 hooks.playAlert = playAlert;
+
+// 画面の大きさに合うレイアウトの定義 (layout.ts) で並べる。大きさが変わって定義が変われば並べ直す
+applyLayout();
+window.addEventListener("resize", () => applyLayout());
 
 loadTelop();
 // 気象警報・注意報は 5 分ごとに取り直す
