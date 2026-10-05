@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>レイアウト設計システム (案)</title>
+  <meta name="description" content="画面サイズ・デバイスごとのレイアウトの基準と、部品を何割で・どこに置くかの案 (提案ドラフト)">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<button class="menu-btn" id="menu-btn" type="button" aria-expanded="false" aria-controls="nav">目次</button>
+<div class="shell">
+  <nav class="nav" id="nav" aria-label="目次">
+    <h1>レイアウト設計システム<br><span class="muted" style="font-weight:400">案 (ドラフト)</span></h1>
+    <div class="ver"><a href="index.html">← 現状分析の仕様書</a></div>
+    <ol id="toc"></ol>
+    <div class="tools"><button type="button" id="theme-btn" title="ライト / ダークを切り替え">表示: 自動</button></div>
+  </nav>
+  <main>
+    <header>
+      <p class="lead small" style="margin:0">eq-webservice ドキュメント (現状分析の仕様書の続き)</p>
+      <h1 style="font-size:30px;line-height:1.35;margin:4px 0 8px">レイアウト設計システム (案)</h1>
+      <p class="note"><b>試作あり:</b> この案の「領域と比率」を、実際にコードで書いて描けるようにしたものが <a href="layout-preview.html">レイアウト定義プレビュー</a> です。いまの PC の配置を定義で書いて描くと、実測と 1px 以内で一致します (<code>tools/check-layout.mjs</code>)。</p>
+      <p class="lead">画面サイズ・デバイスごとに「どのレイアウトを基準にするか」と、部品を「どれを・どの割合で・どこに置くか」の案です。<span class="tag proposal">提案・ドラフト</span> 決定事項ではなく、決める論点を絞るための叩き台です。</p>
+      <div class="meta"><span>基準: <b>v0.31.0 の実測</b> (docs/ui-spec/measured.js)</span><span>参照: <b>JDQ・JQuake のスクリーンショット (概算)</b></span><span>状態: <b>ドラフト</b></span></div>
+      <p class="small muted">割合の確度: 「実測」は Chromium で測った値、「概算」は共有されたスクリーンショットからの目測 (±3% 程度) です。</p>
+    </header>
+
+    <section id="l1">
+      <h2><span class="num">1</span>考え方</h2>
+      <ul>
+        <li><b>基準は「プロファイル」</b>: デバイス名ではなく、<b>幅・高さ・縦横比</b>から選ぶ (4 つの案: <code>regular</code> / <code>compact</code> と、配信の 2 つの参照型)。</li>
+        <li><b>領域 (スロット) と比率</b>で並べ、部品は「どのスロットに入るか」と「大きさの方針 (固定 / 割合 / 内容 / 残り)」だけを持つ。px の直書きと、部品どうしの手計算をなくす (仕様書 第 7 章の C1〜C4)。</li>
+        <li><b>共有スロット</b>: 同じ枠に、状態で中身が入れ替わる (JDQ・JQuake の左上: 状態文 → EEW の札 → 津波のパネル)。うちの「出し入れ」より、この流儀が参照画面に近い。</li>
+        <li><b>情報量の段階</b> (簡易 / 詳細) を部品の属性に。津波は JQuake 型 = 簡易 (札 + 沿岸線の色)、JDQ 型 = 詳細 (到達予想の表)。</li>
+      </ul>
+    </section>
+
+    <section id="l2">
+      <h2><span class="num">2</span>プロファイルと比率 <span class="tag maybe">実測 / 概算</span></h2>
+      <p>下の切り替えで、各プロファイルの割合の図を見られます。箱の上にポインタを置くと名前と割合が出ます。</p>
+      <div class="wf-controls" id="ls-controls" role="group" aria-label="プロファイル"></div>
+      <div class="note" id="ls-ratio"></div>
+      <div class="wf-legend" id="ls-legend"></div>
+      <div class="wf-stage"><div class="wf-canvas" id="ls-canvas"></div></div>
+      <p class="small muted" id="ls-basis"></p>
+
+      <h3>2.1 割合の比較 (全体のまとめ)</h3>
+      <div class="tablewrap"><table>
+        <thead><tr><th>プロファイル</th><th>左右 (地図 : 右列)</th><th>縦</th><th>地図の枚数</th><th>特徴</th></tr></thead>
+        <tbody>
+          <tr><td><b>regular</b> (うち・実測)</td><td>≒ 70 : 30 (右は 380px 固定)</td><td>上部バー 5% / 本体 95%</td><td>1</td><td>右パネルが文字中心 (詳細・履歴・お知らせ・出典)</td></tr>
+          <tr><td><b>compact</b> (うち・実測)</td><td>100 (縦積み)</td><td>地図 58% / 以降の文字パネル 28% (ページ全体がスクロール)</td><td>1</td><td>ページスクロール。上部バー sticky</td></tr>
+          <tr><td><b>JQuake 型</b> (概算)</td><td>≒ 68 : 32</td><td>右列: 寄り図 41% / 履歴 59%</td><td>2 (全国 + 寄り)</td><td>うちの 2 カラムに近い。右上が細かい表示 (地図の上に詳細を重ねる)</td></tr>
+          <tr><td><b>JDQ 型</b> (概算)</td><td>≒ 50 : 50</td><td>上段 74% / 下段 22%</td><td>2 (全国 + 寄り)</td><td>ペインの格子。常設の枠に中身が入れ替わる。下段に時計・パネル群</td></tr>
+        </tbody>
+      </table></div>
+      <div class="note ok"><b>気づき:</b> うちの現行 (70 : 30) は JQuake 型 (68 : 32) とほぼ同じ分割です。JQuake 型へは、右上に「寄り図 + 重ねた詳細」の部品を足せば近づきます。JDQ 型 (50 : 50) は、地図が 2 枚・領域の入れ替えが前提で、より大きな再設計になります。</div>
+    </section>
+
+    <section id="l3">
+      <h2><span class="num">3</span>再設計後の部品 (案)</h2>
+      <p>いまの 38 個の部品 (仕様書 第 4 章。容器 4 を除く) を、役割で 16 個に束ねた案です。「どのスロットに・どの大きさの方針で」置くかを書きました。</p>
+      <div class="toolbar"><input type="search" id="lc-q" placeholder="絞り込み (名前・束ねる元)" aria-label="絞り込み"><span id="lc-count" class="small muted"></span></div>
+      <div class="tablewrap"><table id="lc-table">
+        <thead><tr><th>部品 (案)</th><th>束ねる元 (いまの部品)</th><th>置き場所 (スロット)</th><th>大きさの方針</th><th>残す優先度</th><th>メモ</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </section>
+
+    <section id="l4">
+      <h2><span class="num">4</span>設計トークン (案)</h2>
+      <p>画面サイズ・デバイスに応じた「基準」を、値として 1 か所に持つための項目です。</p>
+      <div class="tablewrap"><table id="lt-table">
+        <thead><tr><th>項目</th><th>案</th><th>いまの状態</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </section>
+
+    <section id="l5">
+      <h2><span class="num">5</span>決めたいこと</h2>
+      <ol id="lq-list"></ol>
+      <p class="small muted">答えが決まる順に、次の作業 (プロファイルごとの詳細な座標・部品の契約・移行の手順) が決まります。第 1・2 問が決まれば、残りの多くは機械的に決まります。</p>
+    </section>
+
+    <section id="l7">
+      <h2><span class="num">6</span>第 1 段階: いまの web を定義で再現 <span class="tag sure">実装済み</span></h2>
+      <p>レイアウトの定義を web 本体に持ち込み、いまのページを<b>定義どおりに並べ直す</b>形に置き換えました。見た目は変えず、仕組みだけを置き換えるのが目的です。</p>
+      <ul>
+        <li><b>定義</b>: <code>web/src/layout.ts</code> の <code>LAYOUTS</code> (<code>regular</code> = 幅 801 以上、<code>compact</code> = 800 以下)。部品の名前と、いまの要素の対応は <code>web/src/layout-dom.ts</code> の <code>SLOTS</code>。</li>
+        <li><b>並べ方</b>: 起動時と画面の大きさが変わったときに、合う定義を選び、要素を容器 (flex) と地図の隅の積み (重ね物) へ入れ直す。</li>
+        <li><b>CSS から外したもの</b>: 重ね物の位置の手計算 (<code>left: 246px</code>・<code>:has()</code> で <code>top: 242px</code>・<code>bottom: 96px</code> など) と、本体の grid。部品の見た目 (色・大きさ・文字) はそのまま。</li>
+        <li><b>テスト</b>: <code>web/src/layout.test.ts</code> (定義の選び方・大きさの変換・全部品が 1 回ずつ置かれていること)。</li>
+      </ul>
+      <h3>変更前後の実測の比較</h3>
+      <div class="tablewrap"><table>
+        <thead><tr><th>画面</th><th>結果</th></tr></thead>
+        <tbody>
+          <tr><td>PC 1440×900 / 1280×720 (平時)、タブレット 800×1000、横向きスマホ 844×390</td><td><b>一致</b> (±1px。天気の札の案内は幅だけ違う: 文言が 20 秒ごとに切り替わるため、測った瞬間の差)</td></tr>
+          <tr><td>スマホ 390×844 (平時・EEW 中)、PC (EEW 中)</td><td><b>一致</b> (±1px)</td></tr>
+          <tr><td>条件つきの重ね物 (カウントダウン・小笠原の別枠・トースト・音の案内。表示させて比較)</td><td><b>意図した差あり</b> (下の表)</td></tr>
+        </tbody>
+      </table></div>
+      <h3>意図した差 (条件つきで出る重ね物)</h3>
+      <div class="tablewrap"><table>
+        <thead><tr><th>部品</th><th>前</th><th>後</th><th>理由</th></tr></thead>
+        <tbody>
+          <tr><td>カウントダウン (PC)</td><td>別枠の下 12px・左 12px</td><td>別枠の下 10px・左 10px</td><td>間隔を 10px にそろえた (2px の差)。別枠が隠れると上に詰まる動きは同じ</td></tr>
+          <tr><td>カウントダウン (スマホ)</td><td>下から 64px の中央。高さが 200px に伸び、時計に重なっていた</td><td>右下で時計の上に積む</td><td>重なりの解消</td></tr>
+          <tr><td>小笠原の別枠</td><td>下から 96px (PC) / 70px (スマホ)。時計と 5〜11px 重なっていた</td><td>時計の上に積む</td><td>重なりの解消</td></tr>
+          <tr><td>トースト・音の案内</td><td>下から 60px・14px の中央 (別々に固定)</td><td>下の中央に積む (案内が無ければトーストが下まで下がる)</td><td>積み方で決まるようにした。<b>スマホでは前も後も時計と重なりうる</b> (要検討)</td></tr>
+        </tbody>
+      </table></div>
+      <p class="small muted">スマホの「時計は角から 6px」「別枠と案内の間 4px・凡例まで 8px」「寄って別枠が隠れても凡例は動かない」は、いまの見た目に合わせるため CSS で補っている (<code>body[data-layout="compact"]</code>)。第 2 段階で書式に「余白」「場所を空けておく」を足せば、定義に移せる。</p>
+      <h3>横向きのスマホ (landscape) を追加 <span class="tag sure">実装済み</span></h3>
+      <ul>
+        <li>条件: 幅 801px 以上・高さ 480px 以下 (<code>web/src/layout.ts</code> の <code>landscape</code>)。PC とスマホ縦の見た目は変えていない (実測で ±1px 一致を確認)。</li>
+        <li>帯 (EEW・津波・気象警報) を地図の左上に重ねる札にした。EEW は 1 件ずつ 4 秒ごとに巡回し、「5/6」のように何件目かを出す。津波・気象警報は小さな札。</li>
+        <li>上部バーを細く (題と版を隠し、ボタンを小さく)。南西諸島の別枠は 140px。別枠の右に凡例を並べる。</li>
+        <li>書式に「見せ方の段階」(<code>{ slot: "banners", variant: "compact" }</code>) を足した。部品の要素に <code>data-variant</code> が付き、部品の側 (EEW の帯の描き方・CSS) がそれを見て見せ方を変える。</li>
+        <li>天気の札が避ける相手を、セレクタの直書きから「地図の隅に積んだ部品すべて」に変えた (仕様書 第 7 章 C5 の解消)。</li>
+        <li>結果: 915×350 で EEW 6 件 + 津波注意報のとき、地図の高さが 174px → 322px。</li>
+      </ul>
+      <p class="note"><b>今後の課題</b>は、リポジトリの <code>docs/ui-layout-backlog.md</code> に一覧で残しています (実機での確認・書式の拡張・縦画面の改善・2 地図・データ源の確認など)。</p>
+      <h3>第 2 段階以降の候補 (要望)</h3>
+      <ul>
+        <li><b>縦画面 (スマホ) で地図を画面に固定</b>し、下の情報の部分だけをスクロールさせる。定義では、いまの <code>scroll: "page"</code> (ページ全体がスクロール) の代わりに「情報の部分だけスクロール」を選べるようにする。</li>
+        <li><b>スクロールすると地図が一時的に小さくなり</b>、情報の部分を縦に広く使えるようにする。定義では、地図の大きさを幅で持つ (例: いつもは 60svh、スクロール中は 30svh)。CSS のスクロール連動か、少しのスクリプトで実現できる見込み。</li>
+        <li>どちらも「普段の表示の移行 (第 1 段階)」が済んでから。地図の大きさが変わると、地図のカメラと天気の札の置き直しが走るので、その負荷の確認が要る。</li>
+      </ul>
+      <p class="small muted">このページの「レイアウト定義プレビュー」の定義 (<code>layout-def.js</code>) は書式を試したときの下書きで、実際に使っている定義は <code>web/src/layout.ts</code>。</p>
+    </section>
+
+    <section id="l6">
+      <h2><span class="num">7</span>関連</h2>
+      <ul>
+        <li><a href="layout-preview.html"><b>レイアウト定義プレビュー (試作)</b></a> — 構成をコード (定義) で書き、そのまま描いて確かめる。画面サイズからプロファイルを選ぶ・重なりを検査する</li>
+        <li><a href="data-sources.html">データ源の調査メモ</a> (観測点震度・台風・レーダーの利用条件)</li>
+        <li><a href="index.html">現状分析の仕様書</a> (部品カタログ・表示条件・結合・native との対応・参照画面 JDQ / JQuake の対応表)</li>
+        <li><a href="index.html#s11">第 11 章: 部品化への論点と設計の叩き台</a></li>
+      </ul>
+    </section>
+    <footer class="page"><p>この文書は <code>docs/ui-spec/layout-system.html</code> と、データ <code>layout-system.js</code> です。ブラウザでそのまま開けます。</p></footer>
+  </main>
+</div>
+<script src="layout-system.js"></script>
+<script src="layout-app.js"></script>
+</body>
+</html>

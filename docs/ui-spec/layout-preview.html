@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>レイアウト定義プレビュー</title>
+  <meta name="description" content="レイアウトの定義 (領域の入れ子・大きさ・部品の名前) を、ブラウザの flex レイアウトでそのまま描いて確かめる">
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .lp-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 420px); gap: 16px; align-items: start; }
+    @media (max-width: 1100px) { .lp-grid { grid-template-columns: minmax(0, 1fr); } }
+    .lp-stage { background: var(--soft); border: 1px solid var(--line); border-radius: 10px; padding: 10px; overflow: hidden; }
+    .lp-frame { position: relative; background: #0a0f16; color: #e6edf3; transform-origin: 0 0; font: 13px/1.3 system-ui, sans-serif; }
+    .lp-frame * { box-sizing: border-box; }
+    .lp-box { position: relative; display: flex; min-width: 0; min-height: 0; }
+    .lp-leaf { border: 1px solid var(--c); background: color-mix(in srgb, var(--c) 18%, #0d1117); padding: 4px 6px; overflow: hidden; }
+    .lp-leaf b, .lp-ov b { display: block; font-size: 13px; }
+    .lp-leaf span, .lp-ov span { display: block; font-size: 11px; opacity: 0.8; font-variant-numeric: tabular-nums; }
+    .lp-layer { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+    .lp-corner { position: absolute; display: flex; gap: 10px; padding: 10px; }
+    .lp-stack { display: flex; gap: 10px; }
+    .lp-ov { border: 1.5px solid var(--c); background: color-mix(in srgb, var(--c) 30%, #0d1117); padding: 3px 5px; overflow: hidden; flex: none; }
+    #lp-code { width: 100%; min-height: 460px; font: 12px/1.45 ui-monospace, Menlo, monospace; background: var(--code-bg); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+    #lp-error { color: var(--bad); font-size: 13px; white-space: pre-wrap; }
+    .lp-ctl { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+    .lp-ctl input[type=number] { width: 6em; }
+  </style>
+</head>
+<body>
+<div class="shell" style="grid-template-columns:minmax(0,1fr)">
+  <main style="max-width:1500px;margin:0 auto">
+    <p class="lead small" style="margin:0"><a href="layout-system.html">← レイアウト設計システム (案)</a> / <a href="index.html">現状分析の仕様書</a></p>
+    <h1 style="font-size:28px;margin:4px 0 8px">レイアウト定義プレビュー <span class="tag proposal">試作</span></h1>
+    <p class="lead">画面の構成を<b>コード (定義)</b> で書き、ブラウザの実際のレイアウト計算でそのまま描きます。定義は右の欄で書き換えて「反映」できます。画面サイズを入れて「サイズから選ぶ」を押すと、定義の <code>when</code> (幅・高さの条件) からプロファイルを選びます。</p>
+
+    <div class="lp-ctl">
+      <label>プロファイル <select id="lp-layout"></select></label>
+      <label>幅 <input type="number" id="lp-w" min="200" max="3840"></label>
+      <label>高さ <input type="number" id="lp-h" min="200" max="2160"></label>
+      <button type="button" id="lp-pick">サイズから選ぶ</button>
+      <span class="small muted">試す: 1440×900 / 844×390 / 390×844 / 1280×720。重ね物どうしが重なると赤枠と警告が出ます</span>
+    </div>
+    <p class="note small" id="lp-note"></p>
+
+    <div class="lp-grid">
+      <div>
+        <div class="lp-stage" id="lp-stage"><div class="lp-frame" id="lp-frame"></div></div>
+        <p class="small muted">箱の中の数字は、描いた結果の大きさ (px) と、画面に対する割合です。重ね物 (オレンジ系) は地図などの上に、隅から積んで置きます。小笠原の別枠や通知のように、実際は条件つきで出るものも、ここでは常に描いています。</p>
+      </div>
+      <div>
+        <div class="lp-ctl"><b>定義 (JSON)</b><button type="button" id="lp-apply">反映</button><button type="button" id="lp-reset">元に戻す</button></div>
+        <textarea id="lp-code" spellcheck="false" aria-label="レイアウトの定義"></textarea>
+        <div id="lp-error" role="alert"></div>
+      </div>
+    </div>
+
+    <section style="margin-top:28px">
+      <h2>書式</h2>
+      <pre><code>ノード = 容器 { dir: "row" | "column", size, children: [ノード…], overlays? }
+       | 部品 { slot: 部品の名前, size, overlays? }
+size   = "fill" (残りを分ける。"fill:2" は重み 2) | "70%" | "380px" | "auto" (部品の中身の大きさ) | "60vh"
+overlays = { "top-left" | "top-right" | "bottom-left" | "bottom-right" | "top" | "bottom":
+             { flow: "column" | "row", items: [部品の名前 | 入れ子の重ね方…] } }
+when   = { minWidth?, maxWidth?, minHeight?, maxHeight?, target?: "broadcast" }   プロファイルを選ぶ条件 (上から順に最初に合うもの。配信用は大きさでは選ばない)
+sizes  = { 部品の名前: { w?, h? } }   このプロファイルだけ部品の大きさを変える (0 で出さない)</code></pre>
+      <p class="small muted">部品の一覧と既定の大きさは <code>layout-def.js</code> の <code>LD_COMPONENTS</code>。それぞれ、いまの web の要素 (<code>dom</code>) との対応も持っています。</p>
+    </section>
+  </main>
+</div>
+<script src="layout-def.js"></script>
+<script src="layout-preview.js"></script>
+</body>
+</html>
