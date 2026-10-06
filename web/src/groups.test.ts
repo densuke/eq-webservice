@@ -102,3 +102,14 @@ test("the latest eew is the one with the largest serial", () => {
   const g = s.add(e("c", "9"))!;
   assert.equal(latestEew(g as EewGroup).serial, "10");
 });
+
+test("updatedAt follows the received time even when it is negative (records before 1970)", () => {
+  const s = new GroupStore();
+  const at = (id: string, minute: string, ms: number): QuakeEvent => ({ ...quake(id, "detail_scale", "長野県北部", [], minute), received_at_ms: ms });
+  const t1 = Date.UTC(1966, 0, 23);
+  const a = s.add(at("1", "1966/01/23 20:15", t1))!;
+  const b = s.add(at("2", "1966/01/23 20:16", t1 + 60_000))!;
+  assert.equal(a.updatedAt, t1);
+  assert.equal(b.updatedAt, t1 + 60_000);
+  assert.equal(s.list()[0].key, b.key);
+});
