@@ -76,3 +76,8 @@ test("no EEW and no history", () => {
   assert.deepEqual(v.rows, []);
   assert.equal(v.message, "現在、発表はありません");
 });
+
+test("depth 0 km reads as very shallow", () => {
+  const v = eewPanelView([eew({ hypocenter: { name: "X", latitude: 0, longitude: 0, depth_km: 0, magnitude: 5 } })], null);
+  assert.equal(v.rows.find((r) => r.label === "深さ")?.value, "ごく浅い");
+});

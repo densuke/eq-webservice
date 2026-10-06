@@ -70,7 +70,7 @@ export function eewPanelView(active: readonly EewEvent[], last: EewEvent | null)
       { label: "震源", value: h?.name || "調査中" },
       { label: "発生", value: t ? `${t.hour}:${t.minute}:${t.second}` : "—" },
       { label: "規模", value: num(h?.magnitude) ? `M${h.magnitude.toFixed(1)}` : "—" },
-      { label: "深さ", value: num(h?.depth_km) ? `約${Math.round(h.depth_km)}km` : "—" },
+      { label: "深さ", value: !num(h?.depth_km) ? "—" : h.depth_km === 0 ? "ごく浅い" : `約${Math.round(h.depth_km)}km` },
       { label: "予測最大震度", value: scaleLabel(e.max_scale) },
       { label: "報", value: `第${e.serial}報` },
     ],
