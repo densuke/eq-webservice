@@ -191,6 +191,16 @@ body {
 .arrived { color: #ff7b72; font-size: 12px; }
 .eew-title { color: #ff7b72; }
 .eew-banner.forecast { background: #b35900; animation: none; }
+.eew-panel { padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.ep-title { font-size: 14px; font-weight: 700; }
+.ep-rows { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 8px 0 0; font-size: 13px; font-variant-numeric: tabular-nums; }
+.ep-rows dt { color: var(--muted); }
+.ep-rows dd { margin: 0; }
+.ep-more, .ep-message { margin-top: 6px; font-size: 13px; }
+.eew-panel[data-state="none"] .ep-title, .eew-panel[data-state="none"] .ep-message { color: var(--muted); }
+.eew-panel[data-state="active"] { background: var(--alert); color: #fff; }
+.eew-panel[data-state="active"] .ep-rows dt { color: inherit; opacity: 0.8; }
+.eew-panel[data-state="active"]:not(.warning) { background: #b35900; }
 .muted { color: var(--muted); }
 .error { color: #f85149; }
 

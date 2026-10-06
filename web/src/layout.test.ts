@@ -138,3 +138,11 @@ test("the check names what is wrong in a layout file", () => {
   assert.deepEqual(check(null), ["定義ファイルが JSON のオブジェクトでない"]);
   assert.match(check({ version: 1, layouts: [] }).join(), /layouts が空/);
 });
+
+test("trial: 帯の代わりに EEW の常設パネルを置く手動専用の定義", () => {
+  const t = chooseLayout(LAYOUTS, 1440, 900, "trial");
+  assert.equal(t.name, "trial");
+  assert.ok(slotsOf(t.root).includes("eew-panel"));
+  assert.ok(!slotsOf(t.root).includes("banners"));
+  assert.equal(pickLayout(LAYOUTS, 1440, 900).name, "regular");
+});

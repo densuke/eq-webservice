@@ -2,6 +2,7 @@
 
 import { type AreaScale, eewAreaScales, keepForecast, overlayForecast, quakeDetail } from "./detail.ts";
 import { type EewGroup, type Group, heldEew, latestEew, summarizeQuake } from "./groups.ts";
+import { eewPanelView } from "./eew-panel.ts";
 import { esc } from "./html.ts";
 import { byPriority, rotationIndex, sameQuake } from "./priority.ts";
 import { activeEews, currentGroup, groupPlace, groupScale, relatedQuake } from "./quakes.ts";
@@ -10,7 +11,7 @@ import { $, map } from "./dom.ts";
 import { listOpen, shownInList } from "./personal.ts";
 import { app, now } from "./state.ts";
 import { activeAreas } from "./tsunami.ts";
-import type { Hypocenter, PrefScale, Scale, TsunamiEvent } from "./types.ts";
+import type { EewEvent, Hypocenter, PrefScale, Scale, TsunamiEvent } from "./types.ts";
 
 /** EEW バナーに並べる件数 (残りは「ほか N 件」) */
 const EEW_BANNER_MAX = 3;
@@ -250,12 +251,40 @@ export function renderTsunamiBanner(): void {
     .join(" ／ ");
 }
 
-export function renderBanner(now: number): void {
-  // 揺れの大きい順に数件だけ並べる
-  const eews = activeEews(now)
+/** 発表中の EEW を揺れの大きい順に並べる (帯と常設パネルで共有) */
+function sortedActiveEews(now: number): EewEvent[] {
+  return activeEews(now)
     .map((e) => ({ e, scale: e.max_scale, at: e.received_at_ms }))
     .sort(byPriority)
     .map((c) => c.e);
+}
+
+/** 取り消しでない最後の EEW (時間で絞らない)。無ければ null */
+function lastEew(): EewEvent | null {
+  const held = app.world.store
+    .list()
+    .filter((g): g is EewGroup => g.kind === "eew" && !latestEew(g).cancelled)
+    .map(heldEew);
+  return held.reduce<EewEvent | null>((a, b) => (a && a.received_at_ms >= b.received_at_ms ? a : b), null);
+}
+
+/** EEW の常設パネル (部品 eew-panel。定義に置かれていなければ隠し置き場で描くだけ) */
+export function renderEewPanel(now: number): void {
+  const v = eewPanelView(sortedActiveEews(now), lastEew());
+  const el = $("#eew-panel");
+  el.dataset.state = v.state;
+  el.classList.toggle("warning", v.warning);
+  const html =
+    `<div class="ep-title">${esc(v.title)}</div>` +
+    (v.rows.length > 0 ? `<dl class="ep-rows">${v.rows.map((r) => `<dt>${esc(r.label)}</dt><dd>${esc(r.value)}</dd>`).join("")}</dl>` : "") +
+    (v.more > 0 ? `<div class="ep-more">ほか ${v.more} 件</div>` : "") +
+    (v.message ? `<div class="ep-message">${esc(v.message)}</div>` : "");
+  if (el.innerHTML !== html) el.innerHTML = html;
+}
+
+export function renderBanner(now: number): void {
+  // 揺れの大きい順に数件だけ並べる
+  const eews = sortedActiveEews(now);
   const banner = $("#eew-banner");
   banner.hidden = eews.length === 0;
   // 予報だけなら警報と色を分ける
