@@ -267,5 +267,15 @@ pub(super) fn load_with(
             }
         }
     }
+    // 組み込みに無い名前 (cast.toml で自分の定義の名前にしたとき) なら broadcast / broadcast-quake
+    let has = |n: &str| parse(builtin).is_ok_and(|f| f.layouts.iter().any(|l| l.name == n));
+    let (name, quake) = if has(name) && has(quake) {
+        (name, quake)
+    } else {
+        tracing::warn!(
+            "broadcast: 組み込みの定義に「{name}」「{quake}」が無いので、broadcast / broadcast-quake を使います"
+        );
+        ("broadcast", "broadcast-quake")
+    };
     pick_both(builtin, name, quake).context("組み込みのレイアウトの定義が使えない")
 }

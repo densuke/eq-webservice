@@ -149,7 +149,8 @@ impl Screen {
             .iter()
             .zip(&sizes)
             .map(|(k, s)| match s {
-                Size::Fill(w) => rest * w / weights,
+                Size::Fill(w) if weights > 0.0 => rest * w / weights,
+                Size::Fill(_) => 0.0,
                 s => fixed(k, *s),
             })
             .collect())
@@ -247,25 +248,26 @@ impl Screen {
             Align::End => rect.y + rect.h - pb - h,
             Align::Center => rect.y + (rect.h - h) / 2.0,
         };
-        self.place_stack(s, Rect { x, y, w, h }, (ha, va), out)
+        self.place_stack(s, Rect { x, y, w, h }, ha, out)
     }
 
-    /// 積みの箱の中に、積みの向きに沿って gap をあけて並べる。交差方向は隅に寄せる側にそろえる
-    fn place_stack(self, s: &Stack, b: Rect, align: (Align, Align), out: &mut BTreeMap<String, Rect>) -> Result<()> {
+    /// 積みの箱の中に、積みの向きに沿って gap をあけて並べる。交差方向は隅の左右でそろえる (左は先頭、右は末尾、top / bottom は中央。web の CSS と同じ)
+    fn place_stack(self, s: &Stack, b: Rect, align: Align, out: &mut BTreeMap<String, Rect>) -> Result<()> {
         let gap = self.gap(s)?;
         let (mut x, mut y) = (b.x, b.y);
         for item in s.items.iter().filter(|i| item_has_content(i)) {
             let (w, h) = self.item_size(item)?;
             let r = match s.flow {
                 Dir::Column => Rect {
-                    x: aligned(align.0, b.x, b.w, w),
+                    x: aligned(align, b.x, b.w, w),
                     y,
                     w,
                     h,
                 },
+                // 横並びの縦のそろえ方は web の CSS と同じ: 左の隅は上、右の隅は下、top / bottom は中央
                 Dir::Row => Rect {
                     x,
-                    y: aligned(align.1, b.y, b.h, h),
+                    y: aligned(align, b.y, b.h, h),
                     w,
                     h,
                 },

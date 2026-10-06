@@ -130,6 +130,12 @@ fn a_broken_built_in_fails_the_start() {
 }
 
 #[test]
+fn falling_back_to_the_built_in_uses_the_default_names_when_the_configured_ones_are_not_there() {
+    let (a, b) = load_with(None, BUILTIN, "jdq", "jdq-quake").unwrap();
+    assert_eq!((a.name.as_str(), b.name.as_str()), ("broadcast", "broadcast-quake"));
+}
+
+#[test]
 fn only_version_1_is_accepted() {
     assert!(parse(&json_with(r#"{"slot":"main"}"#).replace(r#""version":1"#, r#""version":2"#)).is_err());
 }

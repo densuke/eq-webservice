@@ -139,6 +139,29 @@ fn a_corner_stack_is_pushed_to_its_corner_with_the_pad_and_the_gap() {
 }
 
 #[test]
+fn fill_zero_does_not_produce_nan() {
+    let d = def(r#"{"dir":"column","children":[{"slot":"topbar","size":"36px"},{"slot":"main","size":"fill:0"}]}"#);
+    assert_eq!(resolve(&d, 1280.0, 720.0).unwrap()["main"].h, 0.0);
+}
+
+#[test]
+fn a_row_stack_aligns_across_like_the_css_by_the_corner_side() {
+    // web/public/style.css: 左の隅は flex-start (上)、右の隅は flex-end (下)、top / bottom は center
+    let at = |corner: &str| {
+        let d = def(&format!(
+            r#"{{"dir":"column","children":[{{"slot":"main","overlays":{{"{corner}":{{"flow":"row","pad":"0","gap":"0","items":["clock","legend"]}}}}}}]}}"#
+        ));
+        resolve(&d, 1000.0, 500.0).unwrap()
+    };
+    // 積みの箱の高さは高い方 (凡例 147)。時計 (74) の縦位置だけが変わる
+    assert_eq!(at("bottom-left")["clock"].y, 353.0);
+    assert_eq!(at("bottom-left")["clock"].y, 500.0 - 147.0);
+    assert_eq!(at("top-right")["clock"].y, 147.0 - 74.0);
+    assert_eq!(at("top")["clock"].y, (147.0 - 74.0) / 2.0);
+    assert_eq!(at("top-left")["clock"].y, 0.0);
+}
+
+#[test]
 fn parts_the_broadcast_cannot_draw_are_left_out_and_reported() {
     let d = def(
         r#"{"dir":"column","children":[{"slot":"settings","size":"auto"},{"slot":"main","overlays":{"top-left":{"flow":"column","items":["countdown","clock"]}}}]}"#,
