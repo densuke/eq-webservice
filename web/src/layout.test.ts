@@ -27,8 +27,16 @@ test("a manual layout is chosen only by name (?layout=)", () => {
   // どれにも合わないときも manual は選ばない
   assert.equal(pickLayout([ls[0], ls[1]], 390, 844).name, "wide");
   assert.equal(chooseLayout(ls, 390, 844, "trial").name, "trial");
-  assert.equal(chooseLayout(ls, 390, 844, "wide").name, "wide");
+  assert.equal(chooseLayout(ls, 1440, 900, "wide").name, "wide");
+  assert.equal(chooseLayout(ls, 390, 844, "wide").name, "narrow");
   for (const f of [null, "", "nope"]) assert.equal(chooseLayout(ls, 390, 844, f).name, "narrow", String(f));
+});
+
+test("a forced layout with a non-matching when falls back to the automatic pick", () => {
+  assert.equal(chooseLayout(LAYOUTS, 375, 812, "trial").name, "compact");
+  assert.equal(chooseLayout(LAYOUTS, 1440, 900, "trial").name, "trial");
+  // 自動で選ばれる定義も、合わなければ名前で指しても使わない
+  assert.equal(chooseLayout(LAYOUTS, 390, 844, "regular").name, "compact");
 });
 
 test("sizes become flex values", () => {
