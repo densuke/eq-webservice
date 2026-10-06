@@ -211,7 +211,10 @@ impl Renderer {
     /// 文字や塗りは重いので、波が動く間も 1 秒ごとにここで描き、コマごとには draw_waves だけを重ねる
     pub fn render(&mut self, scene: &Scene) -> Pixmap {
         let mut pm = self.base.clone();
-        let placed = self.placed;
+        // サブの地図を描く地震の画面は、右の列を broadcast-quake の矩形で描く (描かないときは平時の矩形のまま)
+        let placed = self
+            .placed
+            .for_screen(self.sub.is_some() && (scene.quake.is_some() || scene.eew.is_some()));
         let main = placed.main;
         if let Some(z) = &self.zoomed {
             // 日本全体の地図 (と別枠) を海で隠し、寄った地図を描き直す

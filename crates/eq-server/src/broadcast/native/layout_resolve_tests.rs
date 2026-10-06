@@ -79,16 +79,40 @@ fn the_quake_layout_has_the_sub_map_rect_and_the_same_frame() {
 }
 
 #[test]
-fn the_drawing_uses_the_calm_rects_and_only_the_sub_map_from_the_quake_layout() {
+fn the_drawing_uses_the_quake_rects_only_on_the_quake_screen() {
     use super::placed::Placed;
     let p = Placed::builtin().unwrap();
     let calm = resolve(&shipped("broadcast"), W as f32, H as f32).unwrap();
     let q = resolve(&shipped("broadcast-quake"), W as f32, H as f32).unwrap();
-    assert_eq!(p.detail, Some(calm["detail"])); // 地震の画面の 154 ではなく平時の 144
-    assert_eq!(p.history, Some(calm["history"]));
+    let c = p.for_screen(false);
+    assert_eq!((c.detail, c.history), (Some(calm["detail"]), Some(calm["history"])));
+    let s = p.for_screen(true);
+    assert_eq!((s.detail, s.history), (Some(q["detail"]), Some(q["history"])));
+    // 詳細・サブの地図・履歴は上から順に、重ならず右の列の中に収まる (出典の上まで)
+    let (d, m, h) = (s.detail.unwrap(), s.sub.unwrap(), s.history.unwrap());
+    assert!(d.bottom() <= m.y && m.bottom() <= h.y && h.bottom() <= q["credit"].y);
+    assert_eq!(
+        (s.main, s.topbar, s.credit, s.clock),
+        (c.main, c.topbar, c.credit, c.clock)
+    );
     assert_eq!(p.sub, Some(q["map-sub"]));
     assert_eq!(p.map_aspect(), 900.0 / 684.0);
     assert_eq!(p.sub_aspect(), Some(380.0 / 300.0));
+}
+
+/// 右の列の割合 (PR に載せる比較の元の数値。docs/ui-spec/layout-system.js の jquake・jdq の概算と並べる)
+#[test]
+fn the_column_ratios_of_the_broadcast_layouts() {
+    let calm = resolve(&shipped("broadcast"), W as f32, H as f32).unwrap();
+    let q = resolve(&shipped("broadcast-quake"), W as f32, H as f32).unwrap();
+    // 平時: 地図 : 右の列 = 70.3 : 29.7 (JQuake の概算は 68 : 32)
+    let map_pct = calm["main"].w / W as f32 * 100.0;
+    assert!((map_pct - 70.3).abs() < 0.1, "{map_pct}");
+    // 地震の画面: 右の列 (上部バーの下 684px) の詳細 22.5%・サブの地図 43.9%・履歴 20.5%・出典 13.2%
+    let col = q["detail"].h + q["map-sub"].h + q["history"].h + q["credit"].h;
+    assert_eq!(col, 684.0);
+    assert!((q["map-sub"].h / col * 100.0 - 43.9).abs() < 0.1);
+    assert!((q["history"].h / col * 100.0 - 20.5).abs() < 0.1);
 }
 
 #[test]

@@ -2,6 +2,7 @@
 //! 2026-10-01 21:27 の千葉県北東部の地震 (緊急地震速報の予想) を使う。
 
 use super::draw::Scene;
+use super::layout_resolve::Rect;
 use super::*;
 use crate::quake::{Eew, EewArea, EventBody, Hypocenter, PrefScale, Scale};
 
@@ -486,10 +487,28 @@ fn eew_scene<'a>(e: &'a eew::EewSummary, icons: &'a Icons, now_ms: u64) -> Scene
     }
 }
 
+fn in_rect(i: usize, r: Rect) -> bool {
+    let (x, y) = ((i % draw::W as usize) as f32, (i / draw::W as usize) as f32);
+    (r.x..r.right()).contains(&x) && (r.y..r.bottom()).contains(&y)
+}
+
 fn in_sub_rect(i: usize) -> bool {
-    let (x, y) = ((i % draw::W as usize) as f64, (i / draw::W as usize) as f64);
-    let sub = Placed::builtin().unwrap().sub.unwrap();
-    (sub.x as f64..sub.right() as f64).contains(&x) && (sub.y as f64..sub.bottom() as f64).contains(&y)
+    in_rect(i, Placed::builtin().unwrap().sub.unwrap())
+}
+
+/// 地震の画面で右の列が変わる範囲 (詳細からサブの地図・履歴まで。出典の上まで)
+fn in_quake_column(i: usize) -> bool {
+    let p = Placed::builtin().unwrap().for_screen(true);
+    let (d, h) = (p.detail.unwrap(), p.history.unwrap());
+    in_rect(
+        i,
+        Rect {
+            x: d.x,
+            y: d.y,
+            w: d.w,
+            h: h.bottom() - d.y,
+        },
+    )
 }
 
 #[test]
@@ -507,7 +526,8 @@ fn the_sub_map_paints_only_inside_its_rect() {
     let (mut outside, mut inside) = (0, 0);
     for (i, (a, b)) in off.pixels().iter().zip(on.pixels()).enumerate() {
         match (a == b, in_sub_rect(i)) {
-            (false, false) => outside += 1,
+            (false, _) if !in_quake_column(i) => outside += 1,
+            (false, false) => {}
             (false, true) => inside += 1,
             _ => {}
         }
@@ -592,11 +612,8 @@ fn the_sub_map_does_not_draw_when_calm() {
 }
 
 #[test]
-fn the_sub_map_leaves_the_detail_alone_during_a_quake() {
-    // 詳細は右パネルの y 36〜181 (区切り線まで)。サブの地図 (y 190〜) はその下
-    let detail = Placed::builtin().unwrap().detail.unwrap();
-    let in_detail =
-        |i: usize| i % draw::W as usize >= detail.x as usize && i / (draw::W as usize) < detail.bottom() as usize + 2;
+fn the_sub_map_changes_only_the_right_column_during_a_quake() {
+    // 詳細・サブの地図・履歴の列 (出典の上まで) の外 (地図・上部バー・出典) は、サブの地図の有無で変わらない
     for (name, ev, now) in quake_scenes() {
         let (off, _) = still_of(&ev, now, false);
         let (on, _) = still_of(&ev, now, true);
@@ -608,7 +625,7 @@ fn the_sub_map_leaves_the_detail_alone_during_a_quake() {
                 .filter(|&(i, (a, b))| a != b && f(i))
                 .count()
         };
-        assert_eq!(diff(&in_detail), 0, "{name}");
+        assert_eq!(diff(&|i| !in_quake_column(i)), 0, "{name}");
         assert!(diff(&in_sub_rect) > 0, "{name}");
     }
 }

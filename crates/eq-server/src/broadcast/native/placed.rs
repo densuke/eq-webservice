@@ -1,9 +1,9 @@
 //! 描画が使う、部品ごとの矩形 (layout_resolve で割り付けたもの)。
 //! 描画は「矩形の原点 + 部品の中の相対オフセット」で描く。定義に置かれていない部品 (None) は描かない。
 //!
-//! 地震の画面でも、map-sub 以外の部品は平時の定義 (broadcast) の矩形を使う (今の描画は地震の画面でも
-//! 履歴などを同じ場所に描き、サブの地図がその上を隠すため)。地震の画面の定義 (broadcast-quake) から使うのは
-//! map-sub の矩形だけ。他の部品を地震の画面の矩形で描くのは、出力が変わる段 (Task 4) で行う。
+//! 地震の画面 (サブの地図を描くとき) は、右の列の詳細・履歴・サブの地図を地震の画面の定義 (broadcast-quake) の
+//! 矩形で描く (for_screen)。main・topbar・出典・時計・凡例・寄り図は平時と同じ矩形のまま (base が共通なので、
+//! 定義の側でも同じにしておく。出典は動かない地の側に描かれる)。
 
 use anyhow::{Context, Result};
 
@@ -25,6 +25,9 @@ pub struct Placed {
     pub clock: Option<Rect>,
     /// サブの地図 (地震の画面の定義から)
     pub sub: Option<Rect>,
+    /// 地震の画面の定義での詳細・履歴の矩形 (for_screen で detail・history と入れ替える)
+    quake_detail: Option<Rect>,
+    quake_history: Option<Rect>,
 }
 
 impl Placed {
@@ -56,7 +59,22 @@ impl Placed {
             legend: c.get("legend").copied(),
             clock: c.get("clock").copied(),
             sub: q.get("map-sub").copied(),
+            quake_detail: q.get("detail").copied(),
+            quake_history: q.get("history").copied(),
         })
+    }
+
+    /// 地震の画面 (サブの地図が出る) なら、右の列を地震の画面の矩形にした Placed。平時はそのまま
+    pub fn for_screen(&self, quake: bool) -> Placed {
+        if quake {
+            Placed {
+                detail: self.quake_detail,
+                history: self.quake_history,
+                ..*self
+            }
+        } else {
+            *self
+        }
     }
 
     /// 組み込みの定義 (broadcast・broadcast-quake)。再現動画とテストが使う
