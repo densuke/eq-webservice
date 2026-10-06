@@ -26,7 +26,7 @@ import { enqueueAnnounce, enqueueVoice, isPriorityTsunami, tsunamiHistory, voice
 import { loadBgmConfig, updateBgm } from "./bgm.ts";
 import { loadBanners, updateBanner } from "./banner.ts";
 import { loadCityWeather, renderCityWeather } from "./weather-layer.ts";
-import { numTag, renderBanner, renderDetail, renderList, renderMode, renderTsunamiBanner, updatePointsOpen } from "./view.ts";
+import { numTag, renderBanner, renderDetail, renderEewPanel, renderList, renderMode, renderTsunamiBanner, updatePointsOpen } from "./view.ts";
 import { latestEew, summarizeQuake } from "./groups.ts";
 import { applyLayout, loadLayoutFile } from "./layout-dom.ts";
 
@@ -84,6 +84,7 @@ export function tick(): void {
   updateTour(now, map.userMoved);
   if (app.tourKey && app.tourKey !== prevTour) showTourToast(app.tourKey);
   renderBanner(now);
+  renderEewPanel(now);
   renderMarkers(now);
   const sc = scene(now);
   const { box, waving } = renderScene(sc);

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { type LayoutNode, type Stack, LAYOUTS, checkLayouts, flexOf, pickLayout } from "./layout.ts";
+import { type Layout, type LayoutNode, LAYOUTS, REQUIRED_SLOTS, checkLayouts, chooseLayout, boxesOf, flexOf, pickLayout, slotsOf } from "./layout.ts";
 import { BOXES, SLOTS } from "./layout-dom.ts";
 
 test("the layout is picked by the screen size (same 800px boundary as the CSS)", () => {
@@ -16,6 +16,21 @@ test("the layout is picked by the screen size (same 800px boundary as the CSS)",
   assert.equal(pickLayout(LAYOUTS, 801, 481).name, "regular");
 });
 
+test("a manual layout is chosen only by name (?layout=)", () => {
+  const ls = [
+    { name: "trial", manual: true, root: { slot: "main" } },
+    { name: "wide", when: { minWidth: 801 }, root: { slot: "main" } },
+    { name: "narrow", root: { slot: "main" } },
+  ] as Layout[];
+  assert.equal(pickLayout(ls, 1440, 900).name, "wide");
+  assert.equal(pickLayout(ls, 390, 844).name, "narrow");
+  // どれにも合わないときも manual は選ばない
+  assert.equal(pickLayout([ls[0], ls[1]], 390, 844).name, "wide");
+  assert.equal(chooseLayout(ls, 390, 844, "trial").name, "trial");
+  assert.equal(chooseLayout(ls, 390, 844, "wide").name, "wide");
+  for (const f of [null, "", "nope"]) assert.equal(chooseLayout(ls, 390, 844, f).name, "narrow", String(f));
+});
+
 test("sizes become flex values", () => {
   assert.equal(flexOf("fill", false), "1 1 0");
   assert.equal(flexOf("fill:2", false), "2 1 0");
@@ -27,27 +42,32 @@ test("sizes become flex values", () => {
   assert.equal(flexOf("fill", true), "0 1 auto");
 });
 
-/** 定義の中の部品の名前 (重ね物を含む) */
-function slots(n: LayoutNode): string[] {
-  const fromStack = (s: Stack): string[] => s.items.flatMap((i) => (typeof i === "string" ? [i] : "slot" in i ? [i.slot] : fromStack(i)));
-  return [
-    ...(n.slot ? [n.slot] : []),
-    ...Object.values(n.overlays ?? {}).flatMap((s) => (s ? fromStack(s) : [])),
-    ...(n.children ?? []).flatMap(slots),
-  ];
-}
+test("slotsOf lists parts in order, including overlays and nested stacks", () => {
+  const node: LayoutNode = { slot: "main", overlays: { "top-left": { flow: "column", items: ["inset", { slot: "banners", variant: "compact" }, { flow: "row", items: ["legend"] }] } } };
+  assert.deepEqual(slotsOf(node), ["main", "inset", "banners", "legend"]);
+});
+
+/** 出荷している自動の定義が置く部品 (省いたら見た目が変わる。新しい部品はここに足さない限り省いてよい) */
+const SHIPPED_PARTS = ["topbar", "banners", "main", "settings", "detail", "history-head", "history", "notice", "credit",
+  "inset", "ogasawara", "caption", "countdown", "legend", "clock", "toast", "hint"];
 
 for (const l of LAYOUTS) {
-  test(`${l.name}: every part exists and is placed exactly once`, () => {
-    const used = slots(l.root);
+  test(`${l.name}: every part exists, is placed at most once, and main is placed`, () => {
+    const used = slotsOf(l.root);
     for (const s of used) assert.ok(SLOTS[s], `unknown part ${s}`);
     assert.deepEqual(used.filter((s, i) => used.indexOf(s) !== i), [], "placed twice");
-    // ページの部品は全部どこかに置く (置き忘れると要素が元の場所に残り、並びが崩れる)
-    assert.deepEqual(Object.keys(SLOTS).filter((s) => !used.includes(s)), []);
+    assert.deepEqual(REQUIRED_SLOTS.filter((s) => !used.includes(s)), []);
   });
   test(`${l.name}: boxes exist`, () => {
     const boxes = (n: LayoutNode): string[] => [...(n.box ? [n.box] : []), ...(n.children ?? []).flatMap(boxes)];
     for (const b of boxes(l.root)) assert.ok(BOXES[b], `unknown box ${b}`);
+  });
+}
+
+for (const name of ["landscape", "regular", "compact"]) {
+  test(`${name}: places every shipped part`, () => {
+    const l = LAYOUTS.find((x) => x.name === name)!;
+    assert.deepEqual(SHIPPED_PARTS.filter((s) => !slotsOf(l.root).includes(s)), []);
   });
 }
 
@@ -83,9 +103,26 @@ test("the check names what is wrong in a layout file", () => {
     return check(d).join("\n");
   };
   // 知らない部品・置いていない部品・2 回置いた部品
-  assert.match(broken((d) => (d.layouts[1].root.children[0].slot = "topbarr")), /知らない部品 "topbarr"[\s\S]*「topbar」を置いていない/);
-  assert.match(broken((d) => d.layouts[2].root.children.splice(1, 1)), /compact\): 部品「banners」を置いていない/);
+  assert.match(broken((d) => (d.layouts[1].root.children[0].slot = "topbarr")), /知らない部品 "topbarr"/);
+  // 必須でない部品は省いてよい。main は省けない
+  assert.equal(broken((d) => d.layouts[2].root.children.splice(1, 1)), "");
+  assert.match(broken((d) => (d.layouts[1].root.children[2].children[0] = { slot: "notice" })), /regular\): 部品「main」を置いていない/);
   assert.match(broken((d) => d.layouts[1].root.children.push({ slot: "clock" })), /「clock」を 2 回置いている/);
+  // 名前の重なり
+  assert.match(broken((d) => (d.layouts[2].name = d.layouts[1].name)), /名前「regular」が重なっている/);
+  // 積みの余白と場所取り (隅の積みと入れ子の積みの両方で使える)
+  const corner = (d: any) => d.layouts[2].root.children[2].children[0].overlays["top-left"];
+  assert.equal(broken((d) => Object.assign(corner(d), { gap: "8px", pad: "4px 8px" })), "");
+  assert.equal(broken((d) => Object.assign(corner(d).items[0], { gap: "4px", minHeight: "140px" })), "");
+  for (const bad of ["big", "8", "1px; color: red", "", "1px 2px 3px 4px 5px"]) {
+    assert.match(broken((d) => (corner(d).pad = bad)), /pad .* は使えない/, bad);
+  }
+  assert.match(broken((d) => (corner(d).items[0].minHeight = "fill")), /minHeight .* は使えない/);
+  assert.match(broken((d) => (corner(d).margin = "4px")), /知らないキー「margin」/);
+  // 手動専用の印
+  assert.equal(broken((d) => (d.layouts[1].manual = true)), "");
+  assert.match(broken((d) => (d.layouts[1].manual = "yes")), /manual は true だけ/);
+  assert.match(broken((d) => d.layouts.forEach((l: any) => (l.manual = true))), /manual でない定義が 1 つも無い/);
   // 大きさ・向き・容器・隅・条件・キーの書き間違い
   for (const size of ["380", "big", "fill:x", "1px; color: red", ""]) {
     assert.match(broken((d) => (d.layouts[1].root.children[2].children[1].size = size)), /大きさ .* は使えない/, size);
@@ -102,4 +139,18 @@ test("the check names what is wrong in a layout file", () => {
   // ファイルの形そのもの
   assert.deepEqual(check(null), ["定義ファイルが JSON のオブジェクトでない"]);
   assert.match(check({ version: 1, layouts: [] }).join(), /layouts が空/);
+});
+
+test("trial: 帯の代わりに EEW の常設パネルを置く手動専用の定義", () => {
+  const t = chooseLayout(LAYOUTS, 1440, 900, "trial");
+  assert.equal(t.name, "trial");
+  assert.ok(slotsOf(t.root).includes("eew-panel"));
+  assert.ok(!slotsOf(t.root).includes("banners"));
+  assert.equal(pickLayout(LAYOUTS, 1440, 900).name, "regular");
+});
+
+test("boxesOf lists the boxes a layout uses, in order", () => {
+  const tree: LayoutNode = { dir: "column", children: [{ box: "layout", dir: "row", children: [{ slot: "main" }, { box: "side", dir: "column", children: [] }] }] };
+  assert.deepEqual(boxesOf(tree), ["layout", "side"]);
+  assert.deepEqual(boxesOf({ slot: "main" }), []);
 });

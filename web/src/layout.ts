@@ -17,6 +17,10 @@ export interface Part {
 export interface Stack {
   flow: "row" | "column";
   items: (string | Part | Stack)[];
+  /** 中身の間隔・内側の余白 (pad は 1〜4 個)・最小の高さ。CSS の長さ。minHeight は中身が全部隠れても場所を取る */
+  gap?: string;
+  pad?: string;
+  minHeight?: string;
 }
 
 export type Corner = "top-left" | "top-right" | "bottom-left" | "bottom-right" | "top" | "bottom";
@@ -41,15 +45,41 @@ export interface Layout {
   when?: { minWidth?: number; maxWidth?: number; minHeight?: number; maxHeight?: number };
   /** ページ全体がスクロールする (縦に積む中の "fill" は "auto" として扱う) */
   scroll?: "page";
+  /** 画面の大きさによる自動選択から外す (URL の ?layout=名前 で指したときだけ使う) */
+  manual?: true;
   root: LayoutNode;
 }
 
-/** 画面の大きさで定義を選ぶ。どれにも合わなければ先頭 */
+/** 画面の大きさで定義を選ぶ (manual は選ばない)。どれにも合わなければ manual でない先頭 */
 export function pickLayout(layouts: readonly Layout[], width: number, height: number): Layout {
   const ok = ({ minWidth, maxWidth, minHeight, maxHeight }: NonNullable<Layout["when"]>) =>
     (minWidth == null || width >= minWidth) && (maxWidth == null || width <= maxWidth) && (minHeight == null || height >= minHeight) && (maxHeight == null || height <= maxHeight);
-  return layouts.find((l) => ok(l.when ?? {})) ?? layouts[0];
+  const auto = layouts.filter((l) => !l.manual);
+  return auto.find((l) => ok(l.when ?? {})) ?? auto[0];
 }
+
+/** forced (URL の ?layout=) と同じ名前の定義があればそれ (manual でも)。無い・空・null なら画面の大きさで選ぶ */
+export function chooseLayout(layouts: readonly Layout[], width: number, height: number, forced: string | null): Layout {
+  return (forced ? layouts.find((l) => l.name === forced) : undefined) ?? pickLayout(layouts, width, height);
+}
+
+/** 定義の中に置かれた部品の名前を、重ね物と入れ子の積みを含めて出てきた順に返す (重複もそのまま) */
+export function slotsOf(node: LayoutNode): string[] {
+  const fromStack = (s: Stack): string[] => s.items.flatMap((i) => (typeof i === "string" ? [i] : "slot" in i ? [i.slot] : fromStack(i)));
+  return [
+    ...(node.slot ? [node.slot] : []),
+    ...Object.values(node.overlays ?? {}).flatMap((s) => (s ? fromStack(s) : [])),
+    ...(node.children ?? []).flatMap(slotsOf),
+  ];
+}
+
+/** 定義の中で使う容器の名前を、出てきた順に返す */
+export function boxesOf(node: LayoutNode): string[] {
+  return [...(node.box ? [node.box] : []), ...(node.children ?? []).flatMap(boxesOf)];
+}
+
+/** 省けない部品 (これ以外は定義で置かなくてよい) */
+export const REQUIRED_SLOTS: readonly string[] = ["main"];
 
 /** 大きさを親の向きに沿った CSS の flex にする */
 export function flexOf(size: Size | undefined, pageColumn: boolean): string {
@@ -66,12 +96,14 @@ export const LAYOUTS: readonly Layout[] = (BUILTIN as unknown as { layouts: Layo
 
 const CORNERS: readonly string[] = ["top-left", "top-right", "bottom-left", "bottom-right", "top", "bottom"];
 const WHEN: readonly string[] = ["minWidth", "maxWidth", "minHeight", "maxHeight"];
+/** 0 か、数 + 単位 */
+const LENGTH = /^(?:0|\d+(?:\.\d+)?(?:px|em|rem|%|vw|vh|svh|dvh))$/;
 /** fill・fill:n・auto・数 + 単位・calc() などの CSS の関数 */
 const SIZE = /^(?:fill(?::\d+(?:\.\d+)?)?|auto|\d+(?:\.\d+)?(?:px|%|vw|vh|svw|svh|dvw|dvh|lvw|lvh|em|rem)|(?:calc|clamp|min|max)\([\w\s.,%+*/()-]*\))$/;
 
 /**
  * 定義ファイル ({ version: 1, layouts: [...] }) を確かめ、正しくないところを返す (正しければ空)。
- * 部品の名前は slots、容器の名前は boxes にあるものだけ。各定義は部品をすべて、1 回ずつ置く。
+ * 部品の名前は slots、容器の名前は boxes にあるものだけ。各定義は部品を高々 1 回置き、REQUIRED_SLOTS は必ず置く。
  * 知らないキーも誤りにする (書き間違いに気づけるように)。説明には "note" をどこにでも書ける
  */
 export function checkLayouts(data: unknown, slots: readonly string[], boxes: readonly string[]): string[] {
@@ -86,7 +118,12 @@ export function checkLayouts(data: unknown, slots: readonly string[], boxes: rea
   };
   const stack = (s: unknown, at: string, placed: string[]): void => {
     if (!isObj(s)) return void errs.push(`${at}: 重ね方がオブジェクトでない`);
-    keys(s, at, ["flow", "items"]);
+    keys(s, at, ["flow", "items", "gap", "pad", "minHeight"]);
+    for (const k of ["gap", "minHeight"]) if (s[k] !== undefined && !(typeof s[k] === "string" && LENGTH.test(s[k]))) errs.push(`${at}: ${k} ${JSON.stringify(s[k])} は使えない`);
+    if (s.pad !== undefined) {
+      const parts = typeof s.pad === "string" ? s.pad.split(" ") : [];
+      if (parts.length < 1 || parts.length > 4 || !parts.every((p) => LENGTH.test(p))) errs.push(`${at}: pad ${JSON.stringify(s.pad)} は使えない`);
+    }
     if (s.flow !== "row" && s.flow !== "column") errs.push(`${at}: flow は "row" か "column"`);
     if (!Array.isArray(s.items)) return void errs.push(`${at}: items が配列でない`);
     s.items.forEach((it, i) => {
@@ -125,22 +162,26 @@ export function checkLayouts(data: unknown, slots: readonly string[], boxes: rea
   keys(data, "定義ファイル", ["version", "layouts"]);
   if (data.version !== 1) errs.push(`version は 1 (いまは ${JSON.stringify(data.version)})`);
   if (!Array.isArray(data.layouts) || data.layouts.length === 0) return [...errs, "layouts が空か、配列でない"];
-  data.layouts.forEach((l, i) => {
+  if (data.layouts.every((l) => isObj(l) && l.manual === true)) errs.push("manual でない定義が 1 つも無い");
+  data.layouts.forEach((l, i, all) => {
     const at = `layouts[${i}]`;
     if (!isObj(l)) return void errs.push(`${at}: オブジェクトでない`);
     const name = `${at} (${String(l.name)})`;
-    keys(l, name, ["name", "when", "scroll", "root"]);
+    keys(l, name, ["name", "when", "scroll", "manual", "root"]);
     if (typeof l.name !== "string" || !l.name) errs.push(`${at}: name が無い`);
+    else if (all.slice(0, i).some((o) => isObj(o) && o.name === l.name)) errs.push(`${name}: 名前「${l.name}」が重なっている`);
     if (l.when !== undefined) {
       if (!isObj(l.when)) errs.push(`${name}: when がオブジェクトでない`);
       else for (const [k, v] of Object.entries(l.when)) if (!WHEN.includes(k) || typeof v !== "number") errs.push(`${name}: when.${k} は使えない (${WHEN.join("・")} に数)`);
     }
     if (l.scroll !== undefined && l.scroll !== "page") errs.push(`${name}: scroll は "page" だけ`);
+    if (l.manual !== undefined && l.manual !== true) errs.push(`${name}: manual は true だけ`);
     const placed: string[] = [];
     node(l.root, `${name}.root`, placed);
     for (const s of slots) {
       const n = placed.filter((p) => p === s).length;
-      if (n !== 1) errs.push(`${name}: 部品「${s}」を${n === 0 ? "置いていない" : ` ${n} 回置いている`}`);
+      if (n > 1) errs.push(`${name}: 部品「${s}」を ${n} 回置いている`);
+      if (n === 0 && REQUIRED_SLOTS.includes(s)) errs.push(`${name}: 部品「${s}」を置いていない`);
     }
   });
   return errs;

@@ -191,6 +191,16 @@ body {
 .arrived { color: #ff7b72; font-size: 12px; }
 .eew-title { color: #ff7b72; }
 .eew-banner.forecast { background: #b35900; animation: none; }
+.eew-panel { padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.ep-title { font-size: 14px; font-weight: 700; }
+.ep-rows { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 8px 0 0; font-size: 13px; font-variant-numeric: tabular-nums; }
+.ep-rows dt { color: var(--muted); }
+.ep-rows dd { margin: 0; }
+.ep-more, .ep-message { margin-top: 6px; font-size: 13px; }
+.eew-panel[data-state="none"] .ep-title, .eew-panel[data-state="none"] .ep-message { color: var(--muted); }
+.eew-panel[data-state="active"] { background: var(--alert); color: #fff; }
+.eew-panel[data-state="active"] .ep-rows dt { color: inherit; opacity: 0.8; }
+.eew-panel[data-state="active"]:not(.warning) { background: #b35900; }
 .muted { color: var(--muted); }
 .error { color: #f85149; }
 
@@ -326,11 +336,6 @@ a.banner-item:hover p { text-decoration: underline; }
 .ld-bottom { bottom: 0; }
 /* 案内のボタンが無いときも、通知は前と同じ高さ (地図の下端から 60px) に出す */
 .ld-bottom > #tour-toast:has(+ #sound-hint[hidden]) { margin-bottom: 50px; }
-/* スマホ (compact) は、いまの見た目に合わせる: 時計は角から 6px、別枠と案内の間 4px・凡例まで 8px。
-   寄って別枠が隠れても、凡例の位置は変えない (別枠の高さ 140px を空けておく) */
-body[data-layout="compact"] .ld-bottom-right { padding: 6px; }
-body[data-layout="compact"] .ld-top-left { gap: 8px; }
-body[data-layout="compact"] .ld-top-left > .ld-stack { display: flex; gap: 4px; min-height: 140px; }
 
 /* 横向きのスマホ (landscape): 帯は地図の左上に重ねる札にする (EEW は 1 件ずつ巡回、view.ts)。上部バーは細く */
 body[data-layout="landscape"] .topbar { padding: 3px 10px; gap: 6px; }

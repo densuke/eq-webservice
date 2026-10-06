@@ -111,7 +111,7 @@
           <tr><td>トースト・音の案内</td><td>下から 60px・14px の中央 (別々に固定)</td><td>下の中央に積む (案内が無ければトーストが下まで下がる)</td><td>積み方で決まるようにした。<b>スマホでは前も後も時計と重なりうる</b> (要検討)</td></tr>
         </tbody>
       </table></div>
-      <p class="small muted">スマホの「時計は角から 6px」「別枠と案内の間 4px・凡例まで 8px」「寄って別枠が隠れても凡例は動かない」は、いまの見た目に合わせるため CSS で補っている (<code>body[data-layout="compact"]</code>)。第 2 段階で書式に「余白」「場所を空けておく」を足せば、定義に移せる。</p>
+      <p class="small muted">スマホの「時計は角から 6px」「別枠と案内の間 4px・凡例まで 8px」「寄って別枠が隠れても凡例は動かない」は、定義 (<code>layout.json</code> の <code>compact</code>) に移した (<code>pad</code>・<code>gap</code>・<code>minHeight</code>。下の「定義ファイル」)。CSS の補いは消した。</p>
       <h3>横向きのスマホ (landscape) を追加 <span class="tag sure">実装済み</span></h3>
       <ul>
         <li>条件: 幅 801px 以上・高さ 480px 以下 (定義の <code>landscape</code>)。PC とスマホ縦の見た目は変えていない (実測で ±1px 一致を確認)。</li>
@@ -137,11 +137,16 @@
           <tr><td><code>name</code> / <code>when</code> / <code>scroll</code></td><td>名前 (<code>body[data-layout]</code> になる) / <code>minWidth</code>・<code>maxWidth</code>・<code>minHeight</code>・<code>maxHeight</code> (px) / <code>"page"</code> (ページ全体がスクロール)</td></tr>
           <tr><td><code>root</code> とその下の節</td><td>容器 <code>{ dir, box?, size?, children, overlays? }</code> か、部品 <code>{ slot, variant?, size?, overlays? }</code>。<code>box</code> は既存の要素 (<code>layout</code>・<code>side</code>)</td></tr>
           <tr><td><code>size</code></td><td><code>fill</code>・<code>fill:2</code> (残りを重みで分ける)・<code>auto</code> (中身の大きさ)・数 + 単位 (<code>px</code>・<code>%</code>・<code>svh</code>・<code>vw</code> など)・<code>calc()</code>・<code>clamp()</code>・<code>min()</code>・<code>max()</code></td></tr>
-          <tr><td><code>overlays</code></td><td>隅 (<code>top-left</code>・<code>top-right</code>・<code>bottom-left</code>・<code>bottom-right</code>・<code>top</code>・<code>bottom</code>) → <code>{ flow, items }</code>。<code>items</code> は部品の名前・<code>{ slot, variant }</code>・入れ子の <code>{ flow, items }</code></td></tr>
+          <tr><td><code>overlays</code></td><td>隅 (<code>top-left</code>・<code>top-right</code>・<code>bottom-left</code>・<code>bottom-right</code>・<code>top</code>・<code>bottom</code>) → <code>{ flow, items, gap?, pad?, minHeight? }</code>。<code>items</code> は部品の名前・<code>{ slot, variant }</code>・入れ子の <code>{ flow, items }</code></td></tr>
+          <tr><td><code>gap</code> / <code>pad</code> / <code>minHeight</code></td><td>重ね物の積み (入れ子も含む) の、中身の間隔 / 内側の余白 / 最小の高さ。値は CSS の長さ (<code>pad</code> は 1〜4 個)。<code>minHeight</code> を付けた積みは、中身が全部隠れても場所を取る</td></tr>
+          <tr><td><code>manual</code></td><td><code>true</code> の定義は、画面の大きさでは選ばれず、URL の <code>?layout=名前</code> でだけ選ばれる。<code>?layout=</code> は manual でない定義も名前で選べる。名前の重複は誤り。manual でない定義は 1 つ以上要る</td></tr>
           <tr><td><code>note</code></td><td>説明 (どこにでも書ける。JSON にはコメントが無いため)</td></tr>
         </tbody>
       </table></div>
-      <p class="small muted">各定義は、部品 (<code>web/src/layout-dom.ts</code> の <code>SLOTS</code>) をすべて 1 回ずつ置く。知らないキーも誤りにする (書き間違いに気づけるように)。</p>
+      <p class="small muted">各定義は、部品 (<code>web/src/layout-dom.ts</code> の <code>SLOTS</code>) を高々 1 回ずつ置く。必須は <code>main</code> だけ。省いた部品と使わない容器は、body 直下の隠し置き場 (<code>.ld-unused</code>、<code>hidden</code>) へ移る (文書から外れないので、他のコードが要素を探せる)。知らないキーも誤りにする (書き間違いに気づけるように)。</p>
+      <h3>試験定義 trial</h3>
+      <p><code>?layout=trial</code> で選ぶ (<code>manual</code>)。<code>regular</code> と同じ並びで、帯 (<code>banners</code>) の代わりに右列の先頭に緊急地震速報の常設パネル (<code>eew-panel</code>) を置く。発表中は最優先の 1 件 (震源・発生・規模・深さ・予測最大震度・報) と「ほか n 件」を出し、平時は「現在、発表はありません」と最後の発表を出す。</p>
+      <p class="note"><b>配備の注意</b>: eq-server の <code>[layout] file</code> で外部の定義ファイルを使っているときは、web と同じ版の <code>layout.json</code> に更新すること。古い <code>compact</code> の定義では、スマホ縦の余白と場所取りが消える (CSS の補いを消したため)。</p>
       <p><b>配信 (native) が同じファイルを読むために要るもの</b> (段階 4。いまは native を変えていない): 定義の型を serde で持ち、web と同じ確かめ方をする / 部品の名前 → native の描き方の対応 / 固定の 1280×720 で選ぶ条件 (例: <code>when: { target: "broadcast" }</code>。web はそれを選ばない) / <code>fill</code>・<code>auto</code>・<code>px</code>・<code>%</code> を native の矩形の割り付けに直す処理 (<code>svh</code>・<code>vw</code>・<code>clamp()</code> は画面の大きさで計算するか、native では使えない値として扱う)。</p>
       <p class="note"><b>今後の課題</b>は、リポジトリの <code>docs/ui-layout-backlog.md</code> に一覧で残しています (実機での確認・書式の拡張・縦画面の改善・2 地図・データ源の確認など)。</p>
       <h3>第 2 段階以降の候補 (要望)</h3>
