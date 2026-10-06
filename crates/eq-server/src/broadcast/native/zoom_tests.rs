@@ -8,7 +8,12 @@ use crate::quake::{Eew, EewArea, EventBody, Hypocenter, PrefScale, Scale};
 const T0: i64 = 1_790_000_000_000;
 
 fn config(zoom: bool) -> BroadcastConfig {
+    config_sub(zoom, false)
+}
+
+fn config_sub(zoom: bool, sub_map: bool) -> BroadcastConfig {
     BroadcastConfig {
+        sub_map,
         map_dir: std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../web/public")
             .display()
@@ -455,4 +460,295 @@ fn write_zoomed_png_when_asked() {
     let waves = eew::waves(&[], std::slice::from_ref(&e), SHOWN_AT);
     r.draw_waves(&mut pm, &waves);
     pm.save_png(std::path::Path::new(&out).join("zoomed.png")).unwrap();
+}
+
+// ---- sub_map (配信の右パネルの上にサブの地図を描く試験。docs/native-submap-bench.md) ----
+
+fn eew_scene<'a>(e: &'a eew::EewSummary, icons: &'a Icons, now_ms: u64) -> Scene<'a> {
+    Scene {
+        quake: None,
+        eew: Some(e),
+        history: &[],
+        warnings: None,
+        weather: None,
+        icons,
+        flip_s: 0,
+        now_ms,
+        connected: true,
+        bgm_title: "",
+        label: "",
+        test: false,
+        hindsight: None,
+        fast_forward: false,
+        status: None,
+        notices: None,
+    }
+}
+
+fn in_sub_rect(i: usize) -> bool {
+    let (x, y) = ((i % draw::W as usize) as f64, (i / draw::W as usize) as f64);
+    let (rx, ry, rw, rh) = draw::SUB_RECT;
+    (rx..rx + rw).contains(&x) && (ry..ry + rh).contains(&y)
+}
+
+#[test]
+fn the_sub_map_paints_only_inside_its_rect() {
+    let e = eew::latest_eews(&chiba_events()).remove(0);
+    let icons = Icons::new();
+    let scene = eew_scene(&e, &icons, SHOWN_AT);
+    let off = load_renderer(&config_sub(false, false)).unwrap().render(&scene);
+    let mut r = load_renderer(&config_sub(false, true)).unwrap();
+    assert!(r.sub_map_enabled());
+    let (x, y) = geo::project(140.8, 35.7);
+    let aspect = draw::SUB_RECT.2 / draw::SUB_RECT.3;
+    r.set_sub_view(Some(camera::fit_box(camera::MapBox::around(x, y, 150.0), aspect)));
+    let on = r.render(&scene);
+    let (mut outside, mut inside) = (0, 0);
+    for (i, (a, b)) in off.pixels().iter().zip(on.pixels()).enumerate() {
+        match (a == b, in_sub_rect(i)) {
+            (false, false) => outside += 1,
+            (false, true) => inside += 1,
+            _ => {}
+        }
+    }
+    assert_eq!(outside, 0);
+    assert!(inside > 0);
+}
+
+#[test]
+fn the_sub_map_does_not_add_redraws() {
+    let ev = chiba_events();
+    let icons = Icons::new();
+    for zoom in [false, true] {
+        let count = |sub| {
+            let mut st = Stepper::new(load_renderer(&config_sub(zoom, sub)).unwrap());
+            (0..50)
+                .filter(|k| st.step(&input(&ev, SHOWN_AT + k * 200, &icons)).is_some())
+                .count()
+        };
+        assert_eq!(count(true), count(false), "zoom={zoom}");
+    }
+}
+
+fn quake_event(received_ms: u64) -> Event {
+    use crate::quake::{Quake, QuakeInfoType};
+    Event {
+        id: "q".into(),
+        source: "test".into(),
+        received_at_ms: received_ms,
+        body: EventBody::Quake(Quake {
+            info_type: QuakeInfoType::ScaleAndDestination,
+            origin_time: "2026/10/01 21:26:50".into(),
+            origin_time_ms: Some(T0),
+            issued_at: "2026/10/01 21:30:00".into(),
+            hypocenter: Some(Hypocenter {
+                name: "千葉県北東部".into(),
+                latitude: Some(35.7),
+                longitude: Some(140.8),
+                depth_km: Some(40),
+                magnitude: Some(4.5),
+            }),
+            max_scale: Scale::S4,
+            domestic_tsunami: "None".into(),
+            points: vec![],
+            pref_max: vec![PrefScale {
+                pref: "千葉県".into(),
+                scale: Scale::S4,
+            }],
+            comment: String::new(),
+        }),
+    }
+}
+
+const QUAKE_RECEIVED: u64 = (T0 + 60_000) as u64;
+
+/// 場面 (緊急地震速報 / 確定の地震 / 落ち着いた後) の 1 コマ目を sub_map の有無で描いた画面
+fn still_of(ev: &[Event], now: u64, sub: bool) -> (tiny_skia::Pixmap, bool) {
+    let icons = Icons::new();
+    let mut cfg = config_sub(false, sub);
+    cfg.font = std::env::var("EQ_NATIVE_FONT").unwrap_or(cfg.font);
+    let mut st = Stepper::new(load_renderer(&cfg).unwrap());
+    let o = st.step(&input(ev, now, &icons)).unwrap();
+    (st.still_pixmap().unwrap().clone(), o.calm)
+}
+
+fn quake_scenes() -> [(&'static str, Vec<Event>, u64); 2] {
+    [
+        ("eew", chiba_events(), SHOWN_AT),
+        ("quake", vec![quake_event(QUAKE_RECEIVED)], QUAKE_RECEIVED + 10_000),
+    ]
+}
+
+#[test]
+fn the_sub_map_does_not_draw_when_calm() {
+    let ev = [quake_event(QUAKE_RECEIVED)];
+    // 落ち着きの時間 (3 分) を過ぎた後 = 平時
+    let now = QUAKE_RECEIVED + 10 * 60_000;
+    let (off, calm) = still_of(&ev, now, false);
+    let (on, _) = still_of(&ev, now, true);
+    assert!(calm);
+    assert!(off.pixels() == on.pixels());
+}
+
+#[test]
+fn the_sub_map_leaves_the_detail_alone_during_a_quake() {
+    // 詳細は右パネルの y 36〜181 (区切り線まで)。サブの地図 (y 190〜) はその下
+    let in_detail = |i: usize| i % draw::W as usize >= draw::MAP_W as usize && i / (draw::W as usize) < 182;
+    for (name, ev, now) in quake_scenes() {
+        let (off, _) = still_of(&ev, now, false);
+        let (on, _) = still_of(&ev, now, true);
+        let diff = |f: &dyn Fn(usize) -> bool| {
+            off.pixels()
+                .iter()
+                .zip(on.pixels())
+                .enumerate()
+                .filter(|&(i, (a, b))| a != b && f(i))
+                .count()
+        };
+        assert_eq!(diff(&in_detail), 0, "{name}");
+        assert!(diff(&in_sub_rect) > 0, "{name}");
+    }
+}
+
+#[test]
+fn the_sub_map_shows_shaking_colors_during_a_confirmed_quake() {
+    let s4 = model::scale_color(Scale::S4);
+    // 緊急地震速報の予測は半透明の塗りなので、色が決まる確定の地震で見る
+    {
+        let (name, ev, now) = {
+            let [_, q] = quake_scenes();
+            q
+        };
+        let count = |sub| {
+            let (pm, calm) = still_of(&ev, now, sub);
+            assert!(!calm, "{name}");
+            pm.pixels()
+                .iter()
+                .enumerate()
+                .filter(|&(i, p)| in_sub_rect(i) && [p.red(), p.green(), p.blue()] == s4)
+                .count()
+        };
+        let (on, off) = (count(true), count(false));
+        assert!(on > off + 100, "{name}: {on} {off}");
+    }
+}
+
+/// サブの地図を有効にした地震の画面を PNG に書く (EQ_NATIVE_PNG_DIR があるときだけ。フォントは EQ_NATIVE_FONT)
+#[test]
+fn write_sub_map_png_when_asked() {
+    let Ok(out) = std::env::var("EQ_NATIVE_PNG_DIR") else {
+        return;
+    };
+    for (name, ev, now) in quake_scenes() {
+        let (pm, _) = still_of(&ev, now, true);
+        pm.save_png(std::path::Path::new(&out).join(format!("submap_{name}.png")))
+            .unwrap();
+    }
+}
+
+#[test]
+fn sub_map_is_read_from_the_config_and_defaults_to_off() {
+    assert!(
+        !toml::from_str::<BroadcastConfig>("source = \"native\"")
+            .unwrap()
+            .sub_map
+    );
+    assert!(
+        toml::from_str::<BroadcastConfig>("source = \"native\"\nsub_map = true")
+            .unwrap()
+            .sub_map
+    );
+    assert!(!BroadcastConfig::default().sub_map);
+}
+
+fn percentile(sorted: &[f64], p: f64) -> f64 {
+    sorted[((sorted.len() - 1) as f64 * p).round() as usize]
+}
+
+/// 昇順に並べた時間 (ms) の (中央値, p95, 平均)
+fn summarize_ms(mut v: Vec<f64>) -> (f64, f64, f64) {
+    v.sort_by(f64::total_cmp);
+    let mean = v.iter().sum::<f64>() / v.len() as f64;
+    (percentile(&v, 0.5), percentile(&v, 0.95), mean)
+}
+
+/// サブの地図の重さ (リリースビルドで。n2 の配信に足せるかの見積もり。docs/native-submap-bench.md)。
+/// 場面 (平時・緊急地震速報・確定の地震) x zoom x sub_map で、render() 200 回と step() 100 回 (5fps の時刻) を 1 回ずつ計る。
+/// 地図は EQ_NATIVE_MAP_DIR、フォントは EQ_NATIVE_FONT で指す (無ければ web/public と、文字なし)。
+/// `cargo test --release -p eq-server sub_map_cost -- --ignored --nocapture --test-threads=1`
+#[test]
+#[ignore]
+fn sub_map_cost() {
+    const RENDERS: usize = 200;
+    const STEPS: u64 = 100;
+    let received = (T0 + 60_000) as u64;
+    let scenes: [(&str, Vec<Event>, u64); 3] = [
+        ("calm ", vec![quake_event(received)], received + 10 * 60_000),
+        ("eew  ", chiba_events(), T0 as u64 + 20_000),
+        ("quake", vec![quake_event(received)], received + 10_000),
+    ];
+    let icons = Icons::new();
+    for (phase, ev, from) in &scenes {
+        for zoom in [false, true] {
+            for sub in [false, true] {
+                let mut cfg = config_sub(zoom, sub);
+                if let Ok(d) = std::env::var("EQ_NATIVE_MAP_DIR") {
+                    cfg.map_dir = d;
+                }
+                cfg.font = std::env::var("EQ_NATIVE_FONT").unwrap_or(cfg.font);
+                let mut st = Stepper::new(load_renderer(&cfg).unwrap());
+                for k in 0..10 {
+                    st.step(&input(ev, from + k * 200, &icons)); // 温める (寄りとサブの範囲も入る)
+                }
+                // render() 単体 (最後に入れた表示範囲のまま)
+                let groups = model::group_quakes(ev);
+                let eews = eew::latest_eews(ev);
+                let current = eew::current(&groups, &eews, from + 2_000);
+                let (quake, shown) = match current {
+                    Some(eew::Current::Quake(q)) => (Some(q), None),
+                    Some(eew::Current::Eew(e)) => (None, Some(e)),
+                    None => (None, None),
+                };
+                let scene = Scene {
+                    quake,
+                    eew: shown,
+                    history: &groups,
+                    warnings: None,
+                    weather: None,
+                    icons: &icons,
+                    flip_s: 0,
+                    now_ms: from + 2_000,
+                    connected: true,
+                    bgm_title: "",
+                    label: "",
+                    test: false,
+                    hindsight: None,
+                    fast_forward: false,
+                    status: None,
+                    notices: None,
+                };
+                let renders: Vec<f64> = (0..RENDERS)
+                    .map(|_| {
+                        let t = std::time::Instant::now();
+                        std::hint::black_box(st.renderer_mut().render(&scene));
+                        t.elapsed().as_secs_f64() * 1000.0
+                    })
+                    .collect();
+                let steps: Vec<f64> = (0..STEPS)
+                    .map(|k| {
+                        let i = input(ev, from + k * 200, &icons);
+                        let t = std::time::Instant::now();
+                        std::hint::black_box(st.step(&i));
+                        t.elapsed().as_secs_f64() * 1000.0
+                    })
+                    .collect();
+                let (rm, rp, _) = summarize_ms(renders);
+                let (sm, sp, mean) = summarize_ms(steps);
+                println!(
+                    "{phase} zoom={zoom:<5} sub={sub:<5}: render med {rm:.2} p95 {rp:.2} / step med {sm:.2} p95 {sp:.2} mean {mean:.2} ms, core-s per video-s {:.4}",
+                    mean * 5.0 / 1000.0
+                );
+            }
+        }
+    }
 }

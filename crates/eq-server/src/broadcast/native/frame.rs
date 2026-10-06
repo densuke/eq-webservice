@@ -97,6 +97,12 @@ impl Frame {
         Clip::new(Rect::from_xywh(x as f32, y as f32, w as f32, h as f32)?)
     }
 
+    /// サブの地図の枠 (右パネルの上)
+    pub fn sub_clip() -> Option<Clip> {
+        let (x, y, w, h) = super::draw::SUB_RECT;
+        Clip::new(Rect::from_xywh(x as f32, y as f32, w as f32, h as f32)?)
+    }
+
     /// 日本全体の本図 home の path を、view に寄せて映す本図。地図の枠の外には描かない
     pub fn zoomed(home: &View, view: View, clip: &Clip) -> Frame {
         Frame {

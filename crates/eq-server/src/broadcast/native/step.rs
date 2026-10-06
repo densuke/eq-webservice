@@ -211,6 +211,32 @@ impl Stepper {
         zoomed.map(|f| (f.x.to_bits(), f.y.to_bits(), f.w.to_bits()))
     }
 
+    /// サブの地図の範囲を決める。地震の画面 (表示中の地震・緊急地震速報) のときだけ。平時は None (描かない)。波は追わない。
+    /// still_key には入れない: 毎コマ決め直し、描き直しは now/1000 で毎秒なので、反映の遅れは最大 1 秒
+    fn aim_sub(&mut self, current: Option<eew::Current>, eews: &[eew::EewSummary]) {
+        if !self.renderer.sub_map_enabled() {
+            return;
+        }
+        let fit = aim_of(&self.renderer, current, eews, None)
+            .map(|mut a| {
+                a.epicenter = a.epicenter.map(|e| Epicenter { origin_ms: None, ..e });
+                a
+            })
+            .and_then(|a| target_box(&a, 0))
+            .map(|b| fit_box(b, draw::SUB_RECT.2 / draw::SUB_RECT.3));
+        self.renderer.set_sub_view(fit);
+    }
+
+    #[cfg(test)]
+    pub fn renderer_mut(&mut self) -> &mut Renderer {
+        &mut self.renderer
+    }
+
+    #[cfg(test)]
+    pub fn still_pixmap(&self) -> Option<&Pixmap> {
+        self.still.as_ref().map(|(_, pm)| pm)
+    }
+
     /// 前のコマから変わっていなければ None
     pub fn step(&mut self, i: &Input) -> Option<Output> {
         let now = i.now;
@@ -224,6 +250,7 @@ impl Stepper {
         };
         let pending = hindsight::pending(i.hindsight, &groups, &eews);
         let view = self.aim_camera(current, &eews, pending, now, i.fast_forward);
+        self.aim_sub(current, &eews);
         // 地震波は地震の画面のときだけ描く (のちに分かった震源の波は、平時の画面でも描く)
         let waves = frame_waves(&groups, &eews, current.is_some(), i.hindsight, now);
         // 地震波以外を描き直すのは、データが変わったとき・平時と地震が切り替わったとき・秒が進んだときだけ。

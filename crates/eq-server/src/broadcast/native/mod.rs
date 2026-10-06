@@ -210,7 +210,7 @@ pub(super) fn load_renderer(cfg: &BroadcastConfig) -> anyhow::Result<Renderer> {
         text::Text::none()
     });
     let mut renderer = Renderer::new(view, neighbors, prefs, areas, text);
-    if cfg.zoom {
+    if cfg.zoom || cfg.sub_map {
         // 地震情報細分区域は寄りの範囲の計算だけに使う。読めなければ、県の本土の範囲で寄る
         let zones = geo::load(&dir.join("areas.geojson"), "name", &view).unwrap_or_else(|e| {
             tracing::warn!("broadcast: 地震情報細分区域を読めないので、県の範囲で寄ります: {e:#}");
@@ -221,7 +221,13 @@ pub(super) fn load_renderer(cfg: &BroadcastConfig) -> anyhow::Result<Renderer> {
             tracing::warn!("broadcast: 観測点の表を読めないので、観測点では寄りません: {e:#}");
             Default::default()
         });
-        renderer.enable_zoom(zones, stations);
+        renderer.set_zones(zones, stations);
+    }
+    if cfg.zoom {
+        renderer.enable_zoom();
+    }
+    if cfg.sub_map {
+        renderer.enable_sub_map();
     }
     Ok(renderer)
 }
