@@ -15,6 +15,7 @@ use super::frame::{BoxRect, Clip, Frame, OKINAWA};
 use super::geo::{Shape, View};
 use super::hindsight::Hindsight;
 use super::icon::Icons;
+use super::layout_def::LayoutDef;
 use super::model::{scale_color, scale_text_color, QuakeSummary};
 use super::notice::{self, LayoutCache, Notices};
 use super::paint::{epicenter, ghost_epicenter, rect, rrect, LAND, LAND_EDGE, MUTED, NEIGHBOR, NEIGHBOR_EDGE, SEA};
@@ -94,6 +95,9 @@ pub struct Renderer {
     cards: CardCache,
     /// お知らせの並べた行の覚え
     notice_lines: LayoutCache,
+    /// 並びの定義 (平時用・地震の画面用)。ライブだけが持つ (replay-video は組み込みの定義を使う予定)。まだ描画には使わない
+    #[allow(dead_code)]
+    layouts: Option<(LayoutDef, LayoutDef)>,
 }
 
 /// 別枠の枠線の色 (web/public/style.css の .inset)
@@ -116,6 +120,7 @@ impl Renderer {
             base: Pixmap::new(W, H).expect("size"),
             cards: CardCache::default(),
             notice_lines: LayoutCache::default(),
+            layouts: None,
         };
         r.base = r.draw_base();
         r
@@ -124,6 +129,11 @@ impl Renderer {
     /// 地震情報細分区域 (範囲の計算にだけ使い、塗りは描かない) と観測点の表を入れる。寄りとサブの地図が使う
     pub fn set_zones(&mut self, areas: Vec<Shape>, stations: Stations) {
         self.zones = Zones::new(areas, &self.prefs, stations);
+    }
+
+    /// 起動時に決めた並びの定義を持たせる
+    pub fn set_layouts(&mut self, layouts: (LayoutDef, LayoutDef)) {
+        self.layouts = Some(layouts);
     }
 
     /// 寄りを有効にする (地図の枠の型を立てる)

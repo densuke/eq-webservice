@@ -72,6 +72,10 @@ pub struct BroadcastConfig {
     /// native: 地震のとき震源へ寄る (S 波の広がりに合わせて引き、揺れた範囲が収まったら止まる。web と同じ)。
     /// 描き直しが増える (e2-micro では測ってから)。既定は寄らない
     pub zoom: bool,
+    /// native: 平時の並びを決める定義の名前 (サーバの GET /api/layout の中の名前。web/src/layout.json の broadcast)
+    pub layout: String,
+    /// native: 地震の画面の並びを決める定義の名前
+    pub layout_quake: String,
     /// native 試験: 右パネルの上にサブの地図 (表示中の地震、無ければ最新の地震に寄せたもの) を描く (重さを測るため。docs/native-submap-bench.md)。既定は無効
     pub sub_map: bool,
     /// native: 上部バーの右に出す配信元の名前 (例 "配信元: e2")。空なら出さない
@@ -152,6 +156,8 @@ impl Default for BroadcastConfig {
             fps: 30,
             fps_calm: None,
             zoom: false,
+            layout: "broadcast".into(),
+            layout_quake: "broadcast-quake".into(),
             sub_map: false,
             label: String::new(),
             weather_flip_secs: 20,
@@ -281,6 +287,7 @@ async fn session(cfg: &BroadcastConfig, output: &[String], secrets: &[String]) -
         }
         Source::Native => {
             native::check_source(cfg).await?;
+            let layouts = native::load_layouts(cfg).await?;
             // 前の最後のコマから 30 秒以上あいていれば、途切れた札を出す (docs/broadcast-status.md)
             let prev = calm_state::read(&state_path).and_then(|s| s.last_frame_ms);
             last_frame.store(prev.unwrap_or(0), Ordering::Relaxed);
@@ -290,7 +297,7 @@ async fn session(cfg: &BroadcastConfig, output: &[String], secrets: &[String]) -
             (
                 None,
                 None,
-                Some(native::start(cfg, notices, status::Feed { busy, outage })?),
+                Some(native::start(cfg, layouts, notices, status::Feed { busy, outage })?),
             )
         }
     };
@@ -529,6 +536,17 @@ mod tests {
 
     fn env(k: &str) -> Option<String> {
         (k == "KEY").then(|| "abc-123".to_string())
+    }
+
+    #[test]
+    fn the_layout_names_default_to_the_broadcast_definitions_and_can_be_changed() {
+        let cfg = toml::from_str::<BroadcastConfig>("source = \"native\"").unwrap();
+        assert_eq!(
+            (cfg.layout.as_str(), cfg.layout_quake.as_str()),
+            ("broadcast", "broadcast-quake")
+        );
+        let cfg = toml::from_str::<BroadcastConfig>("layout = \"jdq\"\nlayout_quake = \"jdq-quake\"").unwrap();
+        assert_eq!((cfg.layout.as_str(), cfg.layout_quake.as_str()), ("jdq", "jdq-quake"));
     }
 
     #[test]

@@ -16,6 +16,7 @@ mod geo;
 mod held;
 mod hindsight;
 mod icon;
+mod layout_def;
 pub(crate) mod model;
 mod notice;
 mod paint;
@@ -45,6 +46,7 @@ use crate::quake::userquake::Gate;
 use crate::quake::{Event, EventBody};
 use data::{CityWeather, ServerMessage, Warnings};
 use draw::Renderer;
+use layout_def::LayoutDef;
 use notice::{Banners, Notices};
 
 // 記録から描き直す動画 (broadcast/replay) が使う
@@ -142,8 +144,31 @@ fn check_replay(kind: Option<&str>, test: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn start(cfg: &BroadcastConfig, notices: Option<UnboundedSender<String>>, status: Feed) -> anyhow::Result<Native> {
-    let renderer = load_renderer(cfg)?;
+/// 起動時に 1 回、サーバの並びの定義 (GET /api/layout) を読み、平時用と地震の画面用の 2 つを決める。
+/// 取れない・使えないときは組み込みの定義 (その警告は 1 回だけ)。組み込みも使えなければエラー
+pub async fn load_layouts(cfg: &BroadcastConfig) -> anyhow::Result<(LayoutDef, LayoutDef)> {
+    let url = format!("{}/api/layout", cfg.server.trim_end_matches('/'));
+    let json = async {
+        let client = crate::net::client(Duration::from_secs(10))?;
+        crate::net::text(client.get(&url)).await
+    }
+    .await;
+    if let Err(e) = &json {
+        tracing::warn!("broadcast: {url}: {e:#}");
+    }
+    let defs = layout_def::load(json.ok().as_deref(), &cfg.layout, &cfg.layout_quake)?;
+    tracing::info!("broadcast: layout 平時={} 地震={}", defs.0.name, defs.1.name);
+    Ok(defs)
+}
+
+pub fn start(
+    cfg: &BroadcastConfig,
+    layouts: (LayoutDef, LayoutDef),
+    notices: Option<UnboundedSender<String>>,
+    status: Feed,
+) -> anyhow::Result<Native> {
+    let mut renderer = load_renderer(cfg)?;
+    renderer.set_layouts(layouts);
     let server = cfg.server.trim_end_matches('/').to_string();
     let st: Shared = Arc::default();
     let (tx, frames) = watch::channel(Arc::new(Vec::new()));
@@ -519,6 +544,8 @@ async fn bgm_title_loop(url: String, st: Shared) {
     }
 }
 
+#[cfg(test)]
+mod layout_def_tests;
 #[cfg(test)]
 mod sound_tests;
 #[cfg(test)]
