@@ -72,6 +72,8 @@ pub struct BroadcastConfig {
     /// native: 地震のとき震源へ寄る (S 波の広がりに合わせて引き、揺れた範囲が収まったら止まる。web と同じ)。
     /// 描き直しが増える (e2-micro では測ってから)。既定は寄らない
     pub zoom: bool,
+    /// native 試験: 右パネルの上にサブの地図 (表示中の地震、無ければ最新の地震に寄せたもの) を描く (重さを測るため。docs/native-submap-bench.md)。既定は無効
+    pub sub_map: bool,
     /// native: 上部バーの右に出す配信元の名前 (例 "配信元: e2")。空なら出さない
     pub label: String,
     /// native: 平時の天気の札を「今」と「明日」で切り替える間隔 (秒)。0 なら今だけ
@@ -150,6 +152,7 @@ impl Default for BroadcastConfig {
             fps: 30,
             fps_calm: None,
             zoom: false,
+            sub_map: false,
             label: String::new(),
             weather_flip_secs: 20,
             test: false,

@@ -33,6 +33,9 @@ pub const MAP_W: f32 = 900.0;
 /// 地図の枠 (x, y, 幅, 高さ)
 pub const MAP_RECT: (f64, f64, f64, f64) = (0.0, BAR_H as f64, MAP_W as f64, H as f64 - BAR_H as f64);
 
+/// サブの地図の枠 (x, y, 幅, 高さ)。右パネルの上。試験 (BroadcastConfig::sub_map)
+pub const SUB_RECT: (f64, f64, f64, f64) = (MAP_W as f64, BAR_H as f64, W as f64 - MAP_W as f64, 300.0);
+
 /// 描くときに渡す、そのときの状態
 pub struct Scene<'a> {
     /// 地震の画面に出す地震 (無ければ平時)
@@ -76,6 +79,10 @@ pub struct Renderer {
     /// 寄りの設定が有効なとき: 地図の枠の型と、地震情報細分区域の外接矩形 (名前 -> 地図の座標)
     clip: Option<Clip>,
     zones: Zones,
+    /// サブの地図の枠の型 (sub_map が有効なときだけ)
+    sub_clip: Option<Clip>,
+    /// 次に描くサブの地図 (set_sub_view で入れる)。無ければ描かない
+    sub: Option<Frame>,
     /// 周辺国の陸地 (都道府県より下に描く。無ければ空)
     neighbors: Vec<Shape>,
     prefs: Vec<Shape>,
@@ -99,6 +106,8 @@ impl Renderer {
             zoomed: None,
             clip: None,
             zones: Zones::default(),
+            sub_clip: None,
+            sub: None,
             neighbors,
             prefs,
             areas: areas.into_iter().map(|s| (s.key.clone(), s)).collect(),
@@ -110,10 +119,30 @@ impl Renderer {
         r
     }
 
-    /// 寄りを有効にする。zones は地震情報細分区域 (寄りの範囲の計算にだけ使い、塗りは描かない)
-    pub fn enable_zoom(&mut self, areas: Vec<Shape>, stations: Stations) {
-        self.clip = Frame::map_clip();
+    /// 地震情報細分区域 (範囲の計算にだけ使い、塗りは描かない) と観測点の表を入れる。寄りとサブの地図が使う
+    pub fn set_zones(&mut self, areas: Vec<Shape>, stations: Stations) {
         self.zones = Zones::new(areas, &self.prefs, stations);
+    }
+
+    /// 寄りを有効にする (地図の枠の型を立てる)
+    pub fn enable_zoom(&mut self) {
+        self.clip = Frame::map_clip();
+    }
+
+    /// サブの地図を有効にする (試験)
+    pub fn enable_sub_map(&mut self) {
+        self.sub_clip = Frame::sub_clip();
+    }
+
+    pub fn sub_map_enabled(&self) -> bool {
+        self.sub_clip.is_some()
+    }
+
+    /// 次に描くサブの地図の表示範囲 (地図の座標)。None なら描かない。有効でなければ何もしない
+    pub fn set_sub_view(&mut self, fit: Option<Fit>) {
+        self.sub = fit
+            .zip(self.sub_clip.as_ref())
+            .map(|(f, clip)| Frame::zoomed(&self.main.view, View::from_fit(&f, SUB_RECT), clip));
     }
 
     pub fn zoom_enabled(&self) -> bool {
@@ -179,6 +208,9 @@ impl Renderer {
             }
         }
         panel::draw_dynamic(&mut pm, &mut self.text, scene);
+        if let Some(f) = &self.sub {
+            draw_sub_map(&mut pm, &mut self.text, &self.neighbors, &self.prefs, f, scene);
+        }
         // お知らせは平時だけ (右パネルの下半分。地震の画面では出さない)
         if let (None, None, Some(n)) = (scene.quake, scene.eew, scene.notices) {
             notice::draw(&mut pm, &mut self.text, &mut self.notice_lines, n, scene.now_ms);
@@ -240,6 +272,43 @@ fn draw_land(pm: &mut Pixmap, f: &Frame, neighbors: &[Shape], prefs: &[Shape]) {
     for s in prefs {
         f.fill(pm, &s.path, LAND, 1.0);
         f.stroke(pm, &s.path, LAND_EDGE, 1.0, 0.8);
+    }
+}
+
+/// サブの地図 (試験): SUB_RECT を海で塗り、陸と、地震の揺れ (県の塗り・震度の札・震央) を描いて、1px の枠を付ける。
+/// 札 (tag) は出さない。区域の塗りと観測点の点は無い
+fn draw_sub_map(pm: &mut Pixmap, text: &mut Text, neighbors: &[Shape], prefs: &[Shape], f: &Frame, scene: &Scene) {
+    let (x, y, w, h) = (
+        SUB_RECT.0 as f32,
+        SUB_RECT.1 as f32,
+        SUB_RECT.2 as f32,
+        SUB_RECT.3 as f32,
+    );
+    rect(pm, x, y, w, h, SEA, 1.0);
+    draw_land(pm, f, neighbors, prefs);
+    if let Some(s) = sub_shake(scene) {
+        draw_shake(pm, text, prefs, f, &s);
+    }
+    for (rx, ry, rw, rh) in [
+        (x, y, w, 1.0),
+        (x, y + h - 1.0, w, 1.0),
+        (x, y, 1.0, h),
+        (x + w - 1.0, y, 1.0, h),
+    ] {
+        rect(pm, rx, ry, rw, rh, INSET_LINE, 1.0);
+    }
+}
+
+/// サブの地図に描く揺れ: 表示中の地震・緊急地震速報、無ければ最新の地震 (観測)。札は付けない
+fn sub_shake<'a>(scene: &Scene<'a>) -> Option<Shake<'a>> {
+    match Shake::of(scene) {
+        Some(s) => Some(Shake { tag: None, ..s }),
+        None => scene.history.first().map(|q| Shake {
+            scales: &q.pref_scales,
+            forecast: false,
+            hypocenter: q.hypocenter.as_ref(),
+            tag: None,
+        }),
     }
 }
 

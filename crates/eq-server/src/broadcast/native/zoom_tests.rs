@@ -8,7 +8,12 @@ use crate::quake::{Eew, EewArea, EventBody, Hypocenter, PrefScale, Scale};
 const T0: i64 = 1_790_000_000_000;
 
 fn config(zoom: bool) -> BroadcastConfig {
+    config_sub(zoom, false)
+}
+
+fn config_sub(zoom: bool, sub_map: bool) -> BroadcastConfig {
     BroadcastConfig {
+        sub_map,
         map_dir: std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../web/public")
             .display()
@@ -455,4 +460,140 @@ fn write_zoomed_png_when_asked() {
     let waves = eew::waves(&[], std::slice::from_ref(&e), SHOWN_AT);
     r.draw_waves(&mut pm, &waves);
     pm.save_png(std::path::Path::new(&out).join("zoomed.png")).unwrap();
+}
+
+// ---- sub_map (配信の右パネルの上にサブの地図を描く試験。docs/native-submap-bench.md) ----
+
+fn eew_scene<'a>(e: &'a eew::EewSummary, icons: &'a Icons, now_ms: u64) -> Scene<'a> {
+    Scene {
+        quake: None,
+        eew: Some(e),
+        history: &[],
+        warnings: None,
+        weather: None,
+        icons,
+        flip_s: 0,
+        now_ms,
+        connected: true,
+        bgm_title: "",
+        label: "",
+        test: false,
+        hindsight: None,
+        fast_forward: false,
+        status: None,
+        notices: None,
+    }
+}
+
+fn in_sub_rect(i: usize) -> bool {
+    let (x, y) = ((i % draw::W as usize) as f64, (i / draw::W as usize) as f64);
+    let (rx, ry, rw, rh) = draw::SUB_RECT;
+    (rx..rx + rw).contains(&x) && (ry..ry + rh).contains(&y)
+}
+
+#[test]
+fn the_sub_map_paints_only_inside_its_rect() {
+    let e = eew::latest_eews(&chiba_events()).remove(0);
+    let icons = Icons::new();
+    let scene = eew_scene(&e, &icons, SHOWN_AT);
+    let off = load_renderer(&config_sub(false, false)).unwrap().render(&scene);
+    let mut r = load_renderer(&config_sub(false, true)).unwrap();
+    assert!(r.sub_map_enabled());
+    let (x, y) = geo::project(140.8, 35.7);
+    let aspect = draw::SUB_RECT.2 / draw::SUB_RECT.3;
+    r.set_sub_view(Some(camera::fit_box(camera::MapBox::around(x, y, 150.0), aspect)));
+    let on = r.render(&scene);
+    let (mut outside, mut inside) = (0, 0);
+    for (i, (a, b)) in off.pixels().iter().zip(on.pixels()).enumerate() {
+        match (a == b, in_sub_rect(i)) {
+            (false, false) => outside += 1,
+            (false, true) => inside += 1,
+            _ => {}
+        }
+    }
+    assert_eq!(outside, 0);
+    assert!(inside > 0);
+}
+
+#[test]
+fn the_sub_map_does_not_add_redraws() {
+    let ev = chiba_events();
+    let icons = Icons::new();
+    for zoom in [false, true] {
+        let count = |sub| {
+            let mut st = Stepper::new(load_renderer(&config_sub(zoom, sub)).unwrap());
+            (0..50)
+                .filter(|k| st.step(&input(&ev, SHOWN_AT + k * 200, &icons)).is_some())
+                .count()
+        };
+        assert_eq!(count(true), count(false), "zoom={zoom}");
+    }
+}
+
+fn quake_event(received_ms: u64) -> Event {
+    use crate::quake::{Quake, QuakeInfoType};
+    Event {
+        id: "q".into(),
+        source: "test".into(),
+        received_at_ms: received_ms,
+        body: EventBody::Quake(Quake {
+            info_type: QuakeInfoType::ScaleAndDestination,
+            origin_time: "2026/10/01 21:26:50".into(),
+            origin_time_ms: Some(T0),
+            issued_at: "2026/10/01 21:30:00".into(),
+            hypocenter: Some(Hypocenter {
+                name: "千葉県北東部".into(),
+                latitude: Some(35.7),
+                longitude: Some(140.8),
+                depth_km: Some(40),
+                magnitude: Some(4.5),
+            }),
+            max_scale: Scale::S4,
+            domestic_tsunami: "None".into(),
+            points: vec![],
+            pref_max: vec![PrefScale {
+                pref: "千葉県".into(),
+                scale: Scale::S4,
+            }],
+            comment: String::new(),
+        }),
+    }
+}
+
+#[test]
+fn the_sub_map_shows_the_latest_quake_when_calm() {
+    let received = (T0 + 60_000) as u64;
+    let ev = [quake_event(received)];
+    let icons = Icons::new();
+    // 落ち着きの時間 (3 分) を過ぎた後 = 平時
+    let now = received + 10 * 60_000;
+    let s4 = model::scale_color(Scale::S4);
+    let count = |sub| {
+        let mut st = Stepper::new(load_renderer(&config_sub(false, sub)).unwrap());
+        let o = st.step(&input(&ev, now, &icons)).unwrap();
+        assert!(o.calm);
+        let pm = st.still_pixmap().unwrap();
+        pm.pixels()
+            .iter()
+            .enumerate()
+            .filter(|&(i, p)| in_sub_rect(i) && [p.red(), p.green(), p.blue()] == s4)
+            .count()
+    };
+    let (on, off) = (count(true), count(false));
+    assert!(on > off + 500, "{on} {off}");
+}
+
+#[test]
+fn sub_map_is_read_from_the_config_and_defaults_to_off() {
+    assert!(
+        !toml::from_str::<BroadcastConfig>("source = \"native\"")
+            .unwrap()
+            .sub_map
+    );
+    assert!(
+        toml::from_str::<BroadcastConfig>("source = \"native\"\nsub_map = true")
+            .unwrap()
+            .sub_map
+    );
+    assert!(!BroadcastConfig::default().sub_map);
 }
