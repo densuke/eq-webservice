@@ -4,6 +4,8 @@
 Description=eq-webservice ライブ配信 (eq-server broadcast -> YouTube)
 After=eq-server.service network-online.target
 Wants=network-online.target
+# eq-server を再起動・停止すると一緒に再起動・停止する (同じバイナリなので、差し替えで版をそろえる)
+PartOf=eq-server.service
 
 [Service]
 Type=simple

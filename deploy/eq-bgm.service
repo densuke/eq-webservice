@@ -6,6 +6,8 @@
 [Unit]
 Description=eq-server bgm-send (平時の BGM を Icecast へ送る)
 After=network-online.target icecast2.service
+# eq-server を再起動・停止すると一緒に再起動・停止する (同じバイナリなので、差し替えで版をそろえる)
+PartOf=eq-server.service
 
 [Service]
 Type=simple
