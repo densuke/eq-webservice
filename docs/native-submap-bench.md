@@ -64,3 +64,34 @@ quake zoom=true  sub=true : render med 3.55 p95 4.58 / step med 2.46 p95 6.31 me
 - zoom=on の EEW だけは、表示範囲が動く間毎コマ `render()` が走るので、サブも毎コマ描かれて +0.006 コア秒 (コア 0.6 %)。全体は 0.027 コア秒 / 映像秒。
 - p95 は、1 秒に 1 回の描き直しのコマで跳ねる (step p95 で +1 〜 2 ms)。5fps なら 1 コマ 200 ms のうち 1 〜 8 ms で、間に合わなくなる水準ではない。
 - Mac (M4) の値なので、n2 (専用だが遅い CPU) の倍率は Task 3 で測る。n2 は Mac より数倍〜十数倍遅い前提で見積もること。
+
+## n2 での計測 (2026-10-06 14:04〜14:09 JST)
+
+- 機械: n2 (e2-micro 相当、2 vCPU は 1 コアのハイパースレッド)。配信 (eq-broadcast、fps 5 / fps_calm 2、zoom なし) を流したまま。
+- 手順: Mac で `cargo zigbuild --release --target x86_64-unknown-linux-gnu.2.35 --tests -p eq-server` で test バイナリを作って n2 へ送り、次で流した。
+
+```
+systemd-run --user --wait --collect -p CPUQuota=25% -p CPUWeight=1 -p Nice=19 -p MemoryMax=150M -p MemorySwapMax=0 -p RuntimeMaxSec=300 \
+  -E EQ_NATIVE_MAP_DIR=$HOME/work/eq-webservice/current/web/dist -E EQ_NATIVE_FONT=/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc \
+  /tmp/eq-subbench sub_map_cost --ignored --nocapture --test-threads=1
+```
+
+- 5 分の上限で打ち切られ、12 場面のうち 7 場面まで出た (CPU 時間 62 秒、メモリの最大 67MB)。
+- CPUQuota で絞っているので、平均と p95 は待たされた時間を含み、意味が無い。比べられるのは中央値 (絞られなかったコマ) だけ。
+
+```
+calm  zoom=false sub=false: render med 1.21 p95 68.39 / step med 0.00 p95 6.73 mean 15.31 ms
+calm  zoom=false sub=true : render med 5.14 p95 985.45 / step med 0.00 p95 100.47 mean 36.84 ms
+calm  zoom=true  sub=false: render med 1.20 p95 96.61 / step med 0.00 p95 94.64 mean 37.41 ms
+calm  zoom=true  sub=true : render med 5.37 p95 988.35 / step med 0.00 p95 237.72 mean 53.81 ms
+eew   zoom=false sub=false: render med 2.03 p95 229.26 / step med 5.54 p95 902.16 mean 112.30 ms
+eew   zoom=false sub=true : render med 11.09 p95 1206.46 / step med 7.02 p95 900.62 mean 147.44 ms
+eew   zoom=true  sub=false: render med 85.87 p95 998.52 / step med 222.40 p95 1037.05 mean 380.27 ms
+```
+
+要約 (中央値で):
+
+- サブの地図は n2 で `render()` 1 回あたり平時 +3.9 ms、EEW 中 +9.1 ms (Mac の約 4〜6 倍)。
+- n2 の配信は zoom なしなので描き直しは 1 秒に 1 回。増えるのは 1 秒あたり 4〜9 ms = コアの 0.4〜0.9 %。
+- 計測の間 (14:04〜14:10) に配信の `busy chip` は 0 回。
+- zoom=on の EEW (85.9 ms/回、毎コマ) は、サブの地図が無くても n2 では重い。配信で zoom を有効にする話は別に考える。
