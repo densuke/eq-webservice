@@ -238,8 +238,8 @@ export class JapanMap {
     if (panZoom) this.installPanZoom();
     new ResizeObserver(() => this.applyView()).observe(this.svg);
     if (bandWatch) {
-      // 横向きでは帯が地図の上の札になる。出入りや中身で大きさが変わったら、天気の札を置き直す
-      const bands = new ResizeObserver(() => document.body.dataset.layout === "landscape" && this.thinCities());
+      // 帯が地図の上の札になる (横向き・trial)。出入りや中身で大きさが変わったら、天気の札を置き直す
+      const bands = new ResizeObserver(() => document.querySelector(".ld-layer [data-variant]") && this.thinCities());
       for (const el of document.querySelectorAll("#eew-banner, #tsunami-banner, #warn-banner")) bands.observe(el);
     }
   }
@@ -801,12 +801,12 @@ export class JapanMap {
   }
 
   /**
-   * 札が地図の上の重ね物 (凡例・別枠・案内・時計、横向きでは帯の札) や、優先の高い札と重なるときは海の上へ逃がし、置けなければ出さない
-   * (地図の大きさや範囲、凡例の行、横向きの帯が変わるたびに置き直す)
+   * 札が地図の上の重ね物 (凡例・別枠・案内・時計、帯の札) や、優先の高い札と重なるときは海の上へ逃がし、置けなければ出さない
+   * (地図の大きさや範囲、凡例の行、帯の札が変わるたびに置き直す)
    */
   thinCities(): void {
     const blockers = document.querySelectorAll(
-      ".legend, .clock-panel, .weather-caption:not([hidden]), .inset:not([hidden]), body[data-layout=landscape] .ld-layer [data-variant]:not([hidden])",
+      ".legend, .clock-panel, .weather-caption:not([hidden]), .inset:not([hidden]), .ld-layer [data-variant]:not([hidden])",
     );
     thinCityLayer(this.cityLayer, [...blockers], this.svg);
   }
