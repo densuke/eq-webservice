@@ -127,6 +127,11 @@ impl Frame {
         })
     }
 
+    /// 面の枠のマスク (寄った本図・サブの地図。別枠・日本全体の本図は無し)
+    pub fn mask(&self) -> Option<&Mask> {
+        self.clip.as_ref().map(|c| &*c.mask)
+    }
+
     /// 別枠か
     pub fn is_inset(&self) -> bool {
         self.inset.is_some()
