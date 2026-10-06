@@ -82,7 +82,8 @@ export const app = {
   /** 新しく届いた地震をしばらく優先して見せる (巡回より先) */
   tourHold: null as { key: string; until: number } | null,
   /** 「警報・注意報」ボタンで平時に戻した時刻。これ以前に届いた地震の情報は表示を終えたものとする */
-  calmSince: 0,
+  // -Infinity: 1970 年より前の記録の場面では受信時刻が負になるため (0 だと地震が平時に戻した後の扱いになる)
+  calmSince: -Infinity,
 };
 
 /** main.ts にある処理。ほかのモジュールからはこれを通して呼ぶ (循環参照を避けるため) */

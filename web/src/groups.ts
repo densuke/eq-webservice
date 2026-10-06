@@ -54,7 +54,8 @@ export class GroupStore {
     const key = e.kind === "quake" ? this.quakeKey(e) : groupKey(e);
     let g = this.groups.get(key);
     if (!g) {
-      g = { key, kind: e.kind, updatedAt: 0, events: [] } as Group;
+      // -Infinity: 1970 年より前の記録の場面では受信時刻が負になる (0 だと全グループが 0 に潰れる)
+      g = { key, kind: e.kind, updatedAt: -Infinity, events: [] } as Group;
       this.groups.set(key, g);
     }
     (g.events as EqEvent[]).push(e);

@@ -46,8 +46,8 @@ SCENES = {
 SOURCE = "気象庁 (震度データベース)"
 
 
-def p2p_quake(qid: str, issued: datetime, kind: str, hyp: dict, pts: list[dict]) -> dict:
-    return {
+def p2p_quake(qid: str, issued: datetime, kind: str, hyp: dict, pts: list[dict], comment: str = "") -> dict:
+    q = {
         "code": 551,
         "id": qid,
         "issue": {"source": "気象庁", "time": issued.strftime(FMT), "type": kind, "correct": "None"},
@@ -67,6 +67,8 @@ def p2p_quake(qid: str, issued: datetime, kind: str, hyp: dict, pts: list[dict])
         },
         "points": pts,
     }
+    # 画面の詳細に出る欄 (空なら付けず、既存の場面のデータは変わらない)
+    return {**q, "comments": {"freeFormComment": comment}} if comment else q
 
 
 def build(sid: str, scene: dict, current: dict[str, list]) -> list[dict]:
