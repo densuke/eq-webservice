@@ -45,14 +45,22 @@ export interface Layout {
   when?: { minWidth?: number; maxWidth?: number; minHeight?: number; maxHeight?: number };
   /** ページ全体がスクロールする (縦に積む中の "fill" は "auto" として扱う) */
   scroll?: "page";
+  /** 画面の大きさによる自動選択から外す (URL の ?layout=名前 で指したときだけ使う) */
+  manual?: true;
   root: LayoutNode;
 }
 
-/** 画面の大きさで定義を選ぶ。どれにも合わなければ先頭 */
+/** 画面の大きさで定義を選ぶ (manual は選ばない)。どれにも合わなければ manual でない先頭 */
 export function pickLayout(layouts: readonly Layout[], width: number, height: number): Layout {
   const ok = ({ minWidth, maxWidth, minHeight, maxHeight }: NonNullable<Layout["when"]>) =>
     (minWidth == null || width >= minWidth) && (maxWidth == null || width <= maxWidth) && (minHeight == null || height >= minHeight) && (maxHeight == null || height <= maxHeight);
-  return layouts.find((l) => ok(l.when ?? {})) ?? layouts[0];
+  const auto = layouts.filter((l) => !l.manual);
+  return auto.find((l) => ok(l.when ?? {})) ?? auto[0];
+}
+
+/** forced (URL の ?layout=) と同じ名前の定義があればそれ (manual でも)。無い・空・null なら画面の大きさで選ぶ */
+export function chooseLayout(layouts: readonly Layout[], width: number, height: number, forced: string | null): Layout {
+  return (forced ? layouts.find((l) => l.name === forced) : undefined) ?? pickLayout(layouts, width, height);
 }
 
 /** 定義の中に置かれた部品の名前を、重ね物と入れ子の積みを含めて出てきた順に返す (重複もそのまま) */
@@ -149,17 +157,19 @@ export function checkLayouts(data: unknown, slots: readonly string[], boxes: rea
   keys(data, "定義ファイル", ["version", "layouts"]);
   if (data.version !== 1) errs.push(`version は 1 (いまは ${JSON.stringify(data.version)})`);
   if (!Array.isArray(data.layouts) || data.layouts.length === 0) return [...errs, "layouts が空か、配列でない"];
+  if (data.layouts.every((l) => isObj(l) && l.manual === true)) errs.push("manual でない定義が 1 つも無い");
   data.layouts.forEach((l, i) => {
     const at = `layouts[${i}]`;
     if (!isObj(l)) return void errs.push(`${at}: オブジェクトでない`);
     const name = `${at} (${String(l.name)})`;
-    keys(l, name, ["name", "when", "scroll", "root"]);
+    keys(l, name, ["name", "when", "scroll", "manual", "root"]);
     if (typeof l.name !== "string" || !l.name) errs.push(`${at}: name が無い`);
     if (l.when !== undefined) {
       if (!isObj(l.when)) errs.push(`${name}: when がオブジェクトでない`);
       else for (const [k, v] of Object.entries(l.when)) if (!WHEN.includes(k) || typeof v !== "number") errs.push(`${name}: when.${k} は使えない (${WHEN.join("・")} に数)`);
     }
     if (l.scroll !== undefined && l.scroll !== "page") errs.push(`${name}: scroll は "page" だけ`);
+    if (l.manual !== undefined && l.manual !== true) errs.push(`${name}: manual は true だけ`);
     const placed: string[] = [];
     node(l.root, `${name}.root`, placed);
     for (const s of slots) {

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { type LayoutNode, LAYOUTS, REQUIRED_SLOTS, checkLayouts, flexOf, pickLayout, slotsOf } from "./layout.ts";
+import { type Layout, type LayoutNode, LAYOUTS, REQUIRED_SLOTS, checkLayouts, chooseLayout, flexOf, pickLayout, slotsOf } from "./layout.ts";
 import { BOXES, SLOTS } from "./layout-dom.ts";
 
 test("the layout is picked by the screen size (same 800px boundary as the CSS)", () => {
@@ -14,6 +14,21 @@ test("the layout is picked by the screen size (same 800px boundary as the CSS)",
   assert.equal(pickLayout(LAYOUTS, 844, 390).name, "landscape");
   assert.equal(pickLayout(LAYOUTS, 801, 480).name, "landscape");
   assert.equal(pickLayout(LAYOUTS, 801, 481).name, "regular");
+});
+
+test("a manual layout is chosen only by name (?layout=)", () => {
+  const ls = [
+    { name: "trial", manual: true, root: { slot: "main" } },
+    { name: "wide", when: { minWidth: 801 }, root: { slot: "main" } },
+    { name: "narrow", root: { slot: "main" } },
+  ] as Layout[];
+  assert.equal(pickLayout(ls, 1440, 900).name, "wide");
+  assert.equal(pickLayout(ls, 390, 844).name, "narrow");
+  // どれにも合わないときも manual は選ばない
+  assert.equal(pickLayout([ls[0], ls[1]], 390, 844).name, "wide");
+  assert.equal(chooseLayout(ls, 390, 844, "trial").name, "trial");
+  assert.equal(chooseLayout(ls, 390, 844, "wide").name, "wide");
+  for (const f of [null, "", "nope"]) assert.equal(chooseLayout(ls, 390, 844, f).name, "narrow", String(f));
 });
 
 test("sizes become flex values", () => {
@@ -102,6 +117,10 @@ test("the check names what is wrong in a layout file", () => {
   }
   assert.match(broken((d) => (corner(d).items[0].minHeight = "fill")), /minHeight .* は使えない/);
   assert.match(broken((d) => (corner(d).margin = "4px")), /知らないキー「margin」/);
+  // 手動専用の印
+  assert.equal(broken((d) => (d.layouts[1].manual = true)), "");
+  assert.match(broken((d) => (d.layouts[1].manual = "yes")), /manual は true だけ/);
+  assert.match(broken((d) => d.layouts.forEach((l: any) => (l.manual = true))), /manual でない定義が 1 つも無い/);
   // 大きさ・向き・容器・隅・条件・キーの書き間違い
   for (const size of ["380", "big", "fill:x", "1px; color: red", ""]) {
     assert.match(broken((d) => (d.layouts[1].root.children[2].children[1].size = size)), /大きさ .* は使えない/, size);

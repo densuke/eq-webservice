@@ -1,7 +1,7 @@
 // レイアウトの定義 (layout.ts) どおりに、いまのページの要素を並べ直す。
 // 部品の要素は index.html (と JapanMap が作る別枠) にあるものをそのまま使い、置き場所と大きさだけを決める。
 
-import { type Layout, type LayoutNode, type Part, type Stack, LAYOUTS, checkLayouts, flexOf, pickLayout, slotsOf } from "./layout.ts";
+import { type Layout, type LayoutNode, type Part, type Stack, LAYOUTS, checkLayouts, chooseLayout, flexOf, slotsOf } from "./layout.ts";
 
 /** 部品の名前 → 要素 (複数なら順に並べる) */
 export const SLOTS: Record<string, string> = {
@@ -120,7 +120,7 @@ let layouts: readonly Layout[] = LAYOUTS;
 /** 画面の大きさに合う定義で並べる。前と同じ定義なら何もしない。
  *  部品や容器が見つからなければ、ログを出していまの並びのままにする (ページ全体を止めない) */
 export function applyLayout(): void {
-  const next = pickLayout(layouts, window.innerWidth, window.innerHeight);
+  const next = chooseLayout(layouts, window.innerWidth, window.innerHeight, new URLSearchParams(location.search).get("layout"));
   if (next === current) return;
   const lack = missing(next.root);
   if (lack.length) {
