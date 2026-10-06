@@ -94,6 +94,26 @@ export function flexOf(size: Size | undefined, pageColumn: boolean): string {
 /** 組み込みの定義 (layout.json)。eq-server の定義ファイル (GET api/layout) が読めない・正しくないときにも使う */
 export const LAYOUTS: readonly Layout[] = (BUILTIN as unknown as { layouts: Layout[] }).layouts;
 
+/** 保持時間の規則 */
+export interface HoldRule {
+  /** この震度以下に当てはまる (無ければ残り全部) */
+  maxScale?: number;
+  sec: number;
+}
+
+/** サブの地図 (右上の最近の地震) の設定 */
+export interface SubMapConfig {
+  /** 上から順に、最大震度が maxScale 以下の最初の規則。最後は maxScale なし */
+  hold: HoldRule[];
+  /** 最大震度が分からない (0 以下) とき */
+  unknownSec: number;
+  /** 保持時間を過ぎたあとの濃さ (0〜1) */
+  fadedAlpha: number;
+}
+
+/** 組み込みの設定 (layout.json の subMap) */
+export const SUB_MAP: SubMapConfig = (BUILTIN as unknown as { subMap: SubMapConfig }).subMap;
+
 const CORNERS: readonly string[] = ["top-left", "top-right", "bottom-left", "bottom-right", "top", "bottom"];
 const WHEN: readonly string[] = ["minWidth", "maxWidth", "minHeight", "maxHeight"];
 /** 0 か、数 + 単位 */
@@ -158,9 +178,34 @@ export function checkLayouts(data: unknown, slots: readonly string[], boxes: rea
     }
   };
 
+  const num = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+  const subMap = (s: unknown): void => {
+    if (!isObj(s)) return void errs.push("subMap: オブジェクトでない");
+    keys(s, "subMap", ["hold", "unknownSec", "fadedAlpha"]);
+    if (!num(s.unknownSec) || s.unknownSec <= 0) errs.push("subMap.unknownSec: 0 より大きい数");
+    if (!num(s.fadedAlpha) || s.fadedAlpha < 0 || s.fadedAlpha > 1) errs.push("subMap.fadedAlpha: 0〜1 の数");
+    if (!Array.isArray(s.hold) || s.hold.length === 0) return void errs.push("subMap.hold: 空でない配列");
+    const last = s.hold.length - 1;
+    let prev = -Infinity;
+    s.hold.forEach((r, i) => {
+      const at = `subMap.hold[${i}]`;
+      if (!isObj(r)) return void errs.push(`${at}: オブジェクトでない`);
+      keys(r, at, ["maxScale", "sec"]);
+      if (!num(r.sec) || r.sec <= 0) errs.push(`${at}: sec は 0 より大きい数`);
+      if (i === last) {
+        if (r.maxScale !== undefined) errs.push(`${at}: 最後の規則に maxScale は付けない`);
+      } else if (!num(r.maxScale)) errs.push(`${at}: 最後以外は maxScale (数) が要る`);
+      else {
+        if (r.maxScale <= prev) errs.push(`${at}: maxScale は上の規則より大きく`);
+        prev = r.maxScale;
+      }
+    });
+  };
+
   if (!isObj(data)) return ["定義ファイルが JSON のオブジェクトでない"];
-  keys(data, "定義ファイル", ["version", "layouts"]);
+  keys(data, "定義ファイル", ["version", "layouts", "subMap"]);
   if (data.version !== 1) errs.push(`version は 1 (いまは ${JSON.stringify(data.version)})`);
+  if (data.subMap !== undefined) subMap(data.subMap);
   if (!Array.isArray(data.layouts) || data.layouts.length === 0) return [...errs, "layouts が空か、配列でない"];
   if (data.layouts.every((l) => isObj(l) && l.manual === true)) errs.push("manual でない定義が 1 つも無い");
   data.layouts.forEach((l, i, all) => {

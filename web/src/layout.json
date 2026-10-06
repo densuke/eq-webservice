@@ -1,6 +1,17 @@
 {
   "version": 1,
   "note": "画面の並びの定義 (eq-server の [layout] file で差し替えられる)。書式は docs/ui-spec/layout-system.html の「定義ファイル」。上から順に、when に最初に合うものを使う",
+  "subMap": {
+    "note": "右上のサブの地図 (試験定義 trial)。最後の情報から hold の時間ははっきり、過ぎたら fadedAlpha の濃さで残す。震度は 10=1, 20=2, 30=3, 40=4, 45=5弱, 50=5強, 55=6弱, 60=6強, 70=7",
+    "hold": [
+      {"maxScale": 20, "sec": 60},
+      {"maxScale": 40, "sec": 180},
+      {"maxScale": 50, "sec": 600},
+      {"sec": 900}
+    ],
+    "unknownSec": 180,
+    "fadedAlpha": 0.4
+  },
   "layouts": [
     {
       "name": "landscape",

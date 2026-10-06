@@ -1,7 +1,7 @@
 // レイアウトの定義 (layout.ts) どおりに、いまのページの要素を並べ直す。
 // 部品の要素は index.html (と JapanMap が作る別枠) にあるものをそのまま使い、置き場所と大きさだけを決める。
 
-import { type Layout, type LayoutNode, type Part, type Stack, LAYOUTS, boxesOf, checkLayouts, chooseLayout, flexOf, slotsOf } from "./layout.ts";
+import { type Layout, type LayoutNode, type Part, type Stack, type SubMapConfig, LAYOUTS, SUB_MAP, boxesOf, checkLayouts, chooseLayout, flexOf, slotsOf } from "./layout.ts";
 
 /** 部品の名前 → 要素 (複数なら順に並べる) */
 export const SLOTS: Record<string, string> = {
@@ -123,6 +123,12 @@ function missing(node: LayoutNode): string[] {
 let current: Layout | null = null;
 /** 使う定義 (はじめは組み込み。定義ファイルが読めたらそれ) */
 let layouts: readonly Layout[] = LAYOUTS;
+let subMap: SubMapConfig = SUB_MAP;
+
+/** いま使うサブの地図の設定 (はじめは組み込み。定義ファイルが読めて正しければそれ) */
+export function subMapConfig(): SubMapConfig {
+  return subMap;
+}
 
 /** 画面の大きさに合う定義で並べる。前と同じ定義なら何もしない。
  *  部品や容器が見つからなければ、ログを出していまの並びのままにする (ページ全体を止めない) */
@@ -172,6 +178,7 @@ export async function loadLayoutFile(): Promise<void> {
       console.error(`layout: 定義ファイルが正しくないので、組み込みの定義を使う\n${errs.join("\n")}`);
       return;
     }
+    subMap = (data as { subMap?: SubMapConfig }).subMap ?? SUB_MAP;
     const next = (data as { layouts: Layout[] }).layouts;
     if (JSON.stringify(next) === JSON.stringify(layouts)) return;
     layouts = next;
