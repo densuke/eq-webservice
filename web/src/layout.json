@@ -15,7 +15,7 @@
   "layouts": [
     {
       "name": "landscape",
-      "note": "横向きのスマホ (幅 801 以上・高さ 480 以下。高さの低い PC のウィンドウも)。高さが足りないので、帯を地図の左上に重ねる札にする (EEW は 1 件ずつ巡回)。別枠と凡例は横に並べる。上部バーは細く (CSS)",
+      "note": "横向きのスマホ (幅 801 以上・高さ 480 以下。高さの低い PC のウィンドウも)。高さが足りないので、帯を地図の左上に重ねる札にする (EEW は 1 件ずつ巡回)。別枠と凡例は横に並べる。案内と通知は時計と重ならないよう左下へ。上部バーは細く (CSS)",
       "when": {"minWidth": 801, "maxHeight": 480},
       "root": {
         "dir": "column",
@@ -38,8 +38,8 @@
                       "countdown"
                     ]
                   },
-                  "bottom-right": {"flow": "column", "items": ["ogasawara", "clock"]},
-                  "bottom": {"flow": "column", "items": ["toast", "hint"]}
+                  "bottom-left": {"flow": "column", "items": ["toast", "hint"]},
+                  "bottom-right": {"flow": "column", "items": ["ogasawara", "clock"]}
                 }
               },
               {

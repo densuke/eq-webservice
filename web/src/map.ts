@@ -801,12 +801,12 @@ export class JapanMap {
   }
 
   /**
-   * 札が地図の上の重ね物 (凡例・別枠・案内・時計、帯の札) や、優先の高い札と重なるときは海の上へ逃がし、置けなければ出さない
+   * 札が地図の上の重ね物 (凡例・別枠・案内・時計、帯の札、横向きのスマホの左下の案内と通知) や、優先の高い札と重なるときは海の上へ逃がし、置けなければ出さない
    * (地図の大きさや範囲、凡例の行、帯の札が変わるたびに置き直す)
    */
   thinCities(): void {
     const blockers = document.querySelectorAll(
-      ".legend, .clock-panel, .weather-caption:not([hidden]), .inset:not([hidden]), .ld-layer [data-variant]:not([hidden])",
+      ".legend, .clock-panel, .weather-caption:not([hidden]), .inset:not([hidden]), .ld-layer [data-variant]:not([hidden]), .ld-bottom-left > :is(.sound-hint, .tour-toast):not([hidden])",
     );
     thinCityLayer(this.cityLayer, [...blockers], this.svg);
   }
