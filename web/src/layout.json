@@ -104,7 +104,7 @@
     },
     {
       "name": "compact",
-      "note": "スマホ縦 (幅 800 以下)。縦に積み、ページ全体がスクロール。別枠の右に案内、下に凡例 (地図が細いと凡例が九州に重なるため)。カウントダウンは時計の上に積む (横に並べると時計と重なる)",
+      "note": "スマホ縦 (幅 800 以下)。縦に積み、ページ全体がスクロール。別枠の右に案内、下に凡例 (地図が細いと凡例が九州に重なるため)。カウントダウンは時計の上に積む (横に並べると時計と重なる)。案内と通知は時計と重ならないよう左下へ (案内は CSS で幅を絞って 2 行)",
       "when": {"maxWidth": 800},
       "scroll": "page",
       "root": {
@@ -123,7 +123,7 @@
                 "overlays": {
                   "top-left": {"flow": "column", "gap": "8px", "items": [{"flow": "row", "gap": "4px", "minHeight": "140px", "items": ["inset", "caption"]}, "legend"]},
                   "bottom-right": {"flow": "column", "pad": "6px", "items": ["ogasawara", "countdown", "clock"]},
-                  "bottom": {"flow": "column", "items": ["toast", "hint"]}
+                  "bottom-left": {"flow": "column", "items": ["toast", "hint"]}
                 }
               },
               {

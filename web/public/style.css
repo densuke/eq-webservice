@@ -352,6 +352,8 @@ body[data-layout="landscape"] .topbar .follow, body[data-layout="landscape"] .to
 [data-variant="compact"].warn-banner { padding: 3px 10px; font-size: 12px; }
 body[data-layout="landscape"] .inset-okinawa { height: 140px; }
 body[data-layout="landscape"] .inset-ogasawara { height: 100px; }
+/* スマホ縦: 案内は左下。右下の時計 (幅 141px) に掛からないよう、幅を絞って 2 行にする */
+body[data-layout="compact"] .sound-hint { max-width: calc(100vw - 170px); border-radius: 18px; text-align: left; }
 body[data-layout="trial"] .ld-box:has(> #clock) { border-top: 1px solid var(--line); background: var(--panel); align-items: center; gap: 12px; padding: 0 12px; }
 body[data-layout="trial"] .banner { border-top: none; }
 body[data-layout="trial"] #demo-panel { max-height: 25vh; overflow: auto; }
