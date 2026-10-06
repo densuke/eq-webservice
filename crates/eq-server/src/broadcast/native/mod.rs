@@ -146,15 +146,29 @@ fn check_replay(kind: Option<&str>, test: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// 並びの定義の取得を試す回数と間隔 (サーバの起動待ち)
+const LAYOUT_TRIES: u32 = 5;
+const LAYOUT_RETRY: Duration = Duration::from_secs(2);
+
 /// session を始めるたびに (やり直しのたびに) 1 回、サーバの並びの定義 (GET /api/layout) を読み、平時用と地震の画面用の 2 つを割り付ける。
 /// 取れない・使えないときは組み込みの定義 (警告は読むたびに出る)。組み込みも使えなければエラー
 pub async fn load_layouts(cfg: &BroadcastConfig) -> anyhow::Result<Placed> {
     let url = format!("{}/api/layout", cfg.server.trim_end_matches('/'));
-    let json = async {
-        let client = crate::net::client(Duration::from_secs(10))?;
-        crate::net::text(client.get(&url)).await
+    // eq-server と同時に再起動される (PartOf) ので、サーバの起動を少し待つ。2 秒おきに 5 回まで試す
+    let mut json = Err(anyhow::anyhow!("まだ読んでいない"));
+    for attempt in 0..LAYOUT_TRIES {
+        if attempt > 0 {
+            tokio::time::sleep(LAYOUT_RETRY).await;
+        }
+        json = async {
+            let client = crate::net::client(Duration::from_secs(10))?;
+            crate::net::text(client.get(&url)).await
+        }
+        .await;
+        if json.is_ok() {
+            break;
+        }
     }
-    .await;
     if let Err(e) = &json {
         tracing::warn!("broadcast: {url}: {e:#}");
     }

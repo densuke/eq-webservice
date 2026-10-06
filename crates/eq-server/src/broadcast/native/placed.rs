@@ -66,7 +66,7 @@ impl Placed {
             }
             fits
         });
-        Ok(Placed {
+        let placed = Placed {
             main: *c.get("main").context("部品 main の矩形が無い")?,
             topbar: c.get("topbar").copied(),
             detail: c.get("detail").copied(),
@@ -79,7 +79,43 @@ impl Placed {
             sub: q.get("map-sub").copied(),
             quake_detail: q.get("detail").copied(),
             quake_history: q.get("history").copied(),
-        })
+        };
+        placed.check_on_screen()?;
+        Ok(placed)
+    }
+
+    /// 割り付けた矩形が画面 (W×H) の中にあり、大きさが 1px 以上か。外れていれば誤り (呼び出し側が組み込みの定義に戻る)。
+    /// 固定の大きさの合計が画面を超えた・地図の幅が 0 になった、などの定義で、地図の無い絵を流し続けないため
+    fn check_on_screen(&self) -> Result<()> {
+        let (w, h) = (W as f32, H as f32);
+        let named = [
+            ("main", Some(self.main)),
+            ("topbar", self.topbar),
+            ("detail", self.detail),
+            ("history", self.history),
+            ("notice", self.notice),
+            ("credit", self.credit),
+            ("inset", self.inset),
+            ("legend", self.legend),
+            ("clock", self.clock),
+            ("map-sub", self.sub),
+            ("detail (地震)", self.quake_detail),
+            ("history (地震)", self.quake_history),
+        ];
+        for (name, r) in named {
+            let Some(r) = r else { continue };
+            let finite = [r.x, r.y, r.w, r.h].iter().all(|v| v.is_finite());
+            let inside = r.x >= -0.5 && r.y >= -0.5 && r.right() <= w + 0.5 && r.bottom() <= h + 0.5;
+            anyhow::ensure!(
+                finite && r.w >= 1.0 && r.h >= 1.0 && inside,
+                "部品 {name} の矩形 ({}, {}, {}, {}) が画面 {w}x{h} の中に収まらない",
+                r.x,
+                r.y,
+                r.w,
+                r.h
+            );
+        }
+        Ok(())
     }
 
     /// 地震の画面 (サブの地図が出る) なら、右の列を地震の画面の矩形にした Placed。平時はそのまま
