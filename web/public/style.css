@@ -350,6 +350,8 @@ body[data-layout="landscape"] .topbar .follow, body[data-layout="landscape"] .to
 .eew-count { flex: none; font-size: 11px; font-weight: 700; padding: 0 5px; border-radius: 4px; background: rgba(255, 255, 255, 0.25); }
 [data-variant="compact"].tsunami-banner { padding: 2px 8px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 [data-variant="compact"].warn-banner { padding: 3px 10px; font-size: 12px; }
+/* 詳細は上限の 40% だと「津波」の行が切れる (見出し・震源・津波で約 160px)。履歴を縮めて 60% まで使い、残りの本文・観測点は詳細の中でスクロール */
+body[data-layout="landscape"] .detail { max-height: 60%; }
 body[data-layout="landscape"] .inset-okinawa { height: 140px; }
 body[data-layout="landscape"] .inset-ogasawara { height: 100px; }
 body[data-layout="trial"] .ld-box:has(> #clock) { border-top: 1px solid var(--line); background: var(--panel); align-items: center; gap: 12px; padding: 0 12px; }
