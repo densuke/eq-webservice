@@ -176,7 +176,7 @@
                 "size": "fill",
                 "children": [
                   {"slot": "settings", "size": "auto"},
-                  {"slot": "detail", "size": "50%"},
+                  {"slot": "detail", "size": "fill"},
                   {"slot": "eew-panel", "size": "auto"},
                   {"slot": "history-head", "size": "auto"},
                   {"slot": "history", "size": "fill"},
