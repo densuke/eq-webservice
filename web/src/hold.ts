@@ -20,3 +20,11 @@ export function subMapState(now: number, g: { key: string; kind: string; updated
   if (!g || (g.kind !== "quake" && g.kind !== "eew")) return null;
   return { key: g.key, faded: now - g.updatedAt > holdMs(scale, cfg) };
 }
+
+/** サブの地図の署名を 2 つに分ける。paint は描き直し (塗り・震央・カメラ)、fade は薄さだけ。薄くなるだけで塗りを描き直さないため */
+export function subMapSigs(state: SubMapState | null, g: { updatedAt: number } | undefined, w: number, h: number, fadedAlpha: number): { paint: string; fade: string } {
+  return {
+    paint: `${state && g ? `${state.key}|${g.updatedAt}` : ""}|${w}x${h}`,
+    fade: state ? `${state.faded}|${fadedAlpha}` : "",
+  };
+}
