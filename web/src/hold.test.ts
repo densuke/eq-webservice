@@ -8,19 +8,21 @@ test("hold time follows the max scale (boundaries fall on the right side)", () =
   for (const [scale, sec] of want) assert.equal(holdMs(scale, SUB_MAP), sec * 1000, `scale ${scale}`);
 });
 
-test("subMapState: 保持時間の内は 1、過ぎたら 0.4 から 0 へ直線で薄くなり 0.05 刻みに切り下げ、終わったら null", () => {
+test("subMapState: 保持時間の内は 1、過ぎたら 0.4 から 0 へ直線で薄くなり 0.05 刻みに切り上げ、終わったら null", () => {
   const g = { key: "a", kind: "quake", updatedAt: 1000 };
-  // 震度 2: 保持 60 秒、fadedAlpha 0.4、fadeSec 120 (SUB_MAP)。alpha = 0.4 * (1 - (e - 60000) / 120000)
+  // 震度 2: 保持 60 秒、fadedAlpha 0.4、fadeSec 120 (SUB_MAP)。x = 0.4 * (1 - (e - 60000) / 120000)
   const at = (e: number, kind = "quake") => subMapState(1000 + e, { ...g, kind }, 20, SUB_MAP);
   assert.deepEqual(at(0), { key: "a", alpha: 1 });
   assert.deepEqual(at(60000), { key: "a", alpha: 1 });
-  assert.deepEqual(at(60001), { key: "a", alpha: 0.35 }); // 0.3999967 は 0.05 刻みに切り下げて 0.35
-  assert.deepEqual(at(60000 + 6000), { key: "a", alpha: 0.35 }); // 0.38
-  assert.deepEqual(at(60000 + 60000), { key: "a", alpha: 0.2 }); // ちょうど 0.2 (浮動小数の誤差で 0.15 にならない)
+  assert.deepEqual(at(60001), { key: "a", alpha: 0.4 }); // 0.3999967 は切り上げて 0.4 (保持の直後は fadedAlpha)
+  assert.deepEqual(at(60000 + 6000), { key: "a", alpha: 0.4 }); // 0.38
+  assert.deepEqual(at(60000 + 60000), { key: "a", alpha: 0.2 }); // ちょうど 0.2 (浮動小数の誤差で 0.25 にならない)
   assert.deepEqual(at(60000 + 90000), { key: "a", alpha: 0.1 }); // 0.1 ちょうど
-  assert.deepEqual(at(60000 + 119999), null); // 0.0000033 は切り下げて 0
-  assert.deepEqual(at(60000 + 100000), { key: "a", alpha: 0.05 }); // 0.0667
-  assert.equal(at(60000 + 111000), null); // 0.03 は切り下げて 0 = 消える
+  assert.deepEqual(at(60000 + 100000), { key: "a", alpha: 0.1 }); // 0.0667
+  assert.deepEqual(at(60000 + 111000), { key: "a", alpha: 0.05 }); // 0.03
+  assert.deepEqual(at(60000 + 119999), { key: "a", alpha: 0.05 }); // 0.0000033 でも 0.05 は残る
+  assert.equal(at(60000 + 120000), null); // x = 0 = 消える
+  assert.equal(at(60000 + 130000), null);
 });
 
 test("subMapState: 他の種別・地震なしは null、EEW も同じ", () => {

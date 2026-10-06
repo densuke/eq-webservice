@@ -19,14 +19,14 @@ export interface SubMapState {
 const ALPHA_STEP = 20;
 
 /** サブの地図に何を出すか。地震 (quake・eew) でなければ null。保持時間 + fadeSec を過ぎたら (濃さが 0 になったら) null = 消える。
- *  保持時間を過ぎたら fadedAlpha から 0 へ直線で薄くなり、0.05 刻みに切り下げる (1e-9 は 0.2 などが浮動小数の誤差で 1 段下がらないため) */
+ *  保持時間を過ぎたら fadedAlpha から 0 へ直線で薄くなり、0.05 刻みに切り上げる (保持の直後が fadedAlpha になり、終わる直前も 0.05 が残る。1e-9 は 0.2 などが浮動小数の誤差で 1 段上がらないため) */
 export function subMapState(now: number, g: { key: string; kind: string; updatedAt: number } | undefined, scale: number, cfg: SubMapConfig): SubMapState | null {
   if (!g || (g.kind !== "quake" && g.kind !== "eew")) return null;
   const past = now - g.updatedAt - holdMs(scale, cfg);
   if (past <= 0) return { key: g.key, alpha: 1 };
   const x = cfg.fadedAlpha * (1 - past / (cfg.fadeSec * 1000));
-  const alpha = Math.floor(x * ALPHA_STEP + 1e-9) / ALPHA_STEP;
-  return alpha > 0 ? { key: g.key, alpha } : null;
+  if (x <= 0) return null;
+  return { key: g.key, alpha: Math.ceil(x * ALPHA_STEP - 1e-9) / ALPHA_STEP };
 }
 
 /** サブの地図の署名を 2 つに分ける。paint は描き直し (塗り・震央・カメラ)、fade は濃さだけ。薄くなるだけで塗りを描き直さないため */
