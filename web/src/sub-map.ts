@@ -36,18 +36,18 @@ export function renderSubMap(now: number): void {
   const q = g && relatedQuake(g);
   const cfg = subMapConfig();
   const state = subMapState(now, q, q ? groupScale(q) : -1, cfg);
-  const sigs = subMapSigs(state, q, w, h, cfg.fadedAlpha);
+  const sigs = subMapSigs(state, q, w, h);
   if (sigs.paint !== lastPaint) {
     lastPaint = sigs.paint;
     lastFade = sigs.fade;
-    paint(state, q, cfg.fadedAlpha);
+    paint(state, q);
   } else if (sigs.fade !== lastFade) {
     lastFade = sigs.fade;
-    subMap.setFade(state?.faded ? cfg.fadedAlpha : 1);
+    subMap.setFade(state?.alpha ?? 1);
   }
 }
 
-function paint(state: SubMapState | null, q: Group | undefined, fadedAlpha: number): void {
+function paint(state: SubMapState | null, q: Group | undefined): void {
   if (!state || !q) {
     paintMap(subMap, undefined);
     subMap.setEpicenters([]);
@@ -58,7 +58,7 @@ function paint(state: SubMapState | null, q: Group | undefined, fadedAlpha: numb
   paintMap(subMap, q);
   const c = geoOf(q)?.center;
   subMap.setEpicenters(c ? [{ key: q.key, lat: c.lat, lon: c.lon, label: null, primary: true, scale: groupScale(q) }] : []);
-  subMap.setFade(state.faded ? fadedAlpha : 1);
+  subMap.setFade(state.alpha);
   const shaken = shakenGeo(q);
   const shakenBox = subMap.areaBox(shaken.areas) ?? subMap.prefBox(shaken.prefs);
   const [x, y] = c ? project(c.lon, c.lat) : [0, 0];

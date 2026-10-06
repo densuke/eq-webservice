@@ -114,6 +114,16 @@ export interface SubMapConfig {
   unknownSec: number;
   /** 保持時間を過ぎたあとの濃さ (0〜1) */
   fadedAlpha: number;
+  /** 保持時間を過ぎて fadedAlpha になったあと、0 まで薄くする秒数 (任意。無ければ DEFAULT_FADE_SEC) */
+  fadeSec: number;
+}
+
+/** 古い定義ファイルに fadeSec が無いときの値 */
+export const DEFAULT_FADE_SEC = 120;
+
+/** 定義ファイルの subMap に、任意のキー (fadeSec) の既定を補う */
+export function withSubMapDefaults(s: Omit<SubMapConfig, "fadeSec"> & { fadeSec?: number }): SubMapConfig {
+  return { ...s, fadeSec: s.fadeSec ?? DEFAULT_FADE_SEC };
 }
 
 /** 組み込みの設定 (layout.json の subMap) */
@@ -186,9 +196,10 @@ export function checkLayouts(data: unknown, slots: readonly string[], boxes: rea
   const num = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
   const subMap = (s: unknown): void => {
     if (!isObj(s)) return void errs.push("subMap: オブジェクトでない");
-    keys(s, "subMap", ["hold", "unknownSec", "fadedAlpha"]);
+    keys(s, "subMap", ["hold", "unknownSec", "fadedAlpha", "fadeSec"]);
     if (!num(s.unknownSec) || s.unknownSec <= 0) errs.push("subMap.unknownSec: 0 より大きい数");
     if (!num(s.fadedAlpha) || s.fadedAlpha < 0 || s.fadedAlpha > 1) errs.push("subMap.fadedAlpha: 0〜1 の数");
+    if (s.fadeSec !== undefined && (!num(s.fadeSec) || s.fadeSec <= 0)) errs.push("subMap.fadeSec: 0 より大きい数");
     if (!Array.isArray(s.hold) || s.hold.length === 0) return void errs.push("subMap.hold: 空でない配列");
     const last = s.hold.length - 1;
     let prev = -Infinity;

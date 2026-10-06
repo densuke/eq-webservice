@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { type Layout, type LayoutNode, LAYOUTS, REQUIRED_SLOTS, SUB_MAP, checkLayouts, chooseLayout, boxesOf, flexOf, pickLayout, slotsOf } from "./layout.ts";
+import { type Layout, type LayoutNode, LAYOUTS, REQUIRED_SLOTS, SUB_MAP, checkLayouts, withSubMapDefaults, chooseLayout, boxesOf, flexOf, pickLayout, slotsOf } from "./layout.ts";
 import { BOXES, SLOTS } from "./layout-dom.ts";
 
 test("the layout is picked by the screen size (same 800px boundary as the CSS)", () => {
@@ -158,6 +158,11 @@ test("the check names what is wrong in a layout file", () => {
   assert.match(broken((d) => delete d.subMap.hold[0].maxScale), /subMap\.hold\[0\]: 最後以外は maxScale/);
   assert.match(broken((d) => (d.subMap.unknownSec = 0)), /subMap\.unknownSec/);
   assert.match(broken((d) => (d.subMap.fadedAlpha = 1.5)), /subMap\.fadedAlpha/);
+  assert.equal(broken((d) => delete d.subMap.fadeSec), "");
+  const { fadeSec: _, ...old } = SUB_MAP;
+  assert.equal(withSubMapDefaults(old).fadeSec, 120);
+  assert.equal(withSubMapDefaults({ ...old, fadeSec: 30 }).fadeSec, 30);
+  for (const bad of [0, -1, "120", null]) assert.match(broken((d) => (d.subMap.fadeSec = bad)), /subMap\.fadeSec/);
   assert.match(broken((d) => (d.subMap.extra = 1)), /知らないキー「extra」/);
   // ファイルの形そのもの
   assert.deepEqual(check(null), ["定義ファイルが JSON のオブジェクトでない"]);
