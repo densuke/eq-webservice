@@ -287,7 +287,10 @@ async fn session(cfg: &BroadcastConfig, output: &[String], secrets: &[String]) -
         }
         Source::Native => {
             native::check_source(cfg).await?;
-            let layouts = native::load_layouts(cfg).await?;
+            // 組み込みの定義が使えない (起こらないはず): 繰り返しても直らないので、check_replay と同じく長く待つ
+            let layouts = native::load_layouts(cfg)
+                .await
+                .map_err(|e| Refused(format!("レイアウトの定義を使えません: {e:#}")))?;
             // 前の最後のコマから 30 秒以上あいていれば、途切れた札を出す (docs/broadcast-status.md)
             let prev = calm_state::read(&state_path).and_then(|s| s.last_frame_ms);
             last_frame.store(prev.unwrap_or(0), Ordering::Relaxed);

@@ -145,8 +145,8 @@ fn check_replay(kind: Option<&str>, test: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// 起動時に 1 回、サーバの並びの定義 (GET /api/layout) を読み、平時用と地震の画面用の 2 つを決める。
-/// 取れない・使えないときは組み込みの定義 (その警告は 1 回だけ)。組み込みも使えなければエラー
+/// session を始めるたびに (やり直しのたびに) 1 回、サーバの並びの定義 (GET /api/layout) を読み、平時用と地震の画面用の 2 つを決める。
+/// 取れない・使えないときは組み込みの定義 (警告は読むたびに出る)。組み込みも使えなければエラー
 pub async fn load_layouts(cfg: &BroadcastConfig) -> anyhow::Result<(LayoutDef, LayoutDef)> {
     let url = format!("{}/api/layout", cfg.server.trim_end_matches('/'));
     let json = async {
