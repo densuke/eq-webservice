@@ -17,6 +17,7 @@ mod held;
 mod hindsight;
 mod icon;
 mod layout_def;
+mod layout_resolve;
 pub(crate) mod model;
 mod notice;
 mod paint;
@@ -158,6 +159,12 @@ pub async fn load_layouts(cfg: &BroadcastConfig) -> anyhow::Result<(LayoutDef, L
     }
     let defs = layout_def::load(json.ok().as_deref(), &cfg.layout, &cfg.layout_quake)?;
     tracing::info!("broadcast: layout 平時={} 地震={}", defs.0.name, defs.1.name);
+    for def in [&defs.0, &defs.1] {
+        let skipped = layout_resolve::unsupported_slots(def);
+        if !skipped.is_empty() {
+            tracing::info!("broadcast: layout {} の部品 {skipped:?} は配信では描きません", def.name);
+        }
+    }
     Ok(defs)
 }
 
@@ -546,6 +553,8 @@ async fn bgm_title_loop(url: String, st: Shared) {
 
 #[cfg(test)]
 mod layout_def_tests;
+#[cfg(test)]
+mod layout_resolve_tests;
 #[cfg(test)]
 mod sound_tests;
 #[cfg(test)]

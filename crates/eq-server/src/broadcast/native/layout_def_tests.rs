@@ -133,3 +133,22 @@ fn a_broken_built_in_fails_the_start() {
 fn only_version_1_is_accepted() {
     assert!(parse(&json_with(r#"{"slot":"main"}"#).replace(r#""version":1"#, r#""version":2"#)).is_err());
 }
+
+#[test]
+fn definitions_whose_main_or_topbar_differ_are_not_used() {
+    let builtin = parse(BUILTIN).unwrap();
+    let want = (
+        pick(&builtin, "broadcast").unwrap().clone(),
+        pick(&builtin, "broadcast-quake").unwrap().clone(),
+    );
+    let same = r#"{"dir":"column","children":[{"slot":"topbar","size":"36px"},{"slot":"main"}]}"#;
+    let other = r#"{"dir":"column","children":[{"slot":"topbar","size":"40px"},{"slot":"main"}]}"#;
+    let json =
+        |q: &str| format!(r#"{{"version":1,"layouts":[{{"name":"a","root":{same}}},{{"name":"b","root":{q}}}]}}"#);
+    assert_eq!(load(Some(&json(same)), "a", "b").unwrap().1.name, "b");
+    // 上部バーの高さが違う → 組み込みの定義 (名前 a・b が無いのでエラー。ここでは broadcast の名前で確かめる)
+    let named = json(other)
+        .replace(r#""a""#, r#""broadcast""#)
+        .replace(r#""b""#, r#""broadcast-quake""#);
+    assert_eq!(load(Some(&named), "broadcast", "broadcast-quake").unwrap(), want);
+}

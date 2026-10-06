@@ -8,6 +8,8 @@ use std::collections::BTreeMap;
 use anyhow::{anyhow, bail, Context};
 use serde::Deserialize;
 
+use super::layout_resolve::resolve;
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LayoutFile {
@@ -229,7 +231,20 @@ pub fn pick<'a>(file: &'a LayoutFile, name: &str) -> anyhow::Result<&'a LayoutDe
 
 fn pick_both(json: &str, name: &str, quake: &str) -> anyhow::Result<(LayoutDef, LayoutDef)> {
     let file = parse(json)?;
-    Ok((pick(&file, name)?.clone(), pick(&file, quake)?.clone()))
+    let defs = (pick(&file, name)?.clone(), pick(&file, quake)?.clone());
+    // 平時と地震の画面で main と topbar の矩形が違うと、地図の絵や投影を作り直すことになる
+    let (w, h) = (super::draw::W as f32, super::draw::H as f32);
+    let (a, b) = (resolve(&defs.0, w, h)?, resolve(&defs.1, w, h)?);
+    for part in ["main", "topbar"] {
+        if a.get(part) != b.get(part) {
+            bail!(
+                "定義「{name}」と「{quake}」で部品「{part}」の矩形が違う ({:?} と {:?})",
+                a.get(part),
+                b.get(part)
+            );
+        }
+    }
+    Ok(defs)
 }
 
 /// 起動時: 取れた JSON (無ければ None) から平時用と地震の画面用の 2 つの定義を決める。
