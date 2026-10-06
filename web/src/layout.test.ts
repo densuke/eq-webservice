@@ -141,12 +141,12 @@ test("the check names what is wrong in a layout file", () => {
   assert.match(check({ version: 1, layouts: [] }).join(), /layouts が空/);
 });
 
-test("trial: 帯の代わりに EEW の常設パネルを置く手動専用の定義", () => {
+test("trial (manual) is the JDQ-shaped layout", () => {
   const t = chooseLayout(LAYOUTS, 1440, 900, "trial");
   assert.equal(t.name, "trial");
-  assert.ok(slotsOf(t.root).includes("eew-panel"));
-  assert.ok(!slotsOf(t.root).includes("banners"));
   assert.equal(pickLayout(LAYOUTS, 1440, 900).name, "regular");
+  const want = ["topbar", "main", "banners", "inset", "caption", "countdown", "legend", "ogasawara", "toast", "hint", "clock", "notice", "settings", "detail", "eew-panel", "history-head", "history", "credit"];
+  assert.deepEqual([...slotsOf(t.root)].sort(), [...want].sort());
 });
 
 test("boxesOf lists the boxes a layout uses, in order", () => {

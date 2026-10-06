@@ -195,7 +195,7 @@ body {
 .ep-title { font-size: 14px; font-weight: 700; }
 .ep-rows { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 8px 0 0; font-size: 13px; font-variant-numeric: tabular-nums; }
 .ep-rows dt { color: var(--muted); }
-.ep-rows dd { margin: 0; }
+.ep-rows dd { margin: 0; word-break: keep-all; overflow-wrap: anywhere; }
 .ep-more, .ep-message { margin-top: 6px; font-size: 13px; }
 .eew-panel[data-state="none"] .ep-title, .eew-panel[data-state="none"] .ep-message { color: var(--muted); }
 .eew-panel[data-state="active"] { background: var(--alert); color: #fff; }
@@ -351,3 +351,5 @@ body[data-layout="landscape"] .topbar .follow, body[data-layout="landscape"] .to
 [data-variant="compact"].warn-banner { padding: 3px 10px; font-size: 12px; }
 body[data-layout="landscape"] .inset-okinawa { height: 140px; }
 body[data-layout="landscape"] .inset-ogasawara { height: 100px; }
+body[data-layout="trial"] .ld-box:has(> #clock) { border-top: 1px solid var(--line); background: var(--panel); align-items: center; gap: 12px; padding: 0 12px; }
+body[data-layout="trial"] .banner { border-top: none; }
