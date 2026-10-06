@@ -140,7 +140,7 @@
           <tr><td><code>overlays</code></td><td>隅 (<code>top-left</code>・<code>top-right</code>・<code>bottom-left</code>・<code>bottom-right</code>・<code>top</code>・<code>bottom</code>) → <code>{ flow, items, gap?, pad?, minHeight? }</code>。<code>items</code> は部品の名前・<code>{ slot, variant }</code>・入れ子の <code>{ flow, items }</code></td></tr>
           <tr><td><code>gap</code> / <code>pad</code> / <code>minHeight</code></td><td>重ね物の積み (入れ子も含む) の、中身の間隔 / 内側の余白 / 最小の高さ。値は CSS の長さ (<code>pad</code> は 1〜4 個)。<code>minHeight</code> を付けた積みは、中身が全部隠れても場所を取る</td></tr>
           <tr><td><code>manual</code></td><td><code>true</code> の定義は、画面の大きさでは選ばれず、URL の <code>?layout=名前</code> でだけ選ばれる。<code>?layout=</code> は manual でない定義も名前で選べる。ただし定義に <code>when</code> があれば、それに合うときだけ (合わなければ自動の選び方に戻る)。名前の重複は誤り。manual でない定義は 1 つ以上要る</td></tr>
-          <tr><td><code>subMap</code> (最上位・任意)</td><td>サブの地図 (trial の右上) の設定 <code>{ hold, unknownSec, fadedAlpha }</code>。<code>hold</code> は上から順に、最大震度が <code>maxScale</code> 以下の最初の規則の <code>sec</code> 秒 (最後の規則だけ <code>maxScale</code> なし)。<code>unknownSec</code> は最大震度が分からないとき。<code>fadedAlpha</code> は保持時間を過ぎたあとの濃さ (0〜1)。既定は震度 2 以下 60 秒・4 以下 180 秒・5強以下 600 秒・それ以上 900 秒、不明 180 秒、濃さ 0.4。震度の値は 10=1, 20=2, 30=3, 40=4, 45=5弱, 50=5強, 55=6弱, 60=6強, 70=7</td></tr>
+          <tr><td><code>subMap</code> (最上位・任意)</td><td>サブの地図 (trial の右上) の設定 <code>{ hold, unknownSec, fadedAlpha, fadeSec }</code>。<code>hold</code> は上から順に、最大震度が <code>maxScale</code> 以下の最初の規則の <code>sec</code> 秒 (最後の規則だけ <code>maxScale</code> なし)。<code>unknownSec</code> は最大震度が分からないとき。<code>fadedAlpha</code> は保持時間を過ぎたあとの濃さ (0〜1)。<code>fadeSec</code> (任意、0 より大きい数。無ければ 120) は、そこから 0 まで薄くして消すまでの秒数。既定は震度 2 以下 60 秒・4 以下 180 秒・5強以下 600 秒・それ以上 900 秒、不明 180 秒、濃さ 0.4、フェード 120 秒。震度の値は 10=1, 20=2, 30=3, 40=4, 45=5弱, 50=5強, 55=6弱, 60=6強, 70=7</td></tr>
           <tr><td><code>note</code></td><td>説明 (どこにでも書ける。JSON にはコメントが無いため)</td></tr>
         </tbody>
       </table></div>
@@ -159,7 +159,10 @@
         <li>描くもの: EEW の予想 → 震度速報の区域の札 → 確定の観測点の点。揺れた範囲が広くても、区域と観測点で描く。</li>
         <li>表示中の地震へ一度に寄る (動きなし)。</li>
         <li>サブの地図が見えている間、左の地図は日本全体のまま (履歴で地震を選んだときだけ寄る)。P 波・S 波は日本全体の上に描く。</li>
-        <li>最後の情報から保持時間 (<code>subMap.hold</code>) の間ははっきり出し、過ぎたら同じ絵を <code>fadedAlpha</code> の濃さで薄く残す。</li>
+        <li>最後の情報から保持時間 (<code>subMap.hold</code>) の間ははっきり出し、過ぎたら同じ絵を <code>fadedAlpha</code> の濃さに薄め、さらに <code>fadeSec</code> 秒かけて 0 まで薄くして消える (消えたら日本全体、札と凡例も消える)。フェードの長さは震度によらず一定。</li>
+        <li>地図の左上に見出しの札 (最大震度・情報の種類・震源・M と深さ・発生時刻・津波)、右下に凡例 (出ている震度の段階・EEW の予想・震央・P 波 S 波) を重ねる。どちらも <code>#map-sub</code> の中の要素で、レイアウトの部品ではない。文言は詳細パネルと同じ。同じ内容が右列にあるので読み上げからは外す (<code>aria-hidden</code>)。中身は塗り直しのときだけ作り、薄さが変わるときは不透明度だけを変える。</li>
+        <li>見出しの札が左上を覆うので、寄る範囲を札の高さの分だけ上へ広げる。</li>
+        <li>P 波・S 波の円は、サブの地図に映している地震と主の地図の波の地震が同じときだけ描く (色は左の地図と同じ)。波の有無が変わっても塗りは描き直さず、凡例の P 波・S 波の行だけ出し入れする。</li>
         <li>左の地図の戻り方 (<code>priority.ts</code> の <code>settleMs</code>) は別で、変えていない。</li>
       </ul>
       <p class="note"><b>配備の注意</b>: eq-server の <code>[layout] file</code> で外部の定義ファイルを使っているときは、web と同じ版の <code>layout.json</code> に更新すること。古い <code>compact</code> の定義では、スマホ縦の余白と場所取りが消える (CSS の補いを消したため)。</p>
