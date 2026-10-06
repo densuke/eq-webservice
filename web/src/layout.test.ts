@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { type LayoutNode, type Stack, LAYOUTS, checkLayouts, flexOf, pickLayout } from "./layout.ts";
+import { type LayoutNode, LAYOUTS, REQUIRED_SLOTS, checkLayouts, flexOf, pickLayout, slotsOf } from "./layout.ts";
 import { BOXES, SLOTS } from "./layout-dom.ts";
 
 test("the layout is picked by the screen size (same 800px boundary as the CSS)", () => {
@@ -27,27 +27,32 @@ test("sizes become flex values", () => {
   assert.equal(flexOf("fill", true), "0 1 auto");
 });
 
-/** 定義の中の部品の名前 (重ね物を含む) */
-function slots(n: LayoutNode): string[] {
-  const fromStack = (s: Stack): string[] => s.items.flatMap((i) => (typeof i === "string" ? [i] : "slot" in i ? [i.slot] : fromStack(i)));
-  return [
-    ...(n.slot ? [n.slot] : []),
-    ...Object.values(n.overlays ?? {}).flatMap((s) => (s ? fromStack(s) : [])),
-    ...(n.children ?? []).flatMap(slots),
-  ];
-}
+test("slotsOf lists parts in order, including overlays and nested stacks", () => {
+  const node: LayoutNode = { slot: "main", overlays: { "top-left": { flow: "column", items: ["inset", { slot: "banners", variant: "compact" }, { flow: "row", items: ["legend"] }] } } };
+  assert.deepEqual(slotsOf(node), ["main", "inset", "banners", "legend"]);
+});
+
+/** 出荷している自動の定義が置く部品 (省いたら見た目が変わる。新しい部品はここに足さない限り省いてよい) */
+const SHIPPED_PARTS = ["topbar", "banners", "main", "settings", "detail", "history-head", "history", "notice", "credit",
+  "inset", "ogasawara", "caption", "countdown", "legend", "clock", "toast", "hint"];
 
 for (const l of LAYOUTS) {
-  test(`${l.name}: every part exists and is placed exactly once`, () => {
-    const used = slots(l.root);
+  test(`${l.name}: every part exists, is placed at most once, and main is placed`, () => {
+    const used = slotsOf(l.root);
     for (const s of used) assert.ok(SLOTS[s], `unknown part ${s}`);
     assert.deepEqual(used.filter((s, i) => used.indexOf(s) !== i), [], "placed twice");
-    // ページの部品は全部どこかに置く (置き忘れると要素が元の場所に残り、並びが崩れる)
-    assert.deepEqual(Object.keys(SLOTS).filter((s) => !used.includes(s)), []);
+    assert.deepEqual(REQUIRED_SLOTS.filter((s) => !used.includes(s)), []);
   });
   test(`${l.name}: boxes exist`, () => {
     const boxes = (n: LayoutNode): string[] => [...(n.box ? [n.box] : []), ...(n.children ?? []).flatMap(boxes)];
     for (const b of boxes(l.root)) assert.ok(BOXES[b], `unknown box ${b}`);
+  });
+}
+
+for (const name of ["landscape", "regular", "compact"]) {
+  test(`${name}: places every shipped part`, () => {
+    const l = LAYOUTS.find((x) => x.name === name)!;
+    assert.deepEqual(SHIPPED_PARTS.filter((s) => !slotsOf(l.root).includes(s)), []);
   });
 }
 
@@ -83,8 +88,10 @@ test("the check names what is wrong in a layout file", () => {
     return check(d).join("\n");
   };
   // 知らない部品・置いていない部品・2 回置いた部品
-  assert.match(broken((d) => (d.layouts[1].root.children[0].slot = "topbarr")), /知らない部品 "topbarr"[\s\S]*「topbar」を置いていない/);
-  assert.match(broken((d) => d.layouts[2].root.children.splice(1, 1)), /compact\): 部品「banners」を置いていない/);
+  assert.match(broken((d) => (d.layouts[1].root.children[0].slot = "topbarr")), /知らない部品 "topbarr"/);
+  // 必須でない部品は省いてよい。main は省けない
+  assert.equal(broken((d) => d.layouts[2].root.children.splice(1, 1)), "");
+  assert.match(broken((d) => (d.layouts[1].root.children[2].children[0] = { slot: "notice" })), /regular\): 部品「main」を置いていない/);
   assert.match(broken((d) => d.layouts[1].root.children.push({ slot: "clock" })), /「clock」を 2 回置いている/);
   // 大きさ・向き・容器・隅・条件・キーの書き間違い
   for (const size of ["380", "big", "fill:x", "1px; color: red", ""]) {

@@ -51,6 +51,19 @@ export function pickLayout(layouts: readonly Layout[], width: number, height: nu
   return layouts.find((l) => ok(l.when ?? {})) ?? layouts[0];
 }
 
+/** 定義の中に置かれた部品の名前を、重ね物と入れ子の積みを含めて出てきた順に返す (重複もそのまま) */
+export function slotsOf(node: LayoutNode): string[] {
+  const fromStack = (s: Stack): string[] => s.items.flatMap((i) => (typeof i === "string" ? [i] : "slot" in i ? [i.slot] : fromStack(i)));
+  return [
+    ...(node.slot ? [node.slot] : []),
+    ...Object.values(node.overlays ?? {}).flatMap((s) => (s ? fromStack(s) : [])),
+    ...(node.children ?? []).flatMap(slotsOf),
+  ];
+}
+
+/** 省けない部品 (これ以外は定義で置かなくてよい) */
+export const REQUIRED_SLOTS: readonly string[] = ["main"];
+
 /** 大きさを親の向きに沿った CSS の flex にする */
 export function flexOf(size: Size | undefined, pageColumn: boolean): string {
   const s = size ?? "fill";
@@ -71,7 +84,7 @@ const SIZE = /^(?:fill(?::\d+(?:\.\d+)?)?|auto|\d+(?:\.\d+)?(?:px|%|vw|vh|svw|sv
 
 /**
  * 定義ファイル ({ version: 1, layouts: [...] }) を確かめ、正しくないところを返す (正しければ空)。
- * 部品の名前は slots、容器の名前は boxes にあるものだけ。各定義は部品をすべて、1 回ずつ置く。
+ * 部品の名前は slots、容器の名前は boxes にあるものだけ。各定義は部品を高々 1 回置き、REQUIRED_SLOTS は必ず置く。
  * 知らないキーも誤りにする (書き間違いに気づけるように)。説明には "note" をどこにでも書ける
  */
 export function checkLayouts(data: unknown, slots: readonly string[], boxes: readonly string[]): string[] {
@@ -140,7 +153,8 @@ export function checkLayouts(data: unknown, slots: readonly string[], boxes: rea
     node(l.root, `${name}.root`, placed);
     for (const s of slots) {
       const n = placed.filter((p) => p === s).length;
-      if (n !== 1) errs.push(`${name}: 部品「${s}」を${n === 0 ? "置いていない" : ` ${n} 回置いている`}`);
+      if (n > 1) errs.push(`${name}: 部品「${s}」を ${n} 回置いている`);
+      if (n === 0 && REQUIRED_SLOTS.includes(s)) errs.push(`${name}: 部品「${s}」を置いていない`);
     }
   });
   return errs;

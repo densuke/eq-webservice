@@ -1,7 +1,7 @@
 // レイアウトの定義 (layout.ts) どおりに、いまのページの要素を並べ直す。
 // 部品の要素は index.html (と JapanMap が作る別枠) にあるものをそのまま使い、置き場所と大きさだけを決める。
 
-import { type Layout, type LayoutNode, type Part, type Stack, LAYOUTS, checkLayouts, flexOf, pickLayout } from "./layout.ts";
+import { type Layout, type LayoutNode, type Part, type Stack, LAYOUTS, checkLayouts, flexOf, pickLayout, slotsOf } from "./layout.ts";
 
 /** 部品の名前 → 要素 (複数なら順に並べる) */
 export const SLOTS: Record<string, string> = {
@@ -99,12 +99,10 @@ function place(node: LayoutNode, parent: HTMLElement, pageColumn: boolean): void
 
 /** 定義の中で、ページに見つからない部品と容器 (並べる前に確かめ、一つでもあれば並べ直さない) */
 function missing(node: LayoutNode): string[] {
-  const names = (s: Stack): string[] => s.items.flatMap((i) => (typeof i === "string" ? [i] : "slot" in i ? [(i as Part).slot] : names(i)));
-  const used = [...(node.slot ? [node.slot] : []), ...Object.values(node.overlays ?? {}).flatMap((s) => (s ? names(s) : []))];
+  const boxes = (n: LayoutNode): string[] => [...(n.box ? [n.box] : []), ...(n.children ?? []).flatMap(boxes)];
   return [
-    ...used.filter((n) => !SLOTS[n] || elements(n).length === 0).map((n) => `部品「${n}」`),
-    ...(node.box && !document.querySelector(BOXES[node.box] ?? "") ? [`容器「${node.box}」`] : []),
-    ...(node.children ?? []).flatMap(missing),
+    ...slotsOf(node).filter((n) => !SLOTS[n] || elements(n).length === 0).map((n) => `部品「${n}」`),
+    ...boxes(node).filter((b) => !document.querySelector(BOXES[b] ?? "")).map((b) => `容器「${b}」`),
   ];
 }
 
@@ -129,6 +127,14 @@ export function applyLayout(): void {
   made = [];
   document.body.dataset.layout = next.name;
   place(next.root, document.body, next.scroll === "page");
+  // 定義に無い部品は隠し置き場へ (文書から外すと、document.querySelector で探すコードや ResizeObserver が対象を失う)
+  const used = slotsOf(next.root);
+  const unused = document.createElement("div");
+  unused.className = "ld-unused";
+  unused.hidden = true;
+  for (const slot of Object.keys(SLOTS)) if (!used.includes(slot)) unused.append(...part(slot));
+  document.body.append(unused);
+  made.push(unused);
   for (const el of old) el.remove();
 }
 
