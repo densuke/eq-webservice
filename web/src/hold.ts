@@ -11,21 +11,29 @@ export function holdMs(scale: number, cfg: SubMapConfig): number {
 
 export interface SubMapState {
   key: string;
-  /** 保持時間を過ぎた (同じ地震を薄く描く) */
-  faded: boolean;
+  /** 濃さ 0〜1 (1 = 保持時間の内) */
+  alpha: number;
 }
 
-/** サブの地図に何を出すか。地震 (quake・eew) でなければ null */
+/** 濃さの刻み。署名の変化 (= 再描画) を 0.05 ごとに抑える */
+const ALPHA_STEP = 20;
+
+/** サブの地図に何を出すか。地震 (quake・eew) でなければ null。保持時間 + fadeSec を過ぎたら (濃さが 0 になったら) null = 消える。
+ *  保持時間を過ぎたら fadedAlpha から 0 へ直線で薄くなり、0.05 刻みに切り上げる (保持の直後が fadedAlpha になり、終わる直前も 0.05 が残る。1e-9 は 0.2 などが浮動小数の誤差で 1 段上がらないため) */
 export function subMapState(now: number, g: { key: string; kind: string; updatedAt: number } | undefined, scale: number, cfg: SubMapConfig): SubMapState | null {
   if (!g || (g.kind !== "quake" && g.kind !== "eew")) return null;
-  return { key: g.key, faded: now - g.updatedAt > holdMs(scale, cfg) };
+  const past = now - g.updatedAt - holdMs(scale, cfg);
+  if (past <= 0) return { key: g.key, alpha: 1 };
+  const x = cfg.fadedAlpha * (1 - past / (cfg.fadeSec * 1000));
+  if (x <= 0) return null;
+  return { key: g.key, alpha: Math.ceil(x * ALPHA_STEP - 1e-9) / ALPHA_STEP };
 }
 
-/** サブの地図の署名を 2 つに分ける。paint は描き直し (塗り・震央・カメラ)、fade は薄さだけ。薄くなるだけで塗りを描き直さないため */
-export function subMapSigs(state: SubMapState | null, g: { updatedAt: number } | undefined, w: number, h: number, fadedAlpha: number): { paint: string; fade: string } {
+/** サブの地図の署名を 2 つに分ける。paint は描き直し (塗り・震央・カメラ)、fade は濃さだけ。薄くなるだけで塗りを描き直さないため */
+export function subMapSigs(state: SubMapState | null, g: { updatedAt: number } | undefined, w: number, h: number): { paint: string; fade: string } {
   return {
     paint: `${state && g ? `${state.key}|${g.updatedAt}` : ""}|${w}x${h}`,
-    fade: state ? `${state.faded}|${fadedAlpha}` : "",
+    fade: state ? String(state.alpha) : "",
   };
 }
 

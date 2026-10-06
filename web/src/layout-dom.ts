@@ -1,7 +1,7 @@
 // レイアウトの定義 (layout.ts) どおりに、いまのページの要素を並べ直す。
 // 部品の要素は index.html (と JapanMap が作る別枠) にあるものをそのまま使い、置き場所と大きさだけを決める。
 
-import { type Layout, type LayoutNode, type Part, type Stack, type SubMapConfig, LAYOUTS, SUB_MAP, boxesOf, checkLayouts, chooseLayout, flexOf, slotsOf } from "./layout.ts";
+import { type Layout, type LayoutNode, type Part, type Stack, type SubMapConfig, LAYOUTS, SUB_MAP, boxesOf, checkLayouts, chooseLayout, flexOf, slotsOf, withSubMapDefaults } from "./layout.ts";
 
 /** 部品の名前 → 要素 (複数なら順に並べる) */
 export const SLOTS: Record<string, string> = {
@@ -179,7 +179,8 @@ export async function loadLayoutFile(): Promise<void> {
       console.error(`layout: 定義ファイルが正しくないので、組み込みの定義を使う\n${errs.join("\n")}`);
       return;
     }
-    subMap = (data as { subMap?: SubMapConfig }).subMap ?? SUB_MAP;
+    const given = (data as { subMap?: Parameters<typeof withSubMapDefaults>[0] }).subMap;
+    subMap = given ? withSubMapDefaults(given) : SUB_MAP;
     const next = (data as { layouts: Layout[] }).layouts;
     if (JSON.stringify(next) === JSON.stringify(layouts)) return;
     layouts = next;

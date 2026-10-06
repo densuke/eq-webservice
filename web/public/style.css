@@ -359,3 +359,24 @@ body[data-layout="compact"] .sound-hint { max-width: calc(100vw - 170px); border
 body[data-layout="trial"] .ld-box:has(> #clock) { border-top: 1px solid var(--line); background: var(--panel); align-items: center; gap: 12px; padding: 0 12px; }
 body[data-layout="trial"] .banner { border-top: none; }
 body[data-layout="trial"] #demo-panel { max-height: 25vh; overflow: auto; }
+
+/* サブの地図の見出しの札 (左上) と凡例 (右下)。レイアウトの部品ではなく #map-sub の中の要素 */
+.sub-caption, .sub-legend {
+  position: absolute; pointer-events: none; background: rgba(13, 17, 23, 0.8); border-radius: 6px; color: var(--text);
+}
+.sub-caption { left: 6px; top: 6px; max-width: 60%; display: flex; gap: 8px; align-items: flex-start; padding: 6px 8px; font-size: 11px; }
+.sub-caption[hidden], .sub-legend[hidden] { display: none; }
+.sub-caption-text { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.sub-kind { color: var(--muted); }
+.sub-kind.forecast { color: #b35900; }
+.sub-caption .sub-kind.forecast { color: #f0883e; } /* 暗い背景の札では #b35900 が沈むので明るい橙 */
+.sub-kind.warning { color: var(--alert); }
+.sub-title { font-size: 14px; font-weight: bold; }
+.sub-facts, .sub-time { color: var(--muted); }
+.sub-tsunami { margin-top: 2px; }
+.sub-legend { right: 6px; bottom: 6px; padding: 6px 8px; font-size: 10px; color: var(--muted); display: flex; flex-direction: column; gap: 3px; }
+.sub-legend-row { display: flex; align-items: center; gap: 5px; }
+.sub-legend-row[hidden] { display: none; }
+.sub-legend-row i { width: 10px; height: 10px; border-radius: 2px; }
+.sub-legend-row i.forecast { background: transparent; border: 1px dashed var(--muted); }
+.sub-legend-row .x { width: 10px; text-align: center; color: var(--text); }

@@ -48,6 +48,8 @@ interface Scene {
   replay: boolean;
   /** 緊急地震速報の予測: 予測の出た地域 (shaken) を最初から収める (S波に合わせて引くのを待たない) */
   forecast?: boolean;
+  /** 中心の地震のグループの key (サブの地図が同じ地震か確かめるため) */
+  key?: string;
 }
 
 /** 揺れた範囲の箱: 揺れた細分区域の和。区域が読めていない・引けないときは県の本土の箱 (離島の地震では本土が映る) */
@@ -62,7 +64,7 @@ export function scene(now: number): Scene | null {
     const rq = g && relatedQuake(g);
     const geo = rq && geoOf(rq);
     if (!geo) return null;
-    return { center: geo.center, others: [], t: ((now - app.selectedAt) / 1000) * REPLAY_SPEED, shaken: shakenBox(shakenGeo(rq)), replay: true };
+    return { center: geo.center, others: [], t: ((now - app.selectedAt) / 1000) * REPLAY_SPEED, shaken: shakenBox(shakenGeo(rq)), replay: true, key: rq.key };
   }
   // 巡回中はその地震に合わせる (ほかの地震の波も描く)
   if (app.tourKey) {
@@ -78,6 +80,7 @@ export function scene(now: number): Scene | null {
         shaken: shakenBox(shakenGeo(g)),
         replay: false,
         forecast: g.kind === "eew",
+        key: g.key,
       };
     }
   }
@@ -100,22 +103,34 @@ export function scene(now: number): Scene | null {
     shaken: g && geo ? shakenBox(shakenGeo(g)) : null,
     replay: false,
     forecast: g?.kind === "eew",
+    key: g?.key,
   };
 }
 
-/** 波を描き、カメラの目標を返す。波を描いているかどうかも返す */
-export function renderScene(sc: Scene | null): { box: Box | null; waving: boolean } {
-  if (!sc?.center) return { box: sc?.shaken ? pad(sc.shaken) : null, waving: false };
+/** 主の地図に描いた中心の地震の波 (サブの地図へ渡す) */
+export interface MainWave {
+  key: string;
+  lat: number;
+  lon: number;
+  pKm: number | null;
+  sKm: number | null;
+}
+
+/** 波を描き、カメラの目標を返す。波を描いているかどうかと、中心の地震の波も返す */
+export function renderScene(sc: Scene | null): { box: Box | null; waving: boolean; wave: MainWave | null } {
+  if (!sc?.center) return { box: sc?.shaken ? pad(sc.shaken) : null, waving: false, wave: null };
   const c = sc.center;
   const [x, y] = project(c.lon, c.lat);
   const stop = stopRadiusKm(x, y, sc.shaken);
   const s = sc.t == null ? null : surfaceRadiusKm(VS_KM_S, c.depth, sc.t);
   // 再生は揺れた地域を覆い終えたら打ち切る (早回しでも 180 秒分は長い)
   const waving = sc.t != null && sc.t < WAVE_MAX_SEC && !(sc.replay && (s ?? 0) > stop);
-  if (!waving) return { box: pad(union(sc.shaken, pointBox(x, y, 0))!), waving };
+  if (!waving) return { box: pad(union(sc.shaken, pointBox(x, y, 0))!), waving, wave: null };
   const wave = (w: Center, t: number) => ({ ...w, pKm: surfaceRadiusKm(VP_KM_S, w.depth, t), sKm: surfaceRadiusKm(VS_KM_S, w.depth, t) });
-  map.setWaves([wave(c, sc.t!), ...sc.others.map((o) => wave(o, (now() - o.origin) / 1000))]);
+  const main = wave(c, sc.t!);
+  map.setWaves([main, ...sc.others.map((o) => wave(o, (now() - o.origin) / 1000))]);
   $("#wave-info").textContent = sc.replay ? `再生中 ${sc.t!.toFixed(0)}秒 (×${REPLAY_SPEED})` : `発生から${sc.t!.toFixed(0)}秒`;
   const follow = pointBox(x, y, followRadiusKm(s, stop));
-  return { box: pad(sc.forecast ? union(follow, sc.shaken)! : follow), waving };
+  const sub = sc.key ? { key: sc.key, lat: main.lat, lon: main.lon, pKm: main.pKm, sKm: main.sKm } : null;
+  return { box: pad(sc.forecast ? union(follow, sc.shaken)! : follow), waving, wave: sub };
 }
