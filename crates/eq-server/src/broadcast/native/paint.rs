@@ -2,7 +2,7 @@
 
 #![allow(clippy::too_many_arguments)]
 
-use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, Rect, Stroke, Transform};
+use tiny_skia::{FillRule, Mask, Paint, PathBuilder, Pixmap, Rect, Stroke, Transform};
 
 // web/public/style.css の :root と同じ色
 pub const BG: [u8; 3] = [0x0d, 0x11, 0x17];
@@ -59,6 +59,11 @@ pub fn circle(pm: &mut Pixmap, x: f32, y: f32, r: f32, c: [u8; 3], a: f32) {
 
 /// 線 (太さ w)
 pub fn line(pm: &mut Pixmap, from: (f32, f32), to: (f32, f32), w: f32, c: [u8; 3], a: f32) {
+    line_masked(pm, from, to, w, c, a, None);
+}
+
+/// 線 (太さ w)。mask があれば、その内側だけに描く
+fn line_masked(pm: &mut Pixmap, from: (f32, f32), to: (f32, f32), w: f32, c: [u8; 3], a: f32, mask: Option<&Mask>) {
     let mut pb = PathBuilder::new();
     pb.move_to(from.0, from.1);
     pb.line_to(to.0, to.1);
@@ -67,24 +72,24 @@ pub fn line(pm: &mut Pixmap, from: (f32, f32), to: (f32, f32), w: f32, c: [u8; 3
             width: w,
             ..Stroke::default()
         };
-        pm.stroke_path(&path, &paint(c, a), &s, Transform::identity(), None);
+        pm.stroke_path(&path, &paint(c, a), &s, Transform::identity(), mask);
     }
 }
 
-/// 白い縁取り付きの × (震央)
-pub fn epicenter(pm: &mut Pixmap, x: f32, y: f32) {
-    cross(pm, x, y, 1.0);
+/// 白い縁取り付きの × (震央)。mask があれば、その内側だけに描く (枠の縁の近くでもはみ出さない)
+pub fn epicenter(pm: &mut Pixmap, x: f32, y: f32, mask: Option<&Mask>) {
+    cross(pm, x, y, 1.0, mask);
 }
 
 /// のちに分かった震源の薄い印 (半透明)
 pub fn ghost_epicenter(pm: &mut Pixmap, x: f32, y: f32) {
-    cross(pm, x, y, 0.4);
+    cross(pm, x, y, 0.4, None);
 }
 
-fn cross(pm: &mut Pixmap, x: f32, y: f32, a: f32) {
+fn cross(pm: &mut Pixmap, x: f32, y: f32, a: f32, mask: Option<&Mask>) {
     let d = 9.0;
     for (w, c) in [(7.0, [255, 255, 255]), (3.5, [0xe0, 0x1e, 0x1e])] {
-        line(pm, (x - d, y - d), (x + d, y + d), w, c, a);
-        line(pm, (x - d, y + d), (x + d, y - d), w, c, a);
+        line_masked(pm, (x - d, y - d), (x + d, y + d), w, c, a, mask);
+        line_masked(pm, (x - d, y + d), (x + d, y - d), w, c, a, mask);
     }
 }

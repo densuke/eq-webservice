@@ -536,6 +536,39 @@ fn the_sub_map_paints_only_inside_its_rect() {
     assert!(inside > 0);
 }
 
+/// 震央が矩形の上端・下端のすぐ内側にあっても、印 (×) は矩形の外 (詳細・履歴) に出ない
+#[test]
+fn the_epicenter_cross_is_cut_at_the_sub_map_rect() {
+    let e = eew::latest_eews(&chiba_events()).remove(0);
+    let icons = Icons::new();
+    let scene = eew_scene(&e, &icons, SHOWN_AT);
+    let (x, y) = geo::project(140.8, 35.7);
+    let render = |top: f64| {
+        let mut r = load_renderer(&config_sub(false, true)).unwrap();
+        let fit = camera::fit_box(camera::MapBox::around(x, y, 150.0), r.sub_aspect().unwrap());
+        r.set_sub_view(Some(camera::Fit {
+            y: y - top * fit.h,
+            ..fit
+        }));
+        r.render(&scene)
+    };
+    // 震央が枠の外 (映らない) ときの絵。矩形の外は、印が切られていれば同じになる
+    let away = render(10.0);
+    for top in [0.01, 0.99] {
+        let near_edge = render(top);
+        let diff = |f: &dyn Fn(usize) -> bool| {
+            away.pixels()
+                .iter()
+                .zip(near_edge.pixels())
+                .enumerate()
+                .filter(|&(i, (a, b))| a != b && f(i))
+                .count()
+        };
+        assert_eq!(diff(&|i| !in_sub_rect(i)), 0, "top={top}");
+        assert!(diff(&in_sub_rect) > 0, "top={top}");
+    }
+}
+
 #[test]
 fn the_sub_map_does_not_add_redraws() {
     let ev = chiba_events();

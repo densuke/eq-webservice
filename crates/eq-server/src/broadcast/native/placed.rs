@@ -5,6 +5,8 @@
 //! 矩形で描く (for_screen)。main・topbar・出典・時計・凡例・寄り図は平時と同じ矩形のまま (base が共通なので、
 //! 定義の側でも同じにしておく。出典は動かない地の側に描かれる)。
 
+use std::collections::BTreeMap;
+
 use anyhow::{Context, Result};
 
 use super::draw::{H, W};
@@ -30,12 +32,28 @@ pub struct Placed {
     quake_history: Option<Rect>,
 }
 
+/// 地震の画面の右の列 (詳細・サブの地図・履歴・出典) が互いに重なる定義は誤り (重ねて描くと配信が崩れる)
+fn check_quake_column(q: &BTreeMap<String, Rect>) -> Result<()> {
+    let col: Vec<(&str, Rect)> = ["detail", "map-sub", "history", "credit"]
+        .into_iter()
+        .filter_map(|n| Some((n, *q.get(n)?)))
+        .collect();
+    for (i, (a, ra)) in col.iter().enumerate() {
+        for (b, rb) in &col[i + 1..] {
+            let overlap = ra.x < rb.right() && rb.x < ra.right() && ra.y < rb.bottom() && rb.y < ra.bottom();
+            anyhow::ensure!(!overlap, "地震の画面の部品 {a} と {b} の矩形が重なっている");
+        }
+    }
+    Ok(())
+}
+
 impl Placed {
     /// 平時の定義と地震の画面の定義を、画面 (W×H) に割り付ける
     pub fn new(calm: &LayoutDef, quake: &LayoutDef) -> Result<Placed> {
         let (w, h) = (W as f32, H as f32);
         let c = resolve(calm, w, h)?;
         let q = resolve(quake, w, h)?;
+        check_quake_column(&q)?;
         // お知らせの箱が最大の高さで収まらない矩形には描かない (今までのコンパイル時の検査の代わり)
         let notice = c.get("notice").copied().filter(|r| {
             let fits = r.h >= notice::BOX_MAX_H;
