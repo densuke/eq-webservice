@@ -1,7 +1,6 @@
 //! 配信の寄り (zoom)。web/src/camera.ts と scene.ts の renderScene の移植で、純粋な関数だけ。
 //! 座標は地図の座標 (geo::project の単位。1 度 ≒ 100 単位なので 1km ≒ 100/111 単位)。時刻は引数。
 
-use super::draw::MAP_RECT;
 use super::eew::{surface_radius_km, VS_KM_S, WAVE_MAX_MS};
 use super::geo::{home_bounds, project};
 
@@ -137,14 +136,10 @@ pub fn fit_box(b: MapBox, aspect: f64) -> Fit {
     }
 }
 
-pub fn map_aspect() -> f64 {
-    MAP_RECT.2 / MAP_RECT.3
-}
-
-/// 日本全体の表示範囲
-pub fn home_fit() -> Fit {
+/// 日本全体の表示範囲 (aspect は地図の枠の縦横比)
+pub fn home_fit(aspect: f64) -> Fit {
     let (x0, y0, x1, y1) = home_bounds();
-    fit_box(MapBox { x0, y0, x1, y1 }, map_aspect())
+    fit_box(MapBox { x0, y0, x1, y1 }, aspect)
 }
 
 /// 目標へ指数的に近づける。近ければ目標そのもの (web の map.ts の step)
@@ -172,21 +167,32 @@ pub fn approach(cur: Fit, target: Fit, dt_ms: f64) -> Fit {
 #[derive(Debug, Clone, Copy)]
 pub struct Camera {
     cur: Fit,
+    /// 日本全体の表示範囲
+    home: Fit,
     last_ms: Option<u64>,
 }
 
 impl Camera {
-    pub fn new() -> Camera {
+    /// aspect は地図の枠の縦横比
+    pub fn new(aspect: f64) -> Camera {
+        let home = home_fit(aspect);
         Camera {
-            cur: home_fit(),
+            cur: home,
+            home,
             last_ms: None,
         }
+    }
+
+    /// 日本全体の表示範囲
+    #[cfg(test)]
+    pub fn home(&self) -> Fit {
+        self.home
     }
 
     /// now_ms の表示範囲を進める。target が None なら日本全体へ一気に戻す。
     /// snap か、前のコマから大きく (または戻って) 時計が飛んだときは、近づかずに目標へ移る
     pub fn advance(&mut self, target: Option<Fit>, now_ms: u64, snap: bool) {
-        let home = home_fit();
+        let home = self.home;
         let last = self.last_ms.replace(now_ms);
         // 日本全体より広くは引かない (別枠を出す判断を、日本全体かどうかだけにする)
         let Some(target) = target.map(|t| if t.w >= home.w { home } else { t }) else {
@@ -207,13 +213,16 @@ impl Camera {
 
     /// 日本全体の表示か (別枠を出してよい)
     pub fn is_home(&self) -> bool {
-        self.cur.w >= home_fit().w * (1.0 - 1e-6)
+        self.cur.w >= self.home.w * (1.0 - 1e-6)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 組み込みの定義の main (900x684) の縦横比
+    const ASPECT: f64 = 900.0 / 684.0;
 
     fn close(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-6
@@ -362,8 +371,8 @@ mod tests {
             2.0,
         );
         assert!(close(tall.h, 200.0 / 2.0) && close(tall.w, 200.0) && close(tall.x, -95.0));
-        let home = home_fit();
-        assert!(close(home.w / home.h, map_aspect()));
+        let home = home_fit(ASPECT);
+        assert!(close(home.w / home.h, ASPECT));
     }
 
     #[test]
@@ -390,14 +399,14 @@ mod tests {
 
     #[test]
     fn the_camera_snaps_on_the_first_frame_a_jump_and_a_return_home() {
-        let target = fit_box(MapBox::around(0.0, 0.0, 80.0).pad(), map_aspect());
-        let mut c = Camera::new();
+        let target = fit_box(MapBox::around(0.0, 0.0, 80.0).pad(), ASPECT);
+        let mut c = Camera::new(ASPECT);
         assert!(c.is_home());
         c.advance(Some(target), 10_000, false); // 最初のコマは前が無いので、そのまま目標
         assert_eq!(c.fit(), target);
         assert!(!c.is_home());
         // 同じ時刻・近い時刻では、近づく (別の目標へ)
-        let other = fit_box(MapBox::around(500.0, 0.0, 80.0).pad(), map_aspect());
+        let other = fit_box(MapBox::around(500.0, 0.0, 80.0).pad(), ASPECT);
         c.advance(Some(other), 10_200, false);
         assert!(c.fit() != other && c.fit() != target && c.fit().x > target.x);
         // 大きく時計が飛んだ・戻った・snap のときは目標へ
@@ -409,7 +418,7 @@ mod tests {
         assert_eq!(c.fit(), other);
         // None (平時) は日本全体へ一気に戻る
         c.advance(None, 300, false);
-        assert_eq!(c.fit(), home_fit());
+        assert_eq!(c.fit(), home_fit(ASPECT));
         assert!(c.is_home());
     }
 }

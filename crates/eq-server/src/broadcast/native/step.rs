@@ -3,7 +3,7 @@
 
 use tiny_skia::Pixmap;
 
-use super::camera::{fit_box, map_aspect, target_box, Aim, Camera, Epicenter};
+use super::camera::{fit_box, target_box, Aim, Camera, Epicenter};
 use super::data::{CityWeather, Warnings};
 use super::draw::{self, Renderer, Scene};
 use super::eew::{eew_place, quake_place};
@@ -172,8 +172,8 @@ pub struct Stepper {
 impl Stepper {
     pub fn new(renderer: Renderer) -> Self {
         Stepper {
+            camera: Camera::new(renderer.map_aspect()),
             renderer,
-            camera: Camera::new(),
             last_key: None,
             still: None,
         }
@@ -182,7 +182,7 @@ impl Stepper {
     /// 日本全体の表示の幅 / いまの表示の幅 (1 なら日本全体)
     #[cfg(test)]
     pub fn zoom_ratio(&self) -> f64 {
-        super::camera::home_fit().w / self.camera.fit().w
+        self.camera.home().w / self.camera.fit().w
     }
 
     #[cfg(test)]
@@ -204,7 +204,7 @@ impl Stepper {
         }
         let target = aim_of(&self.renderer, current, eews, hindsight)
             .and_then(|a| target_box(&a, now))
-            .map(|b| fit_box(b, map_aspect()));
+            .map(|b| fit_box(b, self.renderer.map_aspect()));
         self.camera.advance(target, now, snap);
         let zoomed = (!self.camera.is_home()).then(|| self.camera.fit());
         self.renderer.set_view(zoomed);
@@ -214,16 +214,16 @@ impl Stepper {
     /// サブの地図の範囲を決める。地震の画面 (表示中の地震・緊急地震速報) のときだけ。平時は None (描かない)。波は追わない。
     /// still_key には入れない: 毎コマ決め直し、描き直しは now/1000 で毎秒なので、反映の遅れは最大 1 秒
     fn aim_sub(&mut self, current: Option<eew::Current>, eews: &[eew::EewSummary]) {
-        if !self.renderer.sub_map_enabled() {
+        let Some(sub_aspect) = self.renderer.sub_aspect().filter(|_| self.renderer.sub_map_enabled()) else {
             return;
-        }
+        };
         let fit = aim_of(&self.renderer, current, eews, None)
             .map(|mut a| {
                 a.epicenter = a.epicenter.map(|e| Epicenter { origin_ms: None, ..e });
                 a
             })
             .and_then(|a| target_box(&a, 0))
-            .map(|b| fit_box(b, draw::SUB_RECT.2 / draw::SUB_RECT.3));
+            .map(|b| fit_box(b, sub_aspect));
         self.renderer.set_sub_view(fit);
     }
 

@@ -22,6 +22,7 @@ pub(crate) mod model;
 mod notice;
 mod paint;
 mod panel;
+mod placed;
 mod shaken;
 mod step;
 mod telops;
@@ -47,8 +48,8 @@ use crate::quake::userquake::Gate;
 use crate::quake::{Event, EventBody};
 use data::{CityWeather, ServerMessage, Warnings};
 use draw::Renderer;
-use layout_def::LayoutDef;
 use notice::{Banners, Notices};
+use placed::Placed;
 
 // 記録から描き直す動画 (broadcast/replay) が使う
 pub(super) use eew::{eew_place, latest_eews, quake_place, EEW_ACTIVE_MS};
@@ -145,9 +146,9 @@ fn check_replay(kind: Option<&str>, test: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// session を始めるたびに (やり直しのたびに) 1 回、サーバの並びの定義 (GET /api/layout) を読み、平時用と地震の画面用の 2 つを決める。
+/// session を始めるたびに (やり直しのたびに) 1 回、サーバの並びの定義 (GET /api/layout) を読み、平時用と地震の画面用の 2 つを割り付ける。
 /// 取れない・使えないときは組み込みの定義 (警告は読むたびに出る)。組み込みも使えなければエラー
-pub async fn load_layouts(cfg: &BroadcastConfig) -> anyhow::Result<(LayoutDef, LayoutDef)> {
+pub async fn load_layouts(cfg: &BroadcastConfig) -> anyhow::Result<Placed> {
     let url = format!("{}/api/layout", cfg.server.trim_end_matches('/'));
     let json = async {
         let client = crate::net::client(Duration::from_secs(10))?;
@@ -165,17 +166,20 @@ pub async fn load_layouts(cfg: &BroadcastConfig) -> anyhow::Result<(LayoutDef, L
             tracing::info!("broadcast: layout {} の部品 {skipped:?} は配信では描きません", def.name);
         }
     }
-    Ok(defs)
+    // 割り付けに失敗する定義 (検査をすり抜けた分) でも配信は止めず、組み込みの定義に戻す
+    Placed::new(&defs.0, &defs.1).or_else(|e| {
+        tracing::warn!("broadcast: layout を割り付けられないので、組み込みの定義にします: {e:#}");
+        Placed::builtin()
+    })
 }
 
 pub fn start(
     cfg: &BroadcastConfig,
-    layouts: (LayoutDef, LayoutDef),
+    placed: Placed,
     notices: Option<UnboundedSender<String>>,
     status: Feed,
 ) -> anyhow::Result<Native> {
-    let mut renderer = load_renderer(cfg)?;
-    renderer.set_layouts(layouts);
+    let renderer = load_renderer_with(cfg, placed)?;
     let server = cfg.server.trim_end_matches('/').to_string();
     let st: Shared = Arc::default();
     let (tx, frames) = watch::channel(Arc::new(Vec::new()));
@@ -227,8 +231,13 @@ pub fn start(
     })
 }
 
+/// 組み込みの定義の並びで作る (再現動画とテスト)
 pub(super) fn load_renderer(cfg: &BroadcastConfig) -> anyhow::Result<Renderer> {
-    let view = geo::View::fit_home(draw::MAP_RECT);
+    load_renderer_with(cfg, Placed::builtin()?)
+}
+
+fn load_renderer_with(cfg: &BroadcastConfig, placed: Placed) -> anyhow::Result<Renderer> {
+    let view = geo::View::fit_home(placed.main.tuple64());
     let dir = std::path::Path::new(&cfg.map_dir);
     // 周辺国の陸地は背景なので、無くても続ける
     let neighbors = geo::load(&dir.join("neighbors.geojson"), "name", &view).unwrap_or_else(|e| {
@@ -241,7 +250,7 @@ pub(super) fn load_renderer(cfg: &BroadcastConfig) -> anyhow::Result<Renderer> {
         tracing::warn!("broadcast: font {} を読めないので、文字は描きません: {e:#}", cfg.font);
         text::Text::none()
     });
-    let mut renderer = Renderer::new(view, neighbors, prefs, areas, text);
+    let mut renderer = Renderer::new(view, neighbors, prefs, areas, text, placed);
     if cfg.zoom || cfg.sub_map {
         // 地震情報細分区域は寄りの範囲の計算だけに使う。読めなければ、県の本土の範囲で寄る
         let zones = geo::load(&dir.join("areas.geojson"), "name", &view).unwrap_or_else(|e| {

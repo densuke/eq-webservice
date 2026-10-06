@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use tiny_skia::{FillRule, Mask, Path, PathBuilder, PathSegment, Pixmap, Point, Rect, Stroke, Transform};
 
-use super::draw::MAP_RECT;
 use super::geo::{project, View};
+use super::layout_resolve::Rect as Slot;
 use super::paint::paint;
 
 /// 別枠の定義 (経度・緯度の範囲と、置き場所)
@@ -14,20 +14,14 @@ pub struct InsetSpec {
     pub title: &'static str,
     pub lon: (f64, f64),
     pub lat: (f64, f64),
-    /// 枠の左上 (画面の座標) と高さ。幅は範囲の縦横比から決める
-    pub x: f32,
-    pub y: f32,
-    pub h: f32,
 }
 
-/// 南西諸島。日本全体の表示から外れる離島を、地図の左上に別枠で映す
+/// 南西諸島。日本全体の表示から外れる離島を別枠で映す。置き場所 (枠の左上と高さ。幅は範囲の縦横比から決める) は
+/// 定義の inset の矩形 (Frame::inset の at)
 pub const OKINAWA: InsetSpec = InsetSpec {
     title: "南西諸島",
     lon: (122.5, 131.5),
     lat: (24.0, 31.0),
-    x: 10.0,
-    y: super::draw::BAR_H + 10.0,
-    h: 220.0,
 };
 
 /// 別枠の範囲の外でも、この度数以内の震央は枠の縁に寄せて印を置く / そのときの枠の縁からの余白
@@ -92,15 +86,13 @@ impl Frame {
     }
 
     /// 寄った本図の枠 (地図の枠)
-    pub fn map_clip() -> Option<Clip> {
-        let (x, y, w, h) = MAP_RECT;
-        Clip::new(Rect::from_xywh(x as f32, y as f32, w as f32, h as f32)?)
+    pub fn map_clip(main: Slot) -> Option<Clip> {
+        Clip::new(Rect::from_xywh(main.x, main.y, main.w, main.h)?)
     }
 
     /// サブの地図の枠 (右パネルの上)
-    pub fn sub_clip() -> Option<Clip> {
-        let (x, y, w, h) = super::draw::SUB_RECT;
-        Clip::new(Rect::from_xywh(x as f32, y as f32, w as f32, h as f32)?)
+    pub fn sub_clip(sub: Slot) -> Option<Clip> {
+        Clip::new(Rect::from_xywh(sub.x, sub.y, sub.w, sub.h)?)
     }
 
     /// 日本全体の本図 home の path を、view に寄せて映す本図。地図の枠の外には描かない
@@ -113,14 +105,15 @@ impl Frame {
         }
     }
 
-    pub fn inset(main: &View, spec: &InsetSpec) -> Option<Frame> {
+    /// at は定義の inset の矩形。左上と高さを使い、幅は範囲の縦横比から決める (矩形の幅は使わない)
+    pub fn inset(main: &View, spec: &InsetSpec, at: Slot) -> Option<Frame> {
         let (x0, y0) = project(spec.lon.0, spec.lat.1);
         let (x1, y1) = project(spec.lon.1, spec.lat.0);
-        let w = spec.h * ((x1 - x0) / (y1 - y0)) as f32;
-        let rect = Rect::from_xywh(spec.x, spec.y, w, spec.h)?;
+        let w = at.h * ((x1 - x0) / (y1 - y0)) as f32;
+        let rect = Rect::from_xywh(at.x, at.y, w, at.h)?;
         let view = View::fit(
             (spec.lon.0, spec.lon.1, spec.lat.0, spec.lat.1),
-            (spec.x as f64, spec.y as f64, w as f64, spec.h as f64),
+            (at.x as f64, at.y as f64, w as f64, at.h as f64),
         );
         Some(Frame {
             ts: view.transform_from(main),
@@ -258,12 +251,26 @@ impl Frame {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::broadcast::native::camera::{fit_box, map_aspect, MapBox};
-    use crate::broadcast::native::draw::MAP_RECT;
+    use crate::broadcast::native::camera::{fit_box, MapBox};
+
+    /// 組み込みの定義 (broadcast) の main と inset の矩形 (placed.rs が同じ値になることを layout_resolve のテストが守る)
+    const MAIN: Slot = Slot {
+        x: 0.0,
+        y: 36.0,
+        w: 900.0,
+        h: 684.0,
+    };
+    const INSET: Slot = Slot {
+        x: 10.0,
+        y: 46.0,
+        w: 226.0,
+        h: 220.0,
+    };
+    const MAP_RECT: (f64, f64, f64, f64) = (0.0, 36.0, 900.0, 684.0);
 
     fn frames() -> (Frame, Frame) {
         let main = View::fit_home((0.0, 36.0, 900.0, 684.0));
-        (Frame::main(main), Frame::inset(&main, &OKINAWA).unwrap())
+        (Frame::main(main), Frame::inset(&main, &OKINAWA, INSET).unwrap())
     }
 
     #[test]
@@ -302,9 +309,9 @@ mod tests {
     fn zoomed() -> (Frame, View) {
         let home = View::fit_home(MAP_RECT);
         let (x, y) = project(140.8, 35.7);
-        let fit = fit_box(MapBox::around(x, y, 80.0).pad(), map_aspect());
+        let fit = fit_box(MapBox::around(x, y, 80.0).pad(), MAIN.w as f64 / MAIN.h as f64);
         let view = View::from_fit(&fit, MAP_RECT);
-        (Frame::zoomed(&home, view, &Frame::map_clip().unwrap()), home)
+        (Frame::zoomed(&home, view, &Frame::map_clip(MAIN).unwrap()), home)
     }
 
     #[test]
