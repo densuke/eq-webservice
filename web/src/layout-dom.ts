@@ -1,7 +1,7 @@
 // レイアウトの定義 (layout.ts) どおりに、いまのページの要素を並べ直す。
 // 部品の要素は index.html (と JapanMap が作る別枠) にあるものをそのまま使い、置き場所と大きさだけを決める。
 
-import { type Layout, type LayoutNode, type Part, type Stack, LAYOUTS, checkLayouts, chooseLayout, flexOf, slotsOf } from "./layout.ts";
+import { type Layout, type LayoutNode, type Part, type Stack, LAYOUTS, boxesOf, checkLayouts, chooseLayout, flexOf, slotsOf } from "./layout.ts";
 
 /** 部品の名前 → 要素 (複数なら順に並べる) */
 export const SLOTS: Record<string, string> = {
@@ -36,6 +36,13 @@ function elements(slot: string): HTMLElement[] {
   if (!sel) throw new Error(`layout: 部品「${slot}」は無い`);
   if (!found.has(slot)) found.set(slot, [...document.querySelectorAll<HTMLElement>(sel)]);
   return found.get(slot)!;
+}
+
+/** 容器の要素も最初に一度だけ探す (使わない定義の間に隠し置き場へ移しても、戻るときに見つかるように) */
+const foundBoxes = new Map<string, HTMLElement | null>();
+function boxElement(name: string): HTMLElement | null {
+  if (!foundBoxes.has(name)) foundBoxes.set(name, document.querySelector<HTMLElement>(BOXES[name] ?? ""));
+  return foundBoxes.get(name)!;
 }
 
 /** 部品の要素を取り出し、見せ方の段階を付け直す (前の定義の段階は消す) */
@@ -94,7 +101,7 @@ function place(node: LayoutNode, parent: HTMLElement, pageColumn: boolean): void
     if (els[0]) overlays(els[0], node.overlays);
     return;
   }
-  const box = node.box ? document.querySelector<HTMLElement>(BOXES[node.box] ?? "") : document.createElement("div");
+  const box = node.box ? boxElement(node.box) : document.createElement("div");
   if (!box) throw new Error(`layout: 容器「${node.box}」は無い`);
   if (!node.box) made.push(box);
   box.classList.add("ld-box");
@@ -107,10 +114,9 @@ function place(node: LayoutNode, parent: HTMLElement, pageColumn: boolean): void
 
 /** 定義の中で、ページに見つからない部品と容器 (並べる前に確かめ、一つでもあれば並べ直さない) */
 function missing(node: LayoutNode): string[] {
-  const boxes = (n: LayoutNode): string[] => [...(n.box ? [n.box] : []), ...(n.children ?? []).flatMap(boxes)];
   return [
     ...slotsOf(node).filter((n) => !SLOTS[n] || elements(n).length === 0).map((n) => `部品「${n}」`),
-    ...boxes(node).filter((b) => !document.querySelector(BOXES[b] ?? "")).map((b) => `容器「${b}」`),
+    ...boxesOf(node).filter((b) => !boxElement(b)).map((b) => `容器「${b}」`),
   ];
 }
 
@@ -141,6 +147,12 @@ export function applyLayout(): void {
   unused.className = "ld-unused";
   unused.hidden = true;
   for (const slot of Object.keys(SLOTS)) if (!used.includes(slot)) unused.append(...part(slot));
+  // 使わない容器も (戻るときは place が付け直す)
+  const usedBoxes = boxesOf(next.root);
+  for (const b of Object.keys(BOXES)) {
+    const el = boxElement(b);
+    if (el && !usedBoxes.includes(b)) unused.append(el);
+  }
   document.body.append(unused);
   made.push(unused);
   for (const el of old) el.remove();

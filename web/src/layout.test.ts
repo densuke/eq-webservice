@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { type Layout, type LayoutNode, LAYOUTS, REQUIRED_SLOTS, checkLayouts, chooseLayout, flexOf, pickLayout, slotsOf } from "./layout.ts";
+import { type Layout, type LayoutNode, LAYOUTS, REQUIRED_SLOTS, checkLayouts, chooseLayout, boxesOf, flexOf, pickLayout, slotsOf } from "./layout.ts";
 import { BOXES, SLOTS } from "./layout-dom.ts";
 
 test("the layout is picked by the screen size (same 800px boundary as the CSS)", () => {
@@ -145,4 +145,10 @@ test("trial: 帯の代わりに EEW の常設パネルを置く手動専用の�
   assert.ok(slotsOf(t.root).includes("eew-panel"));
   assert.ok(!slotsOf(t.root).includes("banners"));
   assert.equal(pickLayout(LAYOUTS, 1440, 900).name, "regular");
+});
+
+test("boxesOf lists the boxes a layout uses, in order", () => {
+  const tree: LayoutNode = { dir: "column", children: [{ box: "layout", dir: "row", children: [{ slot: "main" }, { box: "side", dir: "column", children: [] }] }] };
+  assert.deepEqual(boxesOf(tree), ["layout", "side"]);
+  assert.deepEqual(boxesOf({ slot: "main" }), []);
 });

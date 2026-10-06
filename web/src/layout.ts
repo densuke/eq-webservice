@@ -73,6 +73,11 @@ export function slotsOf(node: LayoutNode): string[] {
   ];
 }
 
+/** 定義の中で使う容器の名前を、出てきた順に返す */
+export function boxesOf(node: LayoutNode): string[] {
+  return [...(node.box ? [node.box] : []), ...(node.children ?? []).flatMap(boxesOf)];
+}
+
 /** 省けない部品 (これ以外は定義で置かなくてよい) */
 export const REQUIRED_SLOTS: readonly string[] = ["main"];
 
