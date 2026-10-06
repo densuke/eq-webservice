@@ -136,6 +136,30 @@ fn falling_back_to_the_built_in_uses_the_default_names_when_the_configured_ones_
 }
 
 #[test]
+fn the_checks_match_the_web_checker() {
+    let stack = |s: &str| {
+        json_with(&format!(
+            r#"{{"dir":"column","children":[{{"slot":"main","overlays":{{"top-left":{{"flow":"column",{s},"items":["clock"]}}}}}}]}}"#
+        ))
+    };
+    let ok = |json: &str| parse(json).and_then(|f| pick(&f, "a").map(|_| ())).is_ok();
+    assert!(ok(&stack(r#""gap":"4px","pad":"1px 2px 3px 4px""#)));
+    // gap・pad は web の LENGTH と同じ単位だけ (svw・dvw・lvw・lvh は web が受け付けない)
+    for bad in ["svw", "dvw", "lvw", "lvh"] {
+        assert!(!ok(&stack(&format!(r#""gap":"1{bad}""#))), "{bad}");
+    }
+    assert!(ok(&stack(r#""gap":"1svh""#)));
+    // pad は 1〜4 個
+    assert!(!ok(&stack(r#""pad":"1px 2px 3px 4px 5px""#)));
+    // 部品 (slot) の node に children・box は付けられない
+    assert!(!ok(&json_with(r#"{"slot":"main","children":[]}"#)));
+    assert!(!ok(&json_with(r#"{"slot":"main","box":"x"}"#)));
+    // 定義の名前の重複
+    let dup = json_with(r#"{"slot":"main"}"#).replace(r#""b""#, r#""a""#);
+    assert!(parse(&dup).is_err());
+}
+
+#[test]
 fn only_version_1_is_accepted() {
     assert!(parse(&json_with(r#"{"slot":"main"}"#).replace(r#""version":1"#, r#""version":2"#)).is_err());
 }

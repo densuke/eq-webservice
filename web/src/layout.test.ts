@@ -39,6 +39,9 @@ test("a forced layout with a non-matching when falls back to the automatic pick"
   assert.equal(chooseLayout(LAYOUTS, 1000, 420, "trial").name, "landscape");
   assert.equal(chooseLayout(LAYOUTS, 844, 390, "trial").name, "landscape");
   assert.equal(chooseLayout(LAYOUTS, 1280, 720, "trial").name, "trial");
+  // 配信 (1280x720) が使う定義も、その大きさで名前どおりに選ばれる
+  assert.equal(chooseLayout(LAYOUTS, 1280, 720, "broadcast").name, "broadcast");
+  assert.equal(chooseLayout(LAYOUTS, 1280, 720, "broadcast-quake").name, "broadcast-quake");
   // 自動で選ばれる定義も、合わなければ名前で指しても使わない
   assert.equal(chooseLayout(LAYOUTS, 390, 844, "regular").name, "compact");
 });

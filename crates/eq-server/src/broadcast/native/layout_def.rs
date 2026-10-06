@@ -152,6 +152,10 @@ pub fn parse_size(s: &str) -> anyhow::Result<Size> {
 
 /// 間隔・余白・最小の高さ (固定の長さだけ)
 pub(super) fn parse_length(s: &str) -> anyhow::Result<Size> {
+    // web の LENGTH は svw・dvw・lvw・lvh を受け付けない (大きさ SIZE は受け付ける)
+    if ["svw", "dvw", "lvw", "lvh"].iter().any(|u| s.ends_with(u)) {
+        bail!("長さ「{s}」は使えない");
+    }
     match parse_size(s)? {
         Size::Fill(_) | Size::Auto => bail!("長さ「{s}」は使えない"),
         l => Ok(l),
@@ -162,6 +166,11 @@ pub fn parse(json: &str) -> anyhow::Result<LayoutFile> {
     let file: LayoutFile = serde_json::from_str(json).context("レイアウトの定義を読めない")?;
     if file.version != 1 {
         bail!("レイアウトの定義の version は 1 (いまは {})", file.version);
+    }
+    for (i, l) in file.layouts.iter().enumerate() {
+        if file.layouts[..i].iter().any(|o| o.name == l.name) {
+            bail!("定義の名前「{}」が重なっている", l.name);
+        }
     }
     Ok(file)
 }
@@ -191,8 +200,12 @@ fn check_stack(s: &Stack) -> anyhow::Result<()> {
     for l in [&s.gap, &s.min_height].into_iter().flatten() {
         parse_length(l)?;
     }
-    for l in s.pad.iter().flat_map(|p| p.split(' ')) {
-        parse_length(l)?;
+    if let Some(p) = &s.pad {
+        let n = p.split(' ').count();
+        if !(1..=4).contains(&n) {
+            bail!("pad「{p}」は 1〜4 個");
+        }
+        p.split(' ').try_for_each(|l| parse_length(l).map(drop))?;
     }
     s.items.iter().try_for_each(|i| match i {
         StackItem::Stack(s) => check_stack(s),
@@ -203,6 +216,9 @@ fn check_stack(s: &Stack) -> anyhow::Result<()> {
 fn check_lengths(node: &Node) -> anyhow::Result<()> {
     if let Some(s) = &node.size {
         parse_size(s)?;
+    }
+    if node.slot.is_some() && (node.children.is_some() || node.r#box.is_some()) {
+        bail!("部品 (slot) に children・box は付けられない");
     }
     node.overlays
         .iter()
