@@ -50,17 +50,22 @@ export interface Layout {
   root: LayoutNode;
 }
 
+/** 定義の条件 (when) が画面の大きさに合うか。when が無ければ常に合う */
+const fits = (l: Layout, width: number, height: number): boolean => {
+  const { minWidth, maxWidth, minHeight, maxHeight } = l.when ?? {};
+  return (minWidth == null || width >= minWidth) && (maxWidth == null || width <= maxWidth) && (minHeight == null || height >= minHeight) && (maxHeight == null || height <= maxHeight);
+};
+
 /** 画面の大きさで定義を選ぶ (manual は選ばない)。どれにも合わなければ manual でない先頭 */
 export function pickLayout(layouts: readonly Layout[], width: number, height: number): Layout {
-  const ok = ({ minWidth, maxWidth, minHeight, maxHeight }: NonNullable<Layout["when"]>) =>
-    (minWidth == null || width >= minWidth) && (maxWidth == null || width <= maxWidth) && (minHeight == null || height >= minHeight) && (maxHeight == null || height <= maxHeight);
   const auto = layouts.filter((l) => !l.manual);
-  return auto.find((l) => ok(l.when ?? {})) ?? auto[0];
+  return auto.find((l) => fits(l, width, height)) ?? auto[0];
 }
 
-/** forced (URL の ?layout=) と同じ名前の定義があればそれ (manual でも)。無い・空・null なら画面の大きさで選ぶ */
+/** forced (URL の ?layout=) と同じ名前の定義があればそれ (manual でも)。ただし when があって画面の大きさに合わなければ使わない。無い・空・null でも画面の大きさで選ぶ */
 export function chooseLayout(layouts: readonly Layout[], width: number, height: number, forced: string | null): Layout {
-  return (forced ? layouts.find((l) => l.name === forced) : undefined) ?? pickLayout(layouts, width, height);
+  const named = forced ? layouts.find((l) => l.name === forced) : undefined;
+  return named && fits(named, width, height) ? named : pickLayout(layouts, width, height);
 }
 
 /** 定義の中に置かれた部品の名前を、重ね物と入れ子の積みを含めて出てきた順に返す (重複もそのまま) */
