@@ -190,3 +190,19 @@ fn parts_the_broadcast_cannot_draw_are_left_out_and_reported() {
     assert_eq!(unsupported_slots(&d), ["settings", "countdown"]);
     assert!(unsupported_slots(&shipped("broadcast")).is_empty());
 }
+
+#[test]
+fn a_layout_whose_map_has_no_width_or_falls_off_the_screen_is_refused() {
+    let file = parse(
+        r#"{"version": 1, "layouts": [
+          {"name": "zero", "root": {"dir": "row", "children": [{"slot": "main"}, {"slot": "detail", "size": "1280px"}]}},
+          {"name": "over", "root": {"dir": "column", "children": [{"slot": "main", "size": "700px"}, {"slot": "credit", "size": "100px"}]}},
+          {"name": "ok", "root": {"dir": "column", "children": [{"slot": "main"}]}}
+        ]}"#,
+    )
+    .unwrap();
+    let def = |n: &str| file.layouts.iter().find(|l| l.name == n).unwrap().clone();
+    assert!(super::placed::Placed::new(&def("zero"), &def("ok")).is_err());
+    assert!(super::placed::Placed::new(&def("over"), &def("ok")).is_err());
+    assert!(super::placed::Placed::new(&def("ok"), &def("ok")).is_ok());
+}
