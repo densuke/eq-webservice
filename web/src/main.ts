@@ -16,7 +16,7 @@ import { renderMarkers, renderScene, scene } from "./scene.ts";
 import { pipSlot } from "./replay-sound.ts";
 import { play, soundEnabled } from "./sound.ts";
 import { $, map, subMap } from "./dom.ts";
-import { renderSubMap } from "./sub-map.ts";
+import { invalidateSubMap, renderSubMap } from "./sub-map.ts";
 import { type World, app, hooks, liveWorld, now, now as serverNow } from "./state.ts";
 import { activeAreas, latestTsunami, tsunamiAlert } from "./tsunami.ts";
 import type { EewEvent, EqEvent, UserquakeEvent } from "./types.ts";
@@ -179,6 +179,8 @@ export function onEvents(all: EqEvent[], live: boolean, target: World = liveWorl
   if (events.some((e) => e.source === "wolfx")) $("#credit-wolfx").hidden = false;
   // ブラウザ通知は実際の情報だけ (デモは通知しない)
   if (live && target === liveWorld) events.forEach(notify);
+  // 表示中と同じ地震の別のグループ (EEW と地震情報) が更新されても、サブの地図を描き直す
+  invalidateSubMap();
   renderAll();
   if (alert) playAlert(alert);
 }
