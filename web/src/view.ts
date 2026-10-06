@@ -6,13 +6,14 @@ import { eewPanelView } from "./eew-panel.ts";
 import { esc } from "./html.ts";
 import { byPriority, rotationIndex, sameQuake } from "./priority.ts";
 import { activeEews, currentGroup, groupPlace, groupScale, relatedQuake } from "./quakes.ts";
+import { eewKindLabel, hypoText, TSUNAMI_TEXT } from "./sub-caption.ts";
 import { scaleColor, scaleLabel, scaleTextColor } from "./scale.ts";
 import { $, map } from "./dom.ts";
 import type { JapanMap } from "./map.ts";
 import { listOpen, shownInList } from "./personal.ts";
 import { app, now } from "./state.ts";
 import { activeAreas } from "./tsunami.ts";
-import type { EewEvent, Hypocenter, PrefScale, Scale, TsunamiEvent } from "./types.ts";
+import type { EewEvent, PrefScale, Scale, TsunamiEvent } from "./types.ts";
 
 /** EEW バナーに並べる件数 (残りは「ほか N 件」) */
 const EEW_BANNER_MAX = 3;
@@ -27,23 +28,6 @@ function badge(s: Scale, big = false): string {
     s > 0 ? scaleLabel(s) : "-"
   }</span>`;
 }
-
-function hypoText(h: Hypocenter | null): string {
-  if (!h) return "震源調査中";
-  const parts = [esc(h.name || "震源不明")];
-  if (h.magnitude != null) parts.push(`M${h.magnitude.toFixed(1)}`);
-  if (h.depth_km === 0) parts.push("ごく浅い");
-  else if (h.depth_km != null) parts.push(`深さ${h.depth_km}km`);
-  return parts.join(" / ");
-}
-
-const TSUNAMI_TEXT: Record<string, string> = {
-  None: "この地震による津波の心配はありません",
-  NonEffective: "若干の海面変動 (被害の心配なし)",
-  Checking: "津波の有無を調査中",
-  Watch: "津波注意報 発表中",
-  Warning: "津波警報等 発表中",
-};
 
 export const GRADE_LABEL: Record<string, string> = {
   major_warning: "大津波警報",
@@ -186,7 +170,7 @@ export function renderDetail(): void {
         <div class="detail-title">${numTag(g.key)}${esc(q.hypocenter?.name || "震源調査中")}</div>
         <div class="detail-sub">${esc(q.originTime)} 発生</div></div></div>
       <dl class="facts">
-        <dt>震源</dt><dd>${hypoText(q.hypocenter)}</dd>
+        <dt>震源</dt><dd>${esc(hypoText(q.hypocenter))}</dd>
         <dt>津波</dt><dd>${esc(TSUNAMI_TEXT[q.domesticTsunami] ?? "—")}</dd>
       </dl>
       ${q.comment ? `<p class="comment">${esc(q.comment)}</p>` : ""}
@@ -212,10 +196,10 @@ export function renderDetail(): void {
     const e = heldEew(g);
     box.innerHTML = `
       <div class="detail-head">${badge(e.max_scale, true)}
-        <div><div class="detail-kind eew-title">緊急地震速報 (${e.warning ? "警報" : "予報"})${e.test ? " [テスト]" : ""} 第${esc(e.serial)}報</div>
+        <div><div class="detail-kind eew-title">${esc(eewKindLabel(e))}</div>
         <div class="detail-title">${numTag(g.key)}${e.cancelled ? "取り消されました" : esc(e.hypocenter?.name ?? "震源不明")}</div>
         <div class="detail-sub">${esc(e.origin_time ?? e.issued_at)} 発生</div></div></div>
-      <dl class="facts"><dt>震源</dt><dd>${hypoText(e.hypocenter)}</dd><dt>予測最大</dt><dd>震度${scaleLabel(e.max_scale)}</dd></dl>
+      <dl class="facts"><dt>震源</dt><dd>${esc(hypoText(e.hypocenter))}</dd><dt>予測最大</dt><dd>震度${scaleLabel(e.max_scale)}</dd></dl>
       <div class="points">${e.areas
         .map(
           (a) =>
