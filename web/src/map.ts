@@ -7,6 +7,7 @@ import { geoCircle } from "./waves.ts";
 import { ringsBox, union, type Box } from "./camera.ts";
 import mapCss from "./map.css";
 import { esc } from "./html.ts";
+import { baseId } from "./map-ids.ts";
 import { thinCityLayer } from "./thin.ts";
 import { INSET_MARGIN_DEG, INSET_PAD_PX, insetMarkerPos } from "./inset.ts";
 import { clusterMarkers, edgePoint, labelSize, type Cluster, type Marker } from "./cluster.ts";
@@ -100,8 +101,25 @@ function ringPath(coords: [number, number][]): string {
   return d + "Z";
 }
 
+export interface MapOptions {
+  /** 南西諸島・小笠原の別枠 (既定 true) */
+  insets?: boolean;
+  /** 手でのパン・ズーム (既定 true) */
+  panZoom?: boolean;
+  /** 画面外の地震の矢印 (既定 true) */
+  offscreen?: boolean;
+  /** 横向きの帯の大きさを見張って天気の札を置き直す (既定 true) */
+  bandWatch?: boolean;
+  /** 表示範囲の大きさによらず、区域と観測点で細かく描く (既定 false) */
+  alwaysDetail?: boolean;
+}
+
+/** 作った地図の数 (下地の id の連番) */
+let mapCount = 0;
+
 export class JapanMap {
   readonly svg: SVGSVGElement;
+  private alwaysDetail: boolean;
   private neighborLayer = el("g", { class: "neighbors" });
   private prefLayer = el("g", { class: "prefs" });
   private areaLayer = el("g", { class: "areas" });
@@ -156,7 +174,7 @@ export class JapanMap {
   private insets: ((typeof INSETS)[number] & { box: HTMLDivElement; svg: SVGSVGElement; markers: SVGGElement; bounds: Box })[] = [];
   private markerItems: { key: string; x: number; y: number; label: number | null; primary: boolean; scale: number; note?: string; ghost?: boolean }[] = [];
   /** 画面外の地震の方向を示す矢印 (地図の上に重ねる HTML) */
-  private offscreen = document.createElement("div");
+  private offscreen: HTMLDivElement | null = null;
   /** 画面外の矢印が押されたとき (グループのキー) */
   onSelect: ((key: string) => void) | null = null;
   private pWave = el("path", { class: "wave wave-p" });
@@ -169,17 +187,20 @@ export class JapanMap {
   /** 「全体図」のように、自動カメラを止めたうえで決まった表示へ動かしている */
   private manual = false;
 
-  constructor(container: HTMLElement) {
+  constructor(container: HTMLElement, opts: MapOptions = {}) {
+    const { insets = true, panZoom = true, offscreen = true, bandWatch = true, alwaysDetail = false } = opts;
+    this.alwaysDetail = alwaysDetail;
     this.svg = el("svg", { class: "map", preserveAspectRatio: "xMidYMid meet" });
     // 別枠には塗り分け・津波予報・観測点の点・地震波だけを映す (震央の印は縮尺に合わせて別に描く)
-    const base = el("g", { id: "map-base" });
+    const id = baseId(++mapCount);
+    const base = el("g", { id });
     // 外部の CSS は <use> の複製に効かないので、図形のスタイルは SVG の中に置く
     const style = el("style");
     style.textContent = mapCss;
     // P 波・S 波の円も別枠に映す (本図では地名・印より下なので、base の最後に置いても重なりは変わらない)
     base.append(style, this.neighborLayer, this.prefLayer, this.warnLayer, this.rainLayer, this.areaLayer, this.tsunamiLayer, this.dotLayer, this.waveLayer);
     this.svg.append(base, this.labelLayer, this.cityLayer, this.markerLayer);
-    for (const ins of INSETS) {
+    for (const ins of insets ? INSETS : []) {
       const [x0, y0] = project(ins.lonMin, ins.latMax);
       const [x1, y1] = project(ins.lonMax, ins.latMin);
       const box = document.createElement("div");
@@ -189,7 +210,7 @@ export class JapanMap {
       const svg = el("svg", { viewBox: `${x0} ${y0} ${x1 - x0} ${y1 - y0}`, preserveAspectRatio: "xMidYMid meet" });
       svg.style.aspectRatio = String((x1 - x0) / (y1 - y0));
       const use = el("use");
-      use.setAttribute("href", "#map-base");
+      use.setAttribute("href", `#${id}`);
       const markers = el("g");
       svg.append(use, markers);
       box.append(svg);
@@ -201,19 +222,26 @@ export class JapanMap {
     this.tip.hidden = true;
     container.append(this.tip);
     this.installTooltip();
-    this.offscreen.className = "offscreen-layer";
-    this.offscreen.addEventListener("click", (e) => {
-      const key = (e.target as HTMLElement).closest<HTMLElement>("[data-key]")?.dataset.key;
-      if (key) this.onSelect?.(key);
-    });
-    container.append(this.svg, this.offscreen);
+    container.append(this.svg);
+    if (offscreen) {
+      const layer = document.createElement("div");
+      layer.className = "offscreen-layer";
+      layer.addEventListener("click", (e) => {
+        const key = (e.target as HTMLElement).closest<HTMLElement>("[data-key]")?.dataset.key;
+        if (key) this.onSelect?.(key);
+      });
+      container.append(layer);
+      this.offscreen = layer;
+    }
     this.view = this.homeView();
     this.applyView();
-    this.installPanZoom();
+    if (panZoom) this.installPanZoom();
     new ResizeObserver(() => this.applyView()).observe(this.svg);
-    // 横向きでは帯が地図の上の札になる。出入りや中身で大きさが変わったら、天気の札を置き直す
-    const bands = new ResizeObserver(() => document.body.dataset.layout === "landscape" && this.thinCities());
-    for (const el of document.querySelectorAll("#eew-banner, #tsunami-banner, #warn-banner")) bands.observe(el);
+    if (bandWatch) {
+      // 横向きでは帯が地図の上の札になる。出入りや中身で大きさが変わったら、天気の札を置き直す
+      const bands = new ResizeObserver(() => document.body.dataset.layout === "landscape" && this.thinCities());
+      for (const el of document.querySelectorAll("#eew-banner, #tsunami-banner, #warn-banner")) bands.observe(el);
+    }
   }
 
   async load(url: string): Promise<void> {
@@ -575,6 +603,8 @@ export class JapanMap {
 
   /** 番号の付いた地震の震央が画面外にあれば、画面の端にその方向の矢印と番号を出す */
   private renderOffscreen(): void {
+    const layer = this.offscreen;
+    if (!layer) return;
     const r = this.svg.getBoundingClientRect();
     const k = this.unitsPerPixel();
     const ox = this.view.x - (r.width * k - this.view.w) / 2;
@@ -588,7 +618,7 @@ export class JapanMap {
         return `<button type="button" class="offscreen" data-key="${esc(m.key)}" style="left:${p!.x.toFixed(0)}px;top:${p!.y.toFixed(0)}px;--c:${c}" title="${m.label}番の地震へ"><i style="transform:rotate(${p!.angle.toFixed(0)}deg) translateX(17px)"></i>${m.label}</button>`;
       })
       .join("");
-    if (this.offscreen.innerHTML !== html) this.offscreen.innerHTML = html;
+    if (layer.innerHTML !== html) layer.innerHTML = html;
   }
 
   /** P波・S波の到達範囲 (km)。複数の地震の円をまとめて描く。空配列で非表示 */
@@ -613,6 +643,14 @@ export class JapanMap {
       this.lastFrame = performance.now();
       requestAnimationFrame(this.step);
     }
+  }
+
+  /** 自動カメラの目標へ、動きを付けずに一度に移す。null は日本全体 (手で動かしたかは見ない) */
+  jumpTo(box: Box | null): void {
+    const v = box ? this.boxToView(box) : this.homeView();
+    this.target = v;
+    this.view = { ...v };
+    this.applyView();
   }
 
   /** 自動カメラに戻す */
@@ -697,7 +735,7 @@ export class JapanMap {
     // 地図が動いたらツールチップの位置がずれるので消す
     this.tip.hidden = true;
     this.svg.setAttribute("viewBox", `${v.x} ${v.y} ${v.w} ${v.h}`);
-    this.svg.classList.toggle("zoomed", this.areas.size > 0 && v.h < DETAIL_MAX_H);
+    this.svg.classList.toggle("zoomed", this.areas.size > 0 && (this.alwaysDetail || v.h < DETAIL_MAX_H));
     this.renderLabels();
     this.updateInsets();
     this.renderMarkers();
