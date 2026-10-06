@@ -15,10 +15,12 @@ use super::frame::{BoxRect, Clip, Frame, OKINAWA};
 use super::geo::{Shape, View};
 use super::hindsight::Hindsight;
 use super::icon::Icons;
+use super::layout_resolve::Rect;
 use super::model::{scale_color, scale_text_color, QuakeSummary};
 use super::notice::{self, LayoutCache, Notices};
 use super::paint::{epicenter, ghost_epicenter, rect, rrect, LAND, LAND_EDGE, MUTED, NEIGHBOR, NEIGHBOR_EDGE, SEA};
 use super::panel;
+use super::placed::Placed;
 use super::shaken::{Stations, Zones};
 use super::test_mark;
 use super::text::Text;
@@ -27,16 +29,10 @@ use crate::quake::{Hypocenter, Scale};
 
 pub const W: u32 = 1280;
 pub const H: u32 = 720;
-pub const BAR_H: f32 = 36.0;
-pub const MAP_W: f32 = 900.0;
 
-/// 地図の枠 (x, y, 幅, 高さ)
-pub const MAP_RECT: (f64, f64, f64, f64) = (0.0, BAR_H as f64, MAP_W as f64, H as f64 - BAR_H as f64);
-
-/// サブの地図の枠 (x, y, 幅, 高さ)。試験 (BroadcastConfig::sub_map)。地震の画面だけに描く。
-/// 右パネルの「詳細」(地震・緊急地震速報とも、下端は panel.rs の区切り線 y 180〜181。文字は 1 行に収めるので伸びない) と
-/// 出典 (最上行の文字の上端が H-5-5*15-9 = 631) の間、y 190〜490 に置く。履歴 (y 204〜476) は隠れる
-pub const SUB_RECT: (f64, f64, f64, f64) = (MAP_W as f64, 190.0, W as f64 - MAP_W as f64, 300.0);
+// 部品の枠 (地図・サブの地図・右パネルなど) は定数ではなく、レイアウトの定義から割り付けた placed::Placed が持つ。
+// サブの地図 (試験: BroadcastConfig::sub_map) は地震の画面だけに描く。今の定義 (broadcast-quake) は右パネルの詳細の下
+// (y 190〜490) に置き、履歴 (y 204〜476) はその下に隠れる
 
 /// 描くときに渡す、そのときの状態
 pub struct Scene<'a> {
@@ -94,16 +90,29 @@ pub struct Renderer {
     cards: CardCache,
     /// お知らせの並べた行の覚え
     notice_lines: LayoutCache,
+    /// 部品ごとの枠 (レイアウトの定義から割り付けたもの。replay-video は組み込みの定義)
+    placed: Placed,
 }
 
 /// 別枠の枠線の色 (web/public/style.css の .inset)
 pub(super) const INSET_LINE: [u8; 3] = [0x3a, 0x44, 0x52];
 
 impl Renderer {
-    pub fn new(view: View, neighbors: Vec<Shape>, prefs: Vec<Shape>, areas: Vec<Shape>, text: Text) -> Renderer {
+    pub fn new(
+        view: View,
+        neighbors: Vec<Shape>,
+        prefs: Vec<Shape>,
+        areas: Vec<Shape>,
+        text: Text,
+        placed: Placed,
+    ) -> Renderer {
         let mut r = Renderer {
             text,
-            insets: Frame::inset(&view, &OKINAWA).into_iter().collect(),
+            insets: placed
+                .inset
+                .and_then(|at| Frame::inset(&view, &OKINAWA, at))
+                .into_iter()
+                .collect(),
             main: Frame::main(view),
             zoomed: None,
             clip: None,
@@ -116,6 +125,7 @@ impl Renderer {
             base: Pixmap::new(W, H).expect("size"),
             cards: CardCache::default(),
             notice_lines: LayoutCache::default(),
+            placed,
         };
         r.base = r.draw_base();
         r
@@ -126,14 +136,24 @@ impl Renderer {
         self.zones = Zones::new(areas, &self.prefs, stations);
     }
 
+    /// 地図の枠の縦横比 (寄りの範囲の計算に使う)
+    pub fn map_aspect(&self) -> f64 {
+        self.placed.map_aspect()
+    }
+
+    /// サブの地図の枠の縦横比 (定義に置かれていなければ None)
+    pub fn sub_aspect(&self) -> Option<f64> {
+        self.placed.sub_aspect()
+    }
+
     /// 寄りを有効にする (地図の枠の型を立てる)
     pub fn enable_zoom(&mut self) {
-        self.clip = Frame::map_clip();
+        self.clip = Frame::map_clip(self.placed.main);
     }
 
     /// サブの地図を有効にする (試験)
     pub fn enable_sub_map(&mut self) {
-        self.sub_clip = Frame::sub_clip();
+        self.sub_clip = self.placed.sub.and_then(Frame::sub_clip);
     }
 
     pub fn sub_map_enabled(&self) -> bool {
@@ -144,7 +164,8 @@ impl Renderer {
     pub fn set_sub_view(&mut self, fit: Option<Fit>) {
         self.sub = fit
             .zip(self.sub_clip.as_ref())
-            .map(|(f, clip)| Frame::zoomed(&self.main.view, View::from_fit(&f, SUB_RECT), clip));
+            .zip(self.placed.sub)
+            .map(|((f, clip), at)| Frame::zoomed(&self.main.view, View::from_fit(&f, at.tuple64()), clip));
     }
 
     pub fn zoom_enabled(&self) -> bool {
@@ -158,15 +179,20 @@ impl Renderer {
 
     /// 次に描く地図の表示範囲 (地図の座標)。None なら日本全体 (別枠も出す)。寄りが有効でなければ何もしない
     pub fn set_view(&mut self, fit: Option<Fit>) {
-        self.zoomed = fit
-            .zip(self.clip.as_ref())
-            .map(|(f, clip)| Frame::zoomed(&self.main.view, super::geo::View::from_fit(&f, MAP_RECT), clip));
+        self.zoomed = fit.zip(self.clip.as_ref()).map(|(f, clip)| {
+            Frame::zoomed(
+                &self.main.view,
+                super::geo::View::from_fit(&f, self.placed.main.tuple64()),
+                clip,
+            )
+        });
     }
 
     /// 動かない部分: 海・陸・県境、別枠、パネルの枠
     fn draw_base(&mut self) -> Pixmap {
         let mut pm = Pixmap::new(W, H).expect("size");
-        rect(&mut pm, 0.0, BAR_H, MAP_W, H as f32 - BAR_H, SEA, 1.0);
+        let main = self.placed.main;
+        rect(&mut pm, main.x, main.y, main.w, main.h, SEA, 1.0);
         for f in std::iter::once(&self.main).chain(&self.insets) {
             if let Some(((x, y, w, h), _)) = f.inset_box() {
                 rrect(&mut pm, x - 1.0, y - 1.0, w + 2.0, h + 2.0, 4.0, INSET_LINE, 1.0);
@@ -177,7 +203,7 @@ impl Renderer {
                 self.text.draw(&mut pm, title, x + 4.0, y + 12.0, 10.0, MUTED);
             }
         }
-        panel::draw_frame(&mut pm, &mut self.text);
+        panel::draw_frame(&mut pm, &mut self.text, &self.placed);
         pm
     }
 
@@ -185,17 +211,21 @@ impl Renderer {
     /// 文字や塗りは重いので、波が動く間も 1 秒ごとにここで描き、コマごとには draw_waves だけを重ねる
     pub fn render(&mut self, scene: &Scene) -> Pixmap {
         let mut pm = self.base.clone();
+        let placed = self.placed;
+        let main = placed.main;
         if let Some(z) = &self.zoomed {
             // 日本全体の地図 (と別枠) を海で隠し、寄った地図を描き直す
-            rect(&mut pm, 0.0, BAR_H, MAP_W, H as f32 - BAR_H, SEA, 1.0);
+            rect(&mut pm, main.x, main.y, main.w, main.h, SEA, 1.0);
             draw_land(&mut pm, z, &self.neighbors, &self.prefs);
-            panel::draw_legend(&mut pm, &mut self.text);
+            if let Some(legend) = placed.legend {
+                panel::draw_legend(&mut pm, &mut self.text, legend);
+            }
         }
         for (slot, f) in frames(&self.main, &self.insets, &self.zoomed).into_iter().enumerate() {
             match Shake::of(scene) {
-                Some(s) => draw_shake(&mut pm, &mut self.text, &self.prefs, f, &s, true),
+                Some(s) => draw_shake(&mut pm, &mut self.text, &self.prefs, f, &s, true, main.right()),
                 None => {
-                    let (fixed, bounds) = card_room(f, &self.insets, self.zoomed.is_some(), scene.test);
+                    let (fixed, bounds) = card_room(f, &self.insets, self.zoomed.is_some(), scene.test, &placed);
                     let env = calm::CardEnv {
                         slot,
                         prefs: &self.prefs,
@@ -209,21 +239,21 @@ impl Renderer {
                 draw_hindsight(&mut pm, &mut self.text, f, h);
             }
         }
-        panel::draw_dynamic(&mut pm, &mut self.text, scene);
-        if let (Some(f), true) = (&self.sub, scene.quake.is_some() || scene.eew.is_some()) {
-            draw_sub_map(&mut pm, &mut self.text, &self.neighbors, &self.prefs, f, scene);
+        panel::draw_dynamic(&mut pm, &mut self.text, scene, &placed);
+        if let (Some(f), Some(at), true) = (&self.sub, placed.sub, scene.quake.is_some() || scene.eew.is_some()) {
+            draw_sub_map(&mut pm, &mut self.text, &self.neighbors, &self.prefs, f, scene, at);
         }
         // お知らせは平時だけ (右パネルの下半分。地震の画面では出さない)
-        if let (None, None, Some(n)) = (scene.quake, scene.eew, scene.notices) {
-            notice::draw(&mut pm, &mut self.text, &mut self.notice_lines, n, scene.now_ms);
+        if let (None, None, Some(n), Some(area)) = (scene.quake, scene.eew, scene.notices, placed.notice) {
+            notice::draw(&mut pm, &mut self.text, &mut self.notice_lines, n, scene.now_ms, area);
         }
         // 警報以上の帯は平時だけ。テスト配信の赤い帯の下に置く
         if let (None, None, Some(w)) = (scene.quake, scene.eew, scene.warnings) {
             let below = if scene.test { test_mark::BAND_H } else { 0.0 };
-            banner::draw(&mut pm, &mut self.text, w, below);
+            banner::draw(&mut pm, &mut self.text, w, main.y, below);
         }
         if scene.test {
-            test_mark::draw(&mut pm, &mut self.text);
+            test_mark::draw(&mut pm, &mut self.text, &placed);
         }
         pm
     }
@@ -247,15 +277,16 @@ impl Renderer {
 
 /// 描く面: 寄っていれば寄った本図だけ、そうでなければ本図と別枠
 /// 札を置かない所と、置いてよい範囲。別枠は枠の中だけ。本図は左下の凡例・情報の窓・別枠 (寄っていないとき) を避ける
-fn card_room(f: &Frame, insets: &[Frame], zoomed: bool, test: bool) -> (Vec<BoxRect>, BoxRect) {
+fn card_room(f: &Frame, insets: &[Frame], zoomed: bool, test: bool, placed: &Placed) -> (Vec<BoxRect>, BoxRect) {
     if let Some((rect, _)) = f.inset_box() {
         return (Vec::new(), rect);
     }
-    let mut fixed = vec![panel::LEGEND_RECT, calm::INFO_WINDOW];
+    let mut fixed: Vec<BoxRect> = placed.legend.map(Rect::tuple).into_iter().collect();
+    fixed.push(calm::INFO_WINDOW);
     if !zoomed {
         fixed.extend(insets.iter().filter_map(|i| i.inset_box().map(|(r, _)| r)));
     }
-    (fixed, calm::main_bounds(test))
+    (fixed, calm::main_bounds(test, placed.main))
 }
 
 fn frames<'a>(main: &'a Frame, insets: &'a [Frame], zoomed: &'a Option<Frame>) -> Vec<&'a Frame> {
@@ -277,19 +308,22 @@ fn draw_land(pm: &mut Pixmap, f: &Frame, neighbors: &[Shape], prefs: &[Shape]) {
     }
 }
 
-/// サブの地図 (試験): SUB_RECT を海で塗り、陸と、地震の揺れ (県の塗り・震央) を描いて、1px の枠を付ける。
+/// サブの地図 (試験): 矩形 at (定義の map-sub) を海で塗り、陸と、地震の揺れ (県の塗り・震央) を描いて、1px の枠を付ける。
 /// 震度の札・緊急地震速報の札 (tag) は出さない (枠の外にはみ出しうる)。区域の塗りと観測点の点は無い
-fn draw_sub_map(pm: &mut Pixmap, text: &mut Text, neighbors: &[Shape], prefs: &[Shape], f: &Frame, scene: &Scene) {
-    let (x, y, w, h) = (
-        SUB_RECT.0 as f32,
-        SUB_RECT.1 as f32,
-        SUB_RECT.2 as f32,
-        SUB_RECT.3 as f32,
-    );
+fn draw_sub_map(
+    pm: &mut Pixmap,
+    text: &mut Text,
+    neighbors: &[Shape],
+    prefs: &[Shape],
+    f: &Frame,
+    scene: &Scene,
+    at: Rect,
+) {
+    let Rect { x, y, w, h } = at;
     rect(pm, x, y, w, h, SEA, 1.0);
     draw_land(pm, f, neighbors, prefs);
     if let Some(s) = Shake::of(scene) {
-        draw_shake(pm, text, prefs, f, &s, false);
+        draw_shake(pm, text, prefs, f, &s, false, x + w);
     }
     for (rx, ry, rw, rh) in [
         (x, y, w, 1.0),
@@ -358,8 +392,17 @@ fn wave_paths(view: &View, waves: &[Wave]) -> Vec<WavePaths> {
     waves.iter().map(|w| (circle(w, w.p_km), circle(w, w.s_km))).collect()
 }
 
-/// 揺れの画面: 都道府県を震度の色で塗り、震度の札と震央 (と札) を出す (札は本図だけ)
-fn draw_shake(pm: &mut Pixmap, text: &mut Text, prefs: &[Shape], frame: &Frame, shake: &Shake, cards: bool) {
+/// 揺れの画面: 都道府県を震度の色で塗り、震度の札と震央 (と札) を出す (札は本図だけ)。
+/// map_right は地図の枠 (定義の main) の右端 (緊急地震速報の札が本図の右端をはみ出さないため)
+fn draw_shake(
+    pm: &mut Pixmap,
+    text: &mut Text,
+    prefs: &[Shape],
+    frame: &Frame,
+    shake: &Shake,
+    cards: bool,
+    map_right: f32,
+) {
     let hit: Vec<(&Shape, Scale)> = shake
         .scales
         .iter()
@@ -401,7 +444,7 @@ fn draw_shake(pm: &mut Pixmap, text: &mut Text, prefs: &[Shape], frame: &Frame, 
         if let (Some(tag), true) = (&shake.tag, cards && text.enabled()) {
             let w = text.width(tag, 13.0) + 14.0;
             // 印の右に置く。別枠の右端をはみ出すときは左に置く
-            let edge = frame.inset_box().map_or(MAP_W, |((bx, _, bw, _), _)| bx + bw);
+            let edge = frame.inset_box().map_or(map_right, |((bx, _, bw, _), _)| bx + bw);
             let left = if x + 14.0 + w > edge { x - 14.0 - w } else { x + 14.0 };
             rrect(pm, left, y - 11.0, w, 22.0, 5.0, [255, 255, 255], 0.9);
             rrect(pm, left + 1.0, y - 10.0, w - 2.0, 20.0, 4.0, [0xb3, 0x59, 0x00], 1.0);

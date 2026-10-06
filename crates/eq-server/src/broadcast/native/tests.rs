@@ -4,12 +4,13 @@
 use tiny_skia::Pixmap;
 
 use super::data::{City, CityWeather, Kind, Tomorrow, Warnings};
-use super::draw::{Renderer, Scene, MAP_RECT};
+use super::draw::{Renderer, Scene};
 use super::eew::{EewSummary, Wave};
 use super::frame::{Frame, OKINAWA};
 use super::geo::{self, View};
 use super::model::{scale_color, QuakeSummary};
 use super::paint::SEA;
+use super::placed::Placed;
 use super::text::Text;
 use super::*;
 use crate::broadcast::status::{Notice, Outage};
@@ -18,17 +19,30 @@ use crate::quake::{Hypocenter, Scale};
 const NOW: u64 = 1_790_000_000_000;
 static NO_ICONS: std::sync::LazyLock<Icons> = std::sync::LazyLock::new(Icons::new);
 
+/// 組み込みの定義 (broadcast) の地図の枠・別枠の矩形
+fn map_rect() -> (f64, f64, f64, f64) {
+    Placed::builtin().unwrap().main.tuple64()
+}
+
+fn inset_rect() -> super::layout_resolve::Rect {
+    Placed::builtin().unwrap().inset.unwrap()
+}
+
 fn renderer(text: Text) -> Renderer {
+    renderer_with(text, Placed::builtin().unwrap())
+}
+
+fn renderer_with(text: Text, placed: Placed) -> Renderer {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/public");
-    let view = View::fit_home(MAP_RECT);
+    let view = View::fit_home(placed.main.tuple64());
     let prefs = geo::load(&dir.join("japan.geojson"), "name", &view).unwrap();
     let areas = geo::load(&dir.join("warning-areas.geojson"), "code", &view).unwrap();
     let neighbors = geo::load(&dir.join("neighbors.geojson"), "name", &view).unwrap();
-    Renderer::new(view, neighbors, prefs, areas, text)
+    Renderer::new(view, neighbors, prefs, areas, text, placed)
 }
 
 fn center_of(pref: &str) -> (u32, u32) {
-    let view = View::fit_home(MAP_RECT);
+    let view = View::fit_home(map_rect());
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/public");
     let shapes = geo::load(&dir.join("japan.geojson"), "name", &view).unwrap();
     let c = shapes.iter().find(|s| s.key == pref).unwrap().center;
@@ -37,7 +51,7 @@ fn center_of(pref: &str) -> (u32, u32) {
 
 /// 日本海の画素 (陸から離れた海)
 fn sea_px() -> (u32, u32) {
-    let (x, y) = View::fit_home(MAP_RECT).px(134.0, 40.5);
+    let (x, y) = View::fit_home(map_rect()).px(134.0, 40.5);
     (x as u32, y as u32)
 }
 
@@ -117,6 +131,24 @@ fn scene<'a>(
 }
 
 #[test]
+fn parts_missing_from_the_layout_are_not_drawn() {
+    use super::layout_def::{parse, pick};
+    let def = pick(
+        &parse(r#"{"version":1,"layouts":[{"name":"t","root":{"dir":"column","children":[{"slot":"main"}]}}]}"#)
+            .unwrap(),
+        "t",
+    )
+    .unwrap()
+    .clone();
+    let mut r = renderer_with(Text::none(), Placed::new(&def, &def).unwrap());
+    let g = quake(Scale(40), &[("石川県", Scale(40))], Some((37.5, 137.2)));
+    let pm = r.render(&scene(Some(&g), &[], None, None));
+    // 上部バーが無いので上端は地図 (バーの地の色ではない)。時計 (緑の枠) も描かれない
+    assert_ne!(rgb(&pm, (640, 5)), super::paint::PANEL);
+    assert!(!near(&pm, (716, 670), [0x3f, 0xb9, 0x50]));
+}
+
+#[test]
 fn calm_frame_shows_the_sea_and_a_warned_prefecture() {
     let mut r = renderer(Text::none());
     let kind = Kind {
@@ -152,7 +184,7 @@ fn calm_frame_shows_the_sea_and_a_warned_prefecture() {
 /// 東京都の市町村等のコード (警報の区域のデータから)
 fn r_areas_of_tokyo() -> Vec<String> {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/public");
-    let view = View::fit_home(MAP_RECT);
+    let view = View::fit_home(map_rect());
     let areas = geo::load(&dir.join("warning-areas.geojson"), "code", &view).unwrap();
     areas
         .into_iter()
@@ -193,7 +225,7 @@ fn an_eew_frame_paints_the_forecast_translucent_with_an_epicenter_and_a_colored_
     );
     assert_eq!(rgb(&pm, center_of("愛知県")), [0x3a, 0x42, 0x50]);
     // 震源の ✕ (中心は赤)
-    let (x, y) = View::fit_home(MAP_RECT).px(137.2, 37.5);
+    let (x, y) = View::fit_home(map_rect()).px(137.2, 37.5);
     assert!(near(&pm, (x as u32, y as u32), [0xe0, 0x1e, 0x1e]));
     // 右パネルの見出しの札: 警報は赤、予報は橙 (文字の左の余白)
     assert_eq!(rgb(&pm, (SIDE + 3, 62)), [0xd7, 0x26, 0x3d]);
@@ -219,7 +251,7 @@ fn a_wave_is_drawn_as_a_ring_that_grows_with_the_radius() {
         p_km: None,
         s_km: Some(km),
     };
-    let view = View::fit_home(MAP_RECT);
+    let view = View::fit_home(map_rect());
     // 円周の、真東・真北の点 (緯度 1 度 = 111.19km)
     let east = |km: f64| view.px(lon + km / (111.19 * lat.to_radians().cos()), lat);
     let north = |km: f64| view.px(lon, lat + km / 111.19);
@@ -254,7 +286,7 @@ fn a_wave_is_drawn_as_a_ring_that_grows_with_the_radius() {
 fn neighbor_countries_are_drawn_under_japan_and_a_missing_file_is_fine() {
     let mut r = renderer(Text::none());
     let pm = r.render(&scene(None, &[], None, None));
-    let (x, y) = View::fit_home(MAP_RECT).px(126.98, 37.57); // ソウル
+    let (x, y) = View::fit_home(map_rect()).px(126.98, 37.57); // ソウル
     assert_eq!(rgb(&pm, (x as u32, y as u32)), paint::NEIGHBOR);
     assert_eq!(rgb(&pm, center_of("長野県")), [0x3a, 0x42, 0x50]); // 日本の県はその上
                                                                    // load_renderer は neighbors.geojson が無くても動く
@@ -281,8 +313,8 @@ fn near(pm: &Pixmap, (cx, cy): (u32, u32), want: [u8; 3]) -> bool {
 
 /// 別枠の中の画素 (那覇のあたり)
 fn okinawa_px() -> (u32, u32) {
-    let main = View::fit_home(MAP_RECT);
-    let inset = frame::Frame::inset(&main, &frame::OKINAWA).unwrap();
+    let main = View::fit_home(map_rect());
+    let inset = frame::Frame::inset(&main, &frame::OKINAWA, inset_rect()).unwrap();
     let (x, y) = inset.view.px(127.95, 26.5); // 沖縄本島
     (x as u32, y as u32)
 }
@@ -319,7 +351,7 @@ fn the_okinawa_inset_is_drawn_with_land_and_the_scale_color() {
 fn warnings_in_okinawa_are_drawn_in_the_inset_too() {
     let mut r = renderer(Text::none());
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/public");
-    let view = View::fit_home(MAP_RECT);
+    let view = View::fit_home(map_rect());
     let areas = geo::load(&dir.join("warning-areas.geojson"), "code", &view).unwrap();
     let kind = vec![Kind {
         name: "特別警報".into(),
@@ -430,7 +462,7 @@ fn window_diff(a: &Pixmap, b: &Pixmap) -> usize {
 #[test]
 fn the_info_window_sits_in_the_sea_clear_of_land_the_inset_and_the_banners() {
     let (x, y, w, h) = super::calm::INFO_WINDOW;
-    let inset = Frame::inset(&View::fit_home(MAP_RECT), &OKINAWA).unwrap();
+    let inset = Frame::inset(&View::fit_home(map_rect()), &OKINAWA, inset_rect()).unwrap();
     let ((ix, _, iw, _), _) = inset.inset_box().unwrap();
     assert!(x > ix + iw); // 南西諸島の別枠の右
     assert!(y > 36.0 + 20.0 + super::banner::banner_height(2)); // 上部バー・テスト配信の帯・警報の帯 (2 行) の下
@@ -782,7 +814,7 @@ fn a_hindsight_epicenter_is_a_faint_cross_that_is_drawn_only_when_given() {
         hindsight: Some(&h),
         ..scene(None, &[], None, None)
     });
-    let (x, y) = View::fit_home(MAP_RECT).px(138.0, 36.0);
+    let (x, y) = View::fit_home(map_rect()).px(138.0, 36.0);
     let at = (x as u32, y as u32);
     assert_ne!(rgb(&ghost, at), rgb(&plain, at));
     // 本物の ✕ (中心は赤) ほど濃くない
@@ -902,7 +934,7 @@ fn the_stepper_skips_an_unchanged_frame_and_redraws_when_the_wave_moves() {
 /// 石狩市の区域の内側にある、札の色 (明るい) の画素の数
 fn card_pixels_over_ishikari(pm: &Pixmap) -> usize {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/public");
-    let view = View::fit_home(MAP_RECT);
+    let view = View::fit_home(map_rect());
     let areas = geo::load(&dir.join("warning-areas.geojson"), "code", &view).unwrap();
     let path = &areas.iter().find(|s| s.key == "0123500").unwrap().path;
     let frame = Frame::main(view);

@@ -201,6 +201,84 @@
           }
         ]
       }
+    },
+    {
+      "name": "broadcast",
+      "note": "配信 (native の eq-broadcast) の平時の並び。今の配信の絵に合わせた px。?layout=broadcast で web でも見られる (自動では選ばれない)。配信は起動時にこの定義を読む",
+      "manual": true,
+      "when": {"minWidth": 801, "minHeight": 481},
+      "root": {
+        "dir": "column",
+        "children": [
+          {"slot": "topbar", "size": "36px"},
+          {
+            "box": "layout",
+            "dir": "row",
+            "size": "fill",
+            "children": [
+              {
+                "slot": "main",
+                "size": "fill",
+                "overlays": {
+                  "top-left": {"flow": "column", "items": ["inset"]},
+                  "bottom-left": {"flow": "column", "items": ["legend"]},
+                  "bottom-right": {"flow": "column", "items": ["clock"]}
+                }
+              },
+              {
+                "box": "side",
+                "dir": "column",
+                "size": "380px",
+                "children": [
+                  {"slot": "detail", "size": "144px"},
+                  {"slot": "history", "size": "fill"},
+                  {"slot": "notice", "size": "138px"},
+                  {"slot": "credit", "size": "90px"}
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "broadcast-quake",
+      "note": "配信の地震の画面の並び。broadcast と main・topbar は同じで、右の列の詳細の下にサブの地図を置き、お知らせは置かない。?layout=broadcast-quake で web でも見られる",
+      "manual": true,
+      "when": {"minWidth": 801, "minHeight": 481},
+      "root": {
+        "dir": "column",
+        "children": [
+          {"slot": "topbar", "size": "36px"},
+          {
+            "box": "layout",
+            "dir": "row",
+            "size": "fill",
+            "children": [
+              {
+                "slot": "main",
+                "size": "fill",
+                "overlays": {
+                  "top-left": {"flow": "column", "items": ["inset"]},
+                  "bottom-left": {"flow": "column", "items": ["legend"]},
+                  "bottom-right": {"flow": "column", "items": ["clock"]}
+                }
+              },
+              {
+                "box": "side",
+                "dir": "column",
+                "size": "380px",
+                "children": [
+                  {"slot": "detail", "size": "154px"},
+                  {"slot": "map-sub", "size": "300px"},
+                  {"slot": "history", "size": "fill"},
+                  {"slot": "credit", "size": "90px"}
+                ]
+              }
+            ]
+          }
+        ]
+      }
     }
   ]
 }

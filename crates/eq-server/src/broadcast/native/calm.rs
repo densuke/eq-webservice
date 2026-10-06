@@ -11,10 +11,11 @@ use super::data::{
     city_side, city_side_tomorrow, rain_color, range_label, temp_label, top_level, warning_fill, weather_caption,
     weather_char, City, Side, Tomorrow, WarningLevel, Warnings, WeatherView,
 };
-use super::draw::{Scene, BAR_H, H, INSET_LINE, MAP_W};
+use super::draw::{Scene, INSET_LINE};
 use super::frame::{BoxRect, Frame};
 use super::geo::Shape;
 use super::icon;
+use super::layout_resolve::Rect;
 use super::paint::{circle, line, rrect, LAND_EDGE, PANEL, TEXT};
 use super::text::Text;
 
@@ -30,11 +31,11 @@ pub struct CardEnv<'a> {
     pub bounds: BoxRect,
 }
 
-/// 札を置いてよい範囲 (本図)。上は警報の帯 (最大 2 行) とテスト配信の帯の下まで
-pub fn main_bounds(test: bool) -> BoxRect {
+/// 札を置いてよい範囲 (本図 = 定義の main の矩形)。上は警報の帯 (最大 2 行) とテスト配信の帯の下まで
+pub fn main_bounds(test: bool, main: Rect) -> BoxRect {
     let band = if test { super::test_mark::BAND_H } else { 0.0 };
-    let top = BAR_H + banner_height(2) + band;
-    (0.0, top, MAP_W, H as f32 - band - top)
+    let top = main.y + banner_height(2) + band;
+    (main.x, top, main.w, main.bottom() - band - top)
 }
 
 pub fn draw(

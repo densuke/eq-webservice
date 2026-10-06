@@ -4,7 +4,7 @@
 use tiny_skia::Pixmap;
 
 use super::data::{warning_summary, WarnSummary, WarningLevel, Warnings};
-use super::draw::{BAR_H, W};
+use super::draw::W;
 use super::paint::rect;
 use super::text::Text;
 
@@ -73,15 +73,16 @@ pub fn layout(segments: &[String], max_w: f32, max_lines: usize, adv: &mut impl 
     lines
 }
 
-/// 警報以上があれば帯を描く。offset_y は上部バーの下からの下げ幅 (テスト配信の赤い帯の分)
-pub fn draw(pm: &mut Pixmap, text: &mut Text, w: &Warnings, offset_y: f32) {
+/// 警報以上があれば帯を描く。bar_bottom は帯を置く上端 (上部バーの下 = 定義の main の上端)、
+/// offset_y はそこからの下げ幅 (テスト配信の赤い帯の分)
+pub fn draw(pm: &mut Pixmap, text: &mut Text, w: &Warnings, bar_bottom: f32, offset_y: f32) {
     let Some(WarnSummary { top, lines }) = warning_summary(w, PER_PREF) else {
         return;
     };
     let rows = layout(&lines, W as f32 - PAD_X * 2.0, MAX_LINES, &mut |c| {
         text.width(c.encode_utf8(&mut [0; 4]), PX)
     });
-    let (y, h) = (BAR_H + offset_y, banner_height(rows.len()));
+    let (y, h) = (bar_bottom + offset_y, banner_height(rows.len()));
     rect(pm, 0.0, y, W as f32, h, banner_color(top), 1.0);
     if top == WarningLevel::Emergency {
         rect(pm, 0.0, y, W as f32, 2.0, WHITE, 1.0);
