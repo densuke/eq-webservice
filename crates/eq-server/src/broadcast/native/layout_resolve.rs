@@ -18,6 +18,26 @@ pub struct Rect {
     pub h: f32,
 }
 
+impl Rect {
+    pub fn right(self) -> f32 {
+        self.x + self.w
+    }
+
+    pub fn bottom(self) -> f32 {
+        self.y + self.h
+    }
+
+    /// (x, y, 幅, 高さ)。札を置かない所などの枠の型 (frame::BoxRect)
+    pub fn tuple(self) -> (f32, f32, f32, f32) {
+        (self.x, self.y, self.w, self.h)
+    }
+
+    /// 地図の投影 (geo::View) の枠の型
+    pub fn tuple64(self) -> (f64, f64, f64, f64) {
+        (self.x as f64, self.y as f64, self.w as f64, self.h as f64)
+    }
+}
+
 /// 配信が描ける部品の固定の大きさ (幅, 高さ)。auto と重ね物の大きさに使う。
 /// 右の列の部品は panel.rs・notice.rs が決めている高さ、重ね物は frame.rs の OKINAWA (幅は 9:7 の範囲の縦横比で約 225.9)・
 /// panel.rs の LEGEND_RECT・時計 (176x74) に合わせる。None なら配信は描かない

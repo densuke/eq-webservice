@@ -164,7 +164,8 @@ fn a_zoomed_picture_leaves_the_bar_and_the_side_panel_as_they_are() {
     let y = |pic: &[u8], x: usize, row: usize| pic[row * w + x];
     // 輝度の面 (先頭の w x h バイト) で、上部バーと右パネルは同じ
     let differs = |x: usize, row: usize| y(&home, x, row) != y(&zoomed, x, row);
-    let outside_map = |x: usize, row: usize| row < draw::BAR_H as usize || x >= draw::MAP_W as usize;
+    let main = Placed::builtin().unwrap().main;
+    let outside_map = |x: usize, row: usize| row < main.y as usize || x >= main.right() as usize;
     assert!(
         !(0..h).any(|row| (0..w).any(|x| outside_map(x, row) && differs(x, row))),
         "地図の外が変わった"
@@ -204,7 +205,7 @@ fn the_insets_are_not_drawn_while_zoomed_and_come_back_at_home() {
     assert_eq!(line(&r.render(&scene)), draw::INSET_LINE);
     r.set_view(Some(camera::fit_box(
         camera::MapBox::around(geo::project(140.8, 35.7).0, geo::project(140.8, 35.7).1, 80.0).pad(),
-        camera::map_aspect(),
+        r.map_aspect(),
     )));
     assert_ne!(line(&r.render(&scene)), draw::INSET_LINE); // 枠は描かれず、寄った地図 (陸か海) になる
     r.set_view(None);
@@ -455,7 +456,7 @@ fn write_zoomed_png_when_asked() {
             .shaken(&["千葉県北東部", "茨城県南部"], &[], &["千葉県", "茨城県"]),
         forecast: true,
     };
-    r.set_view(camera::target_box(&aim, SHOWN_AT).map(|b| camera::fit_box(b, camera::map_aspect())));
+    r.set_view(camera::target_box(&aim, SHOWN_AT).map(|b| camera::fit_box(b, r.map_aspect())));
     let mut pm = r.render(&scene);
     let waves = eew::waves(&[], std::slice::from_ref(&e), SHOWN_AT);
     r.draw_waves(&mut pm, &waves);
@@ -487,8 +488,8 @@ fn eew_scene<'a>(e: &'a eew::EewSummary, icons: &'a Icons, now_ms: u64) -> Scene
 
 fn in_sub_rect(i: usize) -> bool {
     let (x, y) = ((i % draw::W as usize) as f64, (i / draw::W as usize) as f64);
-    let (rx, ry, rw, rh) = draw::SUB_RECT;
-    (rx..rx + rw).contains(&x) && (ry..ry + rh).contains(&y)
+    let sub = Placed::builtin().unwrap().sub.unwrap();
+    (sub.x as f64..sub.right() as f64).contains(&x) && (sub.y as f64..sub.bottom() as f64).contains(&y)
 }
 
 #[test]
@@ -500,7 +501,7 @@ fn the_sub_map_paints_only_inside_its_rect() {
     let mut r = load_renderer(&config_sub(false, true)).unwrap();
     assert!(r.sub_map_enabled());
     let (x, y) = geo::project(140.8, 35.7);
-    let aspect = draw::SUB_RECT.2 / draw::SUB_RECT.3;
+    let aspect = r.sub_aspect().unwrap();
     r.set_sub_view(Some(camera::fit_box(camera::MapBox::around(x, y, 150.0), aspect)));
     let on = r.render(&scene);
     let (mut outside, mut inside) = (0, 0);
@@ -593,7 +594,9 @@ fn the_sub_map_does_not_draw_when_calm() {
 #[test]
 fn the_sub_map_leaves_the_detail_alone_during_a_quake() {
     // 詳細は右パネルの y 36〜181 (区切り線まで)。サブの地図 (y 190〜) はその下
-    let in_detail = |i: usize| i % draw::W as usize >= draw::MAP_W as usize && i / (draw::W as usize) < 182;
+    let detail = Placed::builtin().unwrap().detail.unwrap();
+    let in_detail =
+        |i: usize| i % draw::W as usize >= detail.x as usize && i / (draw::W as usize) < detail.bottom() as usize + 2;
     for (name, ev, now) in quake_scenes() {
         let (off, _) = still_of(&ev, now, false);
         let (on, _) = still_of(&ev, now, true);

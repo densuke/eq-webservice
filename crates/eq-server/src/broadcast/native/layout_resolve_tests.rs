@@ -1,11 +1,10 @@
 //! layout_resolve (定義 → 矩形) のテスト。配信用の定義の割り付けは、今の native の定数と 1px 単位で一致すること。
 
-use super::draw::{BAR_H, H, MAP_RECT, MAP_W, SUB_RECT, W};
+use super::draw::{H, W};
 use super::frame::{Frame, OKINAWA};
 use super::geo::View;
 use super::layout_def::{parse, pick, LayoutDef};
 use super::layout_resolve::{resolve, unsupported_slots, Rect};
-use super::panel::LEGEND_RECT;
 use crate::layout::BUILTIN;
 
 fn shipped(name: &str) -> LayoutDef {
@@ -25,62 +24,79 @@ fn r(x: f32, y: f32, w: f32, h: f32) -> Rect {
     Rect { x, y, w, h }
 }
 
-fn tuple(c: (f64, f64, f64, f64)) -> Rect {
-    r(c.0 as f32, c.1 as f32, c.2 as f32, c.3 as f32)
-}
-
 fn near(a: Rect, b: Rect) {
     for (x, y) in [(a.x, b.x), (a.y, b.y), (a.w, b.w), (a.h, b.h)] {
         assert!((x - y).abs() < 1.0, "{a:?} と {b:?} が 1px 以上ずれている");
     }
 }
 
+// 描画 (draw.rs・panel.rs・notice.rs・frame.rs・test_mark.rs) は、この矩形の原点に相対オフセットを足して描く。
+// 矩形の値が変わると配信の出力が変わるので、組み込みの定義から割り付けた値を 1px 単位で守る
+// (PNG が起点と一致することは、描画の変更のたびに shasum で確かめている)。
+
 #[test]
-fn the_calm_layout_matches_the_current_constants() {
+fn the_calm_layout_has_the_rects_the_drawing_assumes() {
     let m = resolve(&shipped("broadcast"), W as f32, H as f32).unwrap();
-    assert_eq!(m["topbar"], r(0.0, 0.0, W as f32, BAR_H));
-    assert_eq!(m["main"], tuple(MAP_RECT));
-    // 右の列 (panel.rs の SIDE_X = MAP_W、詳細の区切り線 y180、履歴の見出し y204・1 行目 y216、出典の 1 行目 y640)
-    assert_eq!(m["detail"], r(MAP_W, BAR_H, 380.0, 144.0));
-    assert_eq!(m["history"], r(MAP_W, 180.0, 380.0, 312.0));
-    // お知らせの箱 (notice.rs の BOX_X = MAP_W + 16、BOX_Y = 492)
-    assert_eq!(m["notice"], r(MAP_W, 492.0, 380.0, 138.0));
-    // 出典の一番上 (notice.rs の CREDIT_TOP = H - 5 - 15 * 5 - 10)
-    assert_eq!(m["credit"], r(MAP_W, H as f32 - 5.0 - 75.0 - 10.0, 380.0, 90.0));
+    assert_eq!(m["topbar"], r(0.0, 0.0, W as f32, 36.0));
+    assert_eq!(m["main"], r(0.0, 36.0, 900.0, 684.0));
+    // 右の列 (詳細の区切り線 y180、履歴の見出し y204・1 行目 y216、出典の 1 行目 y640)
+    assert_eq!(m["detail"], r(900.0, 36.0, 380.0, 144.0));
+    assert_eq!(m["history"], r(900.0, 180.0, 380.0, 312.0));
+    // お知らせの箱 (x = 矩形 + 16、y = 矩形の上端 492)
+    assert_eq!(m["notice"], r(900.0, 492.0, 380.0, 138.0));
+    // 出典 (下端は画面の下端 720。1 行目の字の上端より少し上が 630)
+    assert_eq!(m["credit"], r(900.0, 630.0, 380.0, 90.0));
     assert!(!m.contains_key("map-sub"));
 }
 
 #[test]
-fn the_overlays_match_the_current_constants() {
+fn the_overlays_have_the_rects_the_drawing_assumes() {
     let m = resolve(&shipped("broadcast"), W as f32, H as f32).unwrap();
-    // 別枠 (frame.rs の OKINAWA。幅は範囲の縦横比で決まる実数)
-    let main = View::fit_home(MAP_RECT);
-    let (ins, _) = Frame::inset(&main, &OKINAWA).unwrap().inset_box().unwrap();
+    // 別枠 (左上と高さを使い、幅は範囲の縦横比で決まる実数 約 225.9)
+    let main = View::fit_home(m["main"].tuple64());
+    let (ins, _) = Frame::inset(&main, &OKINAWA, m["inset"]).unwrap().inset_box().unwrap();
     near(m["inset"], r(ins.0, ins.1, ins.2, ins.3));
-    assert_eq!(
-        (m["inset"].x, m["inset"].y, m["inset"].h),
-        (OKINAWA.x, OKINAWA.y, OKINAWA.h)
-    );
-    // 凡例 (panel.rs の LEGEND_RECT)
-    let (x, y, w, h) = LEGEND_RECT;
-    assert_eq!(m["legend"], r(x, y, w, h));
-    // 時計 (panel.rs の draw_clock: 176x74、地図の右下から 10px)
-    assert_eq!(m["clock"], r(MAP_W - 10.0 - 176.0, H as f32 - 10.0 - 74.0, 176.0, 74.0));
+    assert_eq!((m["inset"].x, m["inset"].y, m["inset"].h), (10.0, 46.0, 220.0));
+    // 凡例
+    assert_eq!(m["legend"], r(10.0, 563.0, 34.0, 147.0));
+    // 時計 (176x74、地図の右下から 10px)
+    assert_eq!(m["clock"], r(714.0, 636.0, 176.0, 74.0));
 }
 
 #[test]
-fn the_quake_layout_matches_the_current_constants() {
+fn the_quake_layout_has_the_sub_map_rect_and_the_same_frame() {
     let calm = resolve(&shipped("broadcast"), W as f32, H as f32).unwrap();
     let q = resolve(&shipped("broadcast-quake"), W as f32, H as f32).unwrap();
-    assert_eq!(q["map-sub"], tuple(SUB_RECT));
+    assert_eq!(q["map-sub"], r(900.0, 190.0, 380.0, 300.0));
     // 枠 (地図・上部バー・重ね物) は平時と同じ。違うと base の絵や投影を作り直すことになる
     for k in ["main", "topbar", "inset", "legend", "clock"] {
         assert_eq!(calm[k], q[k], "{k}");
     }
     assert!(!q.contains_key("notice"));
     // 詳細は平時より 10px 高い (サブの地図を y190 から置くため)。出典は同じ
-    assert_eq!(q["detail"], r(MAP_W, BAR_H, 380.0, 154.0));
+    assert_eq!(q["detail"], r(900.0, 36.0, 380.0, 154.0));
     assert_eq!(q["credit"], calm["credit"]);
+}
+
+#[test]
+fn the_drawing_uses_the_calm_rects_and_only_the_sub_map_from_the_quake_layout() {
+    use super::placed::Placed;
+    let p = Placed::builtin().unwrap();
+    let calm = resolve(&shipped("broadcast"), W as f32, H as f32).unwrap();
+    let q = resolve(&shipped("broadcast-quake"), W as f32, H as f32).unwrap();
+    assert_eq!(p.detail, Some(calm["detail"])); // 地震の画面の 154 ではなく平時の 144
+    assert_eq!(p.history, Some(calm["history"]));
+    assert_eq!(p.sub, Some(q["map-sub"]));
+    assert_eq!(p.map_aspect(), 900.0 / 684.0);
+    assert_eq!(p.sub_aspect(), Some(380.0 / 300.0));
+}
+
+#[test]
+fn a_notice_rect_too_short_for_the_box_is_not_drawn() {
+    use super::placed::Placed;
+    let d = def(r#"{"dir":"column","children":[{"slot":"main"},{"slot":"notice","size":"100px"}]}"#);
+    let p = Placed::new(&d, &d).unwrap();
+    assert!(p.notice.is_none() && p.detail.is_none() && p.topbar.is_none());
 }
 
 #[test]

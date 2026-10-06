@@ -16,6 +16,7 @@ const OUTAGE_FG: [u8; 3] = TEXT;
 
 const PX: f32 = 12.0;
 const PAD_X: f32 = 8.0;
+/// 札の上端・文字のベースライン (上部バーの上端からの距離)
 const TOP: f32 = 9.0;
 const HEIGHT: f32 = 22.0;
 const BASELINE: f32 = 24.0;
@@ -38,15 +39,15 @@ pub fn width(text: &mut Text, notice: &Notice) -> f32 {
     text.width(&notice.text(), PX) + 2.0 * PAD_X
 }
 
-/// 札を、右端が right になるように描く
-pub fn draw(pm: &mut Pixmap, text: &mut Text, notice: &Notice, right: f32) {
+/// 札を、右端が right になるように描く。bar_y は上部バーの上端
+pub fn draw(pm: &mut Pixmap, text: &mut Text, notice: &Notice, right: f32, bar_y: f32) {
     let (bg, fg) = match notice {
         Notice::Busy => (BUSY_BG, BUSY_FG),
         Notice::Outage(_) => (OUTAGE_BG, OUTAGE_FG),
     };
     let w = width(text, notice);
-    rrect(pm, right - w, TOP, w, HEIGHT, 5.0, bg, 1.0);
-    text.draw(pm, &notice.text(), right - w + PAD_X, BASELINE, PX, fg);
+    rrect(pm, right - w, bar_y + TOP, w, HEIGHT, 5.0, bg, 1.0);
+    text.draw(pm, &notice.text(), right - w + PAD_X, bar_y + BASELINE, PX, fg);
 }
 
 #[cfg(test)]

@@ -3,8 +3,9 @@
 
 use tiny_skia::Pixmap;
 
-use super::draw::{BAR_H, H, MAP_RECT, W};
+use super::draw::{H, W};
 use super::paint::rect;
+use super::placed::Placed;
 use super::text::Text;
 
 pub const BAND: [u8; 3] = [0xb3, 0x00, 0x1b];
@@ -13,11 +14,14 @@ pub const BAND_H: f32 = 20.0;
 const MESSAGE: &str = "テスト配信: 過去の地震の再生です。実際の地震ではありません";
 const WATERMARK_ALPHA: f32 = 0.15;
 
-pub fn draw(pm: &mut Pixmap, text: &mut Text) {
-    watermark(pm);
-    band(pm, text, BAR_H);
+pub fn draw(pm: &mut Pixmap, text: &mut Text, p: &Placed) {
+    watermark(pm, p.main);
+    // 上の帯は上部バーの下 (定義の main の上端)
+    band(pm, text, p.main.y);
     band(pm, text, H as f32 - BAND_H);
-    text.draw(pm, "[テスト]", 262.0, 24.0, 12.0, BAND_TEXT);
+    if let Some(bar) = p.topbar {
+        text.draw(pm, "[テスト]", bar.x + 262.0, bar.y + 24.0, 12.0, BAND_TEXT);
+    }
 }
 
 /// 帯と、白い太字の文 (太字は少しずらして重ね描き)
@@ -30,8 +34,8 @@ fn band(pm: &mut Pixmap, text: &mut Text, y: f32) {
 }
 
 /// 地図の中央に、四角だけで組んだ大きな「TEST」(重ならない四角なので、うすくても濃さがそろう)
-fn watermark(pm: &mut Pixmap) {
-    let (mx, my, mw, mh) = MAP_RECT;
+fn watermark(pm: &mut Pixmap, main: super::layout_resolve::Rect) {
+    let (mx, my, mw, mh) = main.tuple64();
     let (w, h, t, gap) = (110.0_f32, 190.0_f32, 30.0_f32, 24.0_f32);
     let total = 4.0 * w + 3.0 * gap;
     let (x0, y0) = (mx as f32 + (mw as f32 - total) / 2.0, my as f32 + (mh as f32 - h) / 2.0);

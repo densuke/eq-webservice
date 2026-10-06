@@ -5,26 +5,20 @@
 use serde::Deserialize;
 use tiny_skia::Pixmap;
 
-use super::draw::{H, MAP_W, W};
+use super::layout_resolve::Rect;
 use super::paint::{rrect, BG, LINE, TEXT};
 use super::text::Text;
 
-/// 箱の左上と幅 (右パネルの左右の余白は panel.rs の PAD と同じ 16)。履歴の下、出典の上に収まる
-const BOX_X: f32 = MAP_W + 16.0;
-const BOX_Y: f32 = 492.0;
-const BOX_W: f32 = W as f32 - 16.0 - BOX_X;
+/// 箱の左右の余白 (右パネルの余白は panel.rs の PAD と同じ 16)。箱の左上は矩形の (x + 16, y)、幅は矩形の幅 - 32
+const SIDE_PAD: f32 = 16.0;
 const PAD_X: f32 = 12.0;
 const PAD_Y: f32 = 10.0;
 const PX: f32 = 14.0;
 const LINE_H: f32 = 21.0;
 const MAX_LINES: usize = 4;
 const ELLIPSIS: char = '…';
-/// 右パネルの出典の一番上 (panel.rs の CREDIT は 6 行。1 行目の字の上端より少し上)
-const CREDIT_TOP: f32 = H as f32 - 5.0 - 15.0 * 5.0 - 10.0;
-/// 履歴の最後の行の下 (panel.rs の draw_history: 216 から 52 ずつ 5 件)
-const HISTORY_BOTTOM: f32 = 216.0 + 5.0 * 52.0;
-// 4 行の箱でも、履歴と出典に重ならない
-const _: () = assert!(BOX_Y > HISTORY_BOTTOM && BOX_Y + PAD_Y * 2.0 + LINE_H * (MAX_LINES as f32) < CREDIT_TOP);
+/// 箱の最大の高さ (4 行)。お知らせの矩形の高さがこれに満たないときは描かない (placed.rs が検査する)
+pub const BOX_MAX_H: f32 = PAD_Y * 2.0 + LINE_H * (MAX_LINES as f32);
 
 /// GET /api/banners
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -113,16 +107,16 @@ pub fn layout(s: &str, max_w: f32, max_lines: usize, adv: &mut impl FnMut(char) 
 
 /// 並べた行の覚え (文が変わったときだけ並べ直す)
 #[derive(Default)]
-pub struct LayoutCache(Option<(String, Vec<String>)>);
+pub struct LayoutCache(Option<(String, f32, Vec<String>)>);
 
 impl LayoutCache {
-    fn lines(&mut self, text: &mut Text, s: &str) -> &[String] {
-        if self.0.as_ref().is_none_or(|(k, _)| k != s) {
-            let max_w = BOX_W - PAD_X * 2.0;
+    fn lines(&mut self, text: &mut Text, s: &str, box_w: f32) -> &[String] {
+        if self.0.as_ref().is_none_or(|(k, w, _)| k != s || *w != box_w) {
+            let max_w = box_w - PAD_X * 2.0;
             let lines = layout(s, max_w, MAX_LINES, &mut |c| text.width(c.encode_utf8(&mut [0; 4]), PX));
-            self.0 = Some((s.to_string(), lines));
+            self.0 = Some((s.to_string(), box_w, lines));
         }
-        self.0.as_ref().map_or(&[], |(_, l)| l)
+        self.0.as_ref().map_or(&[], |(_, _, l)| l)
     }
 }
 
@@ -131,18 +125,19 @@ fn box_height(lines: usize) -> f32 {
     PAD_Y * 2.0 + LINE_H * lines as f32
 }
 
-/// now_ms に出すお知らせを、右パネルの下半分に描く (平時だけ呼ぶ。出すものが無ければ何もしない)
-pub fn draw(pm: &mut Pixmap, text: &mut Text, cache: &mut LayoutCache, n: &Notices, now_ms: u64) {
+/// now_ms に出すお知らせを、矩形 area (定義の notice) の中に描く (平時だけ呼ぶ。出すものが無ければ何もしない)
+pub fn draw(pm: &mut Pixmap, text: &mut Text, cache: &mut LayoutCache, n: &Notices, now_ms: u64, area: Rect) {
     let Some(i) = index_at(now_ms, n.interval_s, n.texts.len()) else {
         return;
     };
-    let lines = cache.lines(text, &n.texts[i]);
+    let (box_x, box_y, box_w) = (area.x + SIDE_PAD, area.y, area.w - SIDE_PAD * 2.0);
+    let lines = cache.lines(text, &n.texts[i], box_w);
     let h = box_height(lines.len().max(1));
-    rrect(pm, BOX_X, BOX_Y, BOX_W, h, 8.0, LINE, 1.0);
-    rrect(pm, BOX_X + 1.0, BOX_Y + 1.0, BOX_W - 2.0, h - 2.0, 7.0, BG, 1.0);
+    rrect(pm, box_x, box_y, box_w, h, 8.0, LINE, 1.0);
+    rrect(pm, box_x + 1.0, box_y + 1.0, box_w - 2.0, h - 2.0, 7.0, BG, 1.0);
     for (k, line) in lines.iter().enumerate() {
-        let y = BOX_Y + PAD_Y + LINE_H * k as f32 + 15.0;
-        text.draw_center(pm, line, BOX_X + BOX_W / 2.0, y, PX, TEXT);
+        let y = box_y + PAD_Y + LINE_H * k as f32 + 15.0;
+        text.draw_center(pm, line, box_x + box_w / 2.0, y, PX, TEXT);
     }
 }
 
