@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { type Layout, type LayoutNode, LAYOUTS, REQUIRED_SLOTS, checkLayouts, chooseLayout, boxesOf, flexOf, pickLayout, slotsOf } from "./layout.ts";
+import { type Layout, type LayoutNode, LAYOUTS, REQUIRED_SLOTS, SUB_MAP, checkLayouts, chooseLayout, boxesOf, flexOf, pickLayout, slotsOf } from "./layout.ts";
 import { BOXES, SLOTS } from "./layout-dom.ts";
 
 test("the layout is picked by the screen size (same 800px boundary as the CSS)", () => {
@@ -94,6 +94,7 @@ const shipped = () => JSON.parse(readFileSync(new URL("./layout.json", import.me
 test("the shipped layout file (layout.json) passes the check and is the built-in", () => {
   assert.deepEqual(check(shipped()), []);
   assert.deepEqual(shipped().layouts, LAYOUTS);
+  assert.deepEqual(shipped().subMap, SUB_MAP);
 });
 
 test("the check names what is wrong in a layout file", () => {
@@ -136,17 +137,27 @@ test("the check names what is wrong in a layout file", () => {
   assert.match(broken((d) => (d.layouts[1].when = { minWidht: 801 })), /when\.minWidht は使えない/);
   assert.match(broken((d) => (d.layouts[1].root.sise = "auto")), /知らないキー「sise」/);
   assert.match(broken((d) => (d.version = 2)), /version は 1/);
+  // サブの地図の設定 (任意)
+  assert.equal(broken((d) => delete d.subMap), "");
+  assert.match(broken((d) => (d.subMap.hold = [])), /subMap\.hold/);
+  assert.match(broken((d) => (d.subMap.hold[1].sec = 0)), /subMap\.hold\[1\]: sec は 0 より大きい数/);
+  assert.match(broken((d) => (d.subMap.hold[3].maxScale = 70)), /subMap\.hold\[3\]: 最後の規則に maxScale/);
+  assert.match(broken((d) => (d.subMap.hold[1].maxScale = 10)), /subMap\.hold\[1\]: maxScale は上の規則より大きく/);
+  assert.match(broken((d) => delete d.subMap.hold[0].maxScale), /subMap\.hold\[0\]: 最後以外は maxScale/);
+  assert.match(broken((d) => (d.subMap.unknownSec = 0)), /subMap\.unknownSec/);
+  assert.match(broken((d) => (d.subMap.fadedAlpha = 1.5)), /subMap\.fadedAlpha/);
+  assert.match(broken((d) => (d.subMap.extra = 1)), /知らないキー「extra」/);
   // ファイルの形そのもの
   assert.deepEqual(check(null), ["定義ファイルが JSON のオブジェクトでない"]);
   assert.match(check({ version: 1, layouts: [] }).join(), /layouts が空/);
 });
 
-test("trial: 帯の代わりに EEW の常設パネルを置く手動専用の定義", () => {
+test("trial (manual) is the JDQ-shaped layout", () => {
   const t = chooseLayout(LAYOUTS, 1440, 900, "trial");
   assert.equal(t.name, "trial");
-  assert.ok(slotsOf(t.root).includes("eew-panel"));
-  assert.ok(!slotsOf(t.root).includes("banners"));
   assert.equal(pickLayout(LAYOUTS, 1440, 900).name, "regular");
+  const want = ["topbar", "main", "map-sub", "banners", "inset", "caption", "countdown", "legend", "ogasawara", "toast", "hint", "clock", "notice", "settings", "detail", "eew-panel", "history-head", "history", "credit"];
+  assert.deepEqual([...slotsOf(t.root)].sort(), [...want].sort());
 });
 
 test("boxesOf lists the boxes a layout uses, in order", () => {

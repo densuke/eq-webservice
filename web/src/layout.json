@@ -1,6 +1,17 @@
 {
   "version": 1,
   "note": "画面の並びの定義 (eq-server の [layout] file で差し替えられる)。書式は docs/ui-spec/layout-system.html の「定義ファイル」。上から順に、when に最初に合うものを使う",
+  "subMap": {
+    "note": "右上のサブの地図 (試験定義 trial)。最後の情報から hold の時間ははっきり、過ぎたら fadedAlpha の濃さで残す。震度は 10=1, 20=2, 30=3, 40=4, 45=5弱, 50=5強, 55=6弱, 60=6強, 70=7",
+    "hold": [
+      {"maxScale": 20, "sec": 60},
+      {"maxScale": 40, "sec": 180},
+      {"maxScale": 50, "sec": 600},
+      {"sec": 900}
+    ],
+    "unknownSec": 180,
+    "fadedAlpha": 0.4
+  },
   "layouts": [
     {
       "name": "landscape",
@@ -135,7 +146,7 @@
     },
     {
       "name": "trial",
-      "note": "試験中。?layout=trial で選ぶ。帯の代わりに EEW の常設パネルを右列の先頭に置く",
+      "note": "試験中。?layout=trial で選ぶ。JDQ の画面の形 (左: 全国の地図 + 下の帯 / 右: 右上はサブの地図 (最近の地震) + パネル群)",
       "manual": true,
       "root": {
         "dir": "column",
@@ -147,26 +158,40 @@
             "size": "fill",
             "children": [
               {
-                "slot": "main",
+                "dir": "column",
                 "size": "fill",
-                "overlays": {
-                  "top-left": {"flow": "column", "items": [{"flow": "row", "items": ["inset", "caption"]}, "countdown"]},
-                  "bottom-left": {"flow": "column", "items": ["legend"]},
-                  "bottom-right": {"flow": "column", "items": ["ogasawara", "clock"]},
-                  "bottom": {"flow": "column", "items": ["toast", "hint"]}
-                }
+                "children": [
+                  {
+                    "slot": "main",
+                    "size": "fill",
+                    "overlays": {
+                      "top-left": {"flow": "column", "items": [{"slot": "banners", "variant": "compact"}, {"flow": "row", "items": ["inset", "caption"]}, "countdown"]},
+                      "bottom-left": {"flow": "column", "items": ["legend"]},
+                      "bottom-right": {"flow": "column", "items": ["ogasawara"]},
+                      "bottom": {"flow": "column", "items": ["toast", "hint"]}
+                    }
+                  },
+                  {
+                    "dir": "row",
+                    "size": "22%",
+                    "children": [
+                      {"slot": "clock", "size": "auto"},
+                      {"slot": "notice", "size": "fill"}
+                    ]
+                  }
+                ]
               },
               {
                 "box": "side",
                 "dir": "column",
-                "size": "380px",
+                "size": "fill",
                 "children": [
                   {"slot": "settings", "size": "auto"},
-                  {"slot": "eew-panel", "size": "auto"},
+                  {"slot": "map-sub", "size": "40%"},
                   {"slot": "detail", "size": "auto"},
+                  {"slot": "eew-panel", "size": "auto"},
                   {"slot": "history-head", "size": "auto"},
                   {"slot": "history", "size": "fill"},
-                  {"slot": "notice", "size": "fill"},
                   {"slot": "credit", "size": "auto"}
                 ]
               }
