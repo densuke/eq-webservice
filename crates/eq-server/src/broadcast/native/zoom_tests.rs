@@ -597,3 +597,95 @@ fn sub_map_is_read_from_the_config_and_defaults_to_off() {
     );
     assert!(!BroadcastConfig::default().sub_map);
 }
+
+fn percentile(sorted: &[f64], p: f64) -> f64 {
+    sorted[((sorted.len() - 1) as f64 * p).round() as usize]
+}
+
+/// 昇順に並べた時間 (ms) の (中央値, p95, 平均)
+fn summarize_ms(mut v: Vec<f64>) -> (f64, f64, f64) {
+    v.sort_by(f64::total_cmp);
+    let mean = v.iter().sum::<f64>() / v.len() as f64;
+    (percentile(&v, 0.5), percentile(&v, 0.95), mean)
+}
+
+/// サブの地図の重さ (リリースビルドで。n2 の配信に足せるかの見積もり。docs/native-submap-bench.md)。
+/// 場面 (平時・緊急地震速報・確定の地震) x zoom x sub_map で、render() 200 回と step() 100 回 (5fps の時刻) を 1 回ずつ計る。
+/// 地図は EQ_NATIVE_MAP_DIR、フォントは EQ_NATIVE_FONT で指す (無ければ web/public と、文字なし)。
+/// `cargo test --release -p eq-server sub_map_cost -- --ignored --nocapture --test-threads=1`
+#[test]
+#[ignore]
+fn sub_map_cost() {
+    const RENDERS: usize = 200;
+    const STEPS: u64 = 100;
+    let received = (T0 + 60_000) as u64;
+    let scenes: [(&str, Vec<Event>, u64); 3] = [
+        ("calm ", vec![quake_event(received)], received + 10 * 60_000),
+        ("eew  ", chiba_events(), T0 as u64 + 20_000),
+        ("quake", vec![quake_event(received)], received + 10_000),
+    ];
+    let icons = Icons::new();
+    for (phase, ev, from) in &scenes {
+        for zoom in [false, true] {
+            for sub in [false, true] {
+                let mut cfg = config_sub(zoom, sub);
+                if let Ok(d) = std::env::var("EQ_NATIVE_MAP_DIR") {
+                    cfg.map_dir = d;
+                }
+                cfg.font = std::env::var("EQ_NATIVE_FONT").unwrap_or(cfg.font);
+                let mut st = Stepper::new(load_renderer(&cfg).unwrap());
+                for k in 0..10 {
+                    st.step(&input(ev, from + k * 200, &icons)); // 温める (寄りとサブの範囲も入る)
+                }
+                // render() 単体 (最後に入れた表示範囲のまま)
+                let groups = model::group_quakes(ev);
+                let eews = eew::latest_eews(ev);
+                let current = eew::current(&groups, &eews, from + 2_000);
+                let (quake, shown) = match current {
+                    Some(eew::Current::Quake(q)) => (Some(q), None),
+                    Some(eew::Current::Eew(e)) => (None, Some(e)),
+                    None => (None, None),
+                };
+                let scene = Scene {
+                    quake,
+                    eew: shown,
+                    history: &groups,
+                    warnings: None,
+                    weather: None,
+                    icons: &icons,
+                    flip_s: 0,
+                    now_ms: from + 2_000,
+                    connected: true,
+                    bgm_title: "",
+                    label: "",
+                    test: false,
+                    hindsight: None,
+                    fast_forward: false,
+                    status: None,
+                    notices: None,
+                };
+                let renders: Vec<f64> = (0..RENDERS)
+                    .map(|_| {
+                        let t = std::time::Instant::now();
+                        std::hint::black_box(st.renderer_mut().render(&scene));
+                        t.elapsed().as_secs_f64() * 1000.0
+                    })
+                    .collect();
+                let steps: Vec<f64> = (0..STEPS)
+                    .map(|k| {
+                        let i = input(ev, from + k * 200, &icons);
+                        let t = std::time::Instant::now();
+                        std::hint::black_box(st.step(&i));
+                        t.elapsed().as_secs_f64() * 1000.0
+                    })
+                    .collect();
+                let (rm, rp, _) = summarize_ms(renders);
+                let (sm, sp, mean) = summarize_ms(steps);
+                println!(
+                    "{phase} zoom={zoom:<5} sub={sub:<5}: render med {rm:.2} p95 {rp:.2} / step med {sm:.2} p95 {sp:.2} mean {mean:.2} ms, core-s per video-s {:.4}",
+                    mean * 5.0 / 1000.0
+                );
+            }
+        }
+    }
+}

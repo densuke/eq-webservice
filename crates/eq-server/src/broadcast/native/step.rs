@@ -229,6 +229,11 @@ impl Stepper {
     }
 
     #[cfg(test)]
+    pub fn renderer_mut(&mut self) -> &mut Renderer {
+        &mut self.renderer
+    }
+
+    #[cfg(test)]
     pub fn still_pixmap(&self) -> Option<&Pixmap> {
         self.still.as_ref().map(|(_, pm)| pm)
     }
