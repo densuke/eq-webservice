@@ -22,6 +22,8 @@ let lastFade: string | null = null;
 let shownQuake: Group | undefined;
 /** サブの地図に P 波・S 波を描いているか */
 let waving = false;
+/** 保持時間を過ぎて薄くなっている間か (波の線は薄くならないので、その間は波を描かない) */
+let faded = false;
 /** 凡例にP波・S波以外の行があるか (波の行だけ出し入れするとき、凡例ごと隠すかの判断に使う) */
 let legendHasRows = false;
 
@@ -56,6 +58,10 @@ export function renderSubMap(now: number): void {
   // 隠し置き場 (trial 以外) にいる間は描かない。再び見えたときにカメラを合わせ直すため署名を消す
   if (!subMapShown()) {
     invalidateSubMap();
+    // 定義を切り替えたあとに古い波の状態が残らないよう、波の状態も消す
+    shownQuake = undefined;
+    waving = false;
+    faded = false;
     return;
   }
   const w = box.clientWidth;
@@ -64,6 +70,7 @@ export function renderSubMap(now: number): void {
   const q = g && relatedQuake(g);
   const cfg = subMapConfig();
   const state = subMapState(now, q, q ? groupScale(q) : -1, cfg);
+  faded = !!state && state.alpha < 1;
   const sigs = subMapSigs(state, q, w, h);
   if (sigs.paint !== lastPaint) {
     lastPaint = sigs.paint;
@@ -82,8 +89,9 @@ function setFade(alpha: number): void {
 
 /** 主の地図の波 (毎 tick)。サブの地図に映している地震の波だけ描く。塗りは描き直さない */
 export function renderSubWaves(wave: MainWave | null): void {
+  if (!subMapShown()) return;
   const g = wave && shownQuake && (wave.key === shownQuake.key ? shownQuake : app.world.store.get(wave.key));
-  const mine = !!(g && wave && (g === shownQuake || sameQuake(groupPlace(g), groupPlace(shownQuake!))));
+  const mine = !faded && !!(g && wave && (g === shownQuake || sameQuake(groupPlace(g), groupPlace(shownQuake!))));
   subMap.setWaves(mine && wave ? [wave] : []);
   if (mine === waving) return;
   waving = mine;
@@ -101,14 +109,14 @@ function captionHtml(q: Group): string {
   }<div class="sub-time">${esc(c.time)}</div>${c.tsunami ? `<div class="sub-tsunami">${esc(c.tsunami)}</div>` : ""}</div>`;
 }
 
-function legendHtml(q: Group): string {
+/** 凡例の行 (震度・予想・震央)。P波・S波の行は波が出入りするので waveRow で別に扱い、subLegend の waves は使わない (false を渡す) */
+function legendRows(q: Group): string[] {
   const l = subLegend(q, false);
-  if (!l) return "";
+  if (!l) return [];
   const rows = l.scales.map((s) => `<div class="sub-legend-row"><i style="background:${scaleColor(s)}"></i>震度${esc(scaleLabel(s))}</div>`);
   if (l.forecast) rows.push(`<div class="sub-legend-row"><i class="forecast"></i>予想</div>`);
   if (l.epicenter) rows.push(`<div class="sub-legend-row"><span class="x">✕</span>震央</div>`);
-  legendHasRows = rows.length > 0;
-  return rows.join("");
+  return rows;
 }
 
 function hideOverlays(): void {
@@ -130,7 +138,9 @@ function paint(state: SubMapState | null, q: Group | undefined): void {
     return;
   }
   shownQuake = q;
-  legend.innerHTML = legendHtml(q);
+  const rows = legendRows(q);
+  legendHasRows = rows.length > 0;
+  legend.innerHTML = rows.join("");
   legend.append(waveRow);
   waveRow.hidden = !waving;
   legend.hidden = !legendHasRows && !waving;
