@@ -23,7 +23,7 @@ export function numTag(key: string): string {
   return n == null ? "" : `<span class="num">${n}</span>`;
 }
 
-function badge(s: Scale, big = false): string {
+export function badge(s: Scale, big = false): string {
   return `<span class="badge${big ? " big" : ""}" style="background:${scaleColor(s)};color:${scaleTextColor(s)}">${
     s > 0 ? scaleLabel(s) : "-"
   }</span>`;

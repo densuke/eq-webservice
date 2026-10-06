@@ -2,16 +2,44 @@
 
 import { pad, pointBox, union } from "./camera.ts";
 import { $, subMap } from "./dom.ts";
+import { app } from "./state.ts";
 import type { Group } from "./groups.ts";
 import { type SubMapState, subMapSigs, subMapState } from "./hold.ts";
+import { esc } from "./html.ts";
 import { subMapConfig } from "./layout-dom.ts";
 import { project } from "./map.ts";
-import { currentGroup, geoOf, groupScale, relatedQuake, shakenGeo } from "./quakes.ts";
-import { paintMap } from "./view.ts";
+import { currentGroup, geoOf, groupPlace, groupScale, relatedQuake, shakenGeo } from "./quakes.ts";
+import { sameQuake } from "./priority.ts";
+import type { MainWave } from "./scene.ts";
+import { scaleColor, scaleLabel } from "./scale.ts";
+import { subCaption, subLegend } from "./sub-caption.ts";
+import { badge, paintMap } from "./view.ts";
 
 const box = $("#map-sub");
 let lastPaint: string | null = null;
 let lastFade: string | null = null;
+/** サブの地図に映している地震 (描き直したときの) */
+let shownQuake: Group | undefined;
+/** サブの地図に P 波・S 波を描いているか */
+let waving = false;
+/** 凡例にP波・S波以外の行があるか (波の行だけ出し入れするとき、凡例ごと隠すかの判断に使う) */
+let legendHasRows = false;
+
+// 見出しの札 (左上) と凡例 (右下)。中身は paint() で作る。同じ内容が右列の詳細パネルにあるので読み上げからは外す
+const caption = overlay("sub-caption");
+const legend = overlay("sub-legend");
+const waveRow = document.createElement("div");
+waveRow.className = "sub-legend-row";
+waveRow.innerHTML = `<span class="lw p">P波</span> <span class="lw s">S波</span>`;
+
+function overlay(cls: string): HTMLElement {
+  const e = document.createElement("div");
+  e.className = cls;
+  e.hidden = true;
+  e.setAttribute("aria-hidden", "true");
+  box.append(e);
+  return e;
+}
 
 /** 枠が見えているか (trial 以外では隠し置き場で 0 のまま) */
 export function subMapShown(): boolean {
@@ -43,8 +71,53 @@ export function renderSubMap(now: number): void {
     paint(state, q);
   } else if (sigs.fade !== lastFade) {
     lastFade = sigs.fade;
-    subMap.setFade(state?.alpha ?? 1);
+    setFade(state?.alpha ?? 1);
   }
+}
+
+function setFade(alpha: number): void {
+  subMap.setFade(alpha);
+  caption.style.opacity = legend.style.opacity = String(alpha);
+}
+
+/** 主の地図の波 (毎 tick)。サブの地図に映している地震の波だけ描く。塗りは描き直さない */
+export function renderSubWaves(wave: MainWave | null): void {
+  const g = wave && shownQuake && (wave.key === shownQuake.key ? shownQuake : app.world.store.get(wave.key));
+  const mine = !!(g && wave && (g === shownQuake || sameQuake(groupPlace(g), groupPlace(shownQuake!))));
+  subMap.setWaves(mine && wave ? [wave] : []);
+  if (mine === waving) return;
+  waving = mine;
+  waveRow.hidden = !mine;
+  legend.hidden = !legendHasRows && !mine;
+}
+
+/** 札の中身。epicenter の印は ✕ */
+function captionHtml(q: Group): string {
+  const c = subCaption(q);
+  if (!c) return "";
+  const kindCls = c.eew === "warning" ? " warning" : c.eew === "forecast" ? " forecast" : "";
+  return `${badge(c.scale, true)}<div class="sub-caption-text"><div class="sub-kind${kindCls}">${esc(c.kind)}</div><div class="sub-title">${esc(c.title)}</div>${
+    c.facts ? `<div class="sub-facts">${esc(c.facts)}</div>` : ""
+  }<div class="sub-time">${esc(c.time)}</div>${c.tsunami ? `<div class="sub-tsunami">${esc(c.tsunami)}</div>` : ""}</div>`;
+}
+
+function legendHtml(q: Group): string {
+  const l = subLegend(q, false);
+  if (!l) return "";
+  const rows = l.scales.map((s) => `<div class="sub-legend-row"><i style="background:${scaleColor(s)}"></i>震度${esc(scaleLabel(s))}</div>`);
+  if (l.forecast) rows.push(`<div class="sub-legend-row"><i class="forecast"></i>予想</div>`);
+  if (l.epicenter) rows.push(`<div class="sub-legend-row"><span class="x">✕</span>震央</div>`);
+  legendHasRows = rows.length > 0;
+  return rows.join("");
+}
+
+function hideOverlays(): void {
+  caption.hidden = true;
+  legend.hidden = true;
+  caption.replaceChildren();
+  legend.replaceChildren();
+  shownQuake = undefined;
+  legendHasRows = false;
 }
 
 function paint(state: SubMapState | null, q: Group | undefined): void {
@@ -53,15 +126,28 @@ function paint(state: SubMapState | null, q: Group | undefined): void {
     subMap.setEpicenters([]);
     subMap.setFade(1);
     subMap.jumpTo(null);
+    hideOverlays();
     return;
   }
+  shownQuake = q;
+  legend.innerHTML = legendHtml(q);
+  legend.append(waveRow);
+  waveRow.hidden = !waving;
+  legend.hidden = !legendHasRows && !waving;
+  caption.innerHTML = captionHtml(q);
+  caption.hidden = false;
   paintMap(subMap, q);
   const c = geoOf(q)?.center;
   subMap.setEpicenters(c ? [{ key: q.key, lat: c.lat, lon: c.lon, label: null, primary: true, scale: groupScale(q) }] : []);
-  subMap.setFade(state.alpha);
+  setFade(state.alpha);
   const shaken = shakenGeo(q);
   const shakenBox = subMap.areaBox(shaken.areas) ?? subMap.prefBox(shaken.prefs);
   const [x, y] = c ? project(c.lon, c.lat) : [0, 0];
   const view = union(shakenBox, c ? pointBox(x, y, 80) : null);
-  subMap.jumpTo(view && pad(view));
+  const padded = view && pad(view);
+  // 札が左上を覆うので、寄る範囲を札の高さの分だけ上へ広げる (札の高さは描いたあとの実測)
+  const capH = caption.offsetHeight;
+  const h = box.clientHeight;
+  if (padded && capH > 0 && h > capH) padded.y0 -= ((padded.y1 - padded.y0) * capH) / (h - capH);
+  subMap.jumpTo(padded);
 }

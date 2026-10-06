@@ -17,7 +17,7 @@ import { pipSlot } from "./replay-sound.ts";
 import { play, soundEnabled } from "./sound.ts";
 import { $, map, subMap } from "./dom.ts";
 import { mainMapTarget } from "./hold.ts";
-import { invalidateSubMap, renderSubMap, subMapShown } from "./sub-map.ts";
+import { invalidateSubMap, renderSubMap, renderSubWaves, subMapShown } from "./sub-map.ts";
 import { type World, app, hooks, liveWorld, now, now as serverNow } from "./state.ts";
 import { activeAreas, latestTsunami, tsunamiAlert } from "./tsunami.ts";
 import type { EewEvent, EqEvent, UserquakeEvent } from "./types.ts";
@@ -90,7 +90,8 @@ export function tick(): void {
   renderEewPanel(now);
   renderMarkers(now);
   const sc = scene(now);
-  const { box, waving } = renderScene(sc);
+  const { box, waving, wave } = renderScene(sc);
+  renderSubWaves(wave);
   // 波の広がり中 (履歴の再生の早送りの最中を除く) は 2 秒ごとに短い音で警戒中を知らせる (地震が重なっても 1 本)
   const pip = pipSlot(now, { waving, replay: sc?.replay ?? false, speed: app.demo?.clock.speed ?? 1, fastForward: fastForwarding() });
   if (pip > lastPip && lastPip !== -1) play("pip");
