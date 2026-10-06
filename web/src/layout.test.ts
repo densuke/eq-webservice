@@ -108,6 +108,8 @@ test("the check names what is wrong in a layout file", () => {
   assert.equal(broken((d) => d.layouts[2].root.children.splice(1, 1)), "");
   assert.match(broken((d) => (d.layouts[1].root.children[2].children[0] = { slot: "notice" })), /regular\): 部品「main」を置いていない/);
   assert.match(broken((d) => d.layouts[1].root.children.push({ slot: "clock" })), /「clock」を 2 回置いている/);
+  // 名前の重なり
+  assert.match(broken((d) => (d.layouts[2].name = d.layouts[1].name)), /名前「regular」が重なっている/);
   // 積みの余白と場所取り (隅の積みと入れ子の積みの両方で使える)
   const corner = (d: any) => d.layouts[2].root.children[2].children[0].overlays["top-left"];
   assert.equal(broken((d) => Object.assign(corner(d), { gap: "8px", pad: "4px 8px" })), "");

@@ -96,9 +96,9 @@ export const LAYOUTS: readonly Layout[] = (BUILTIN as unknown as { layouts: Layo
 
 const CORNERS: readonly string[] = ["top-left", "top-right", "bottom-left", "bottom-right", "top", "bottom"];
 const WHEN: readonly string[] = ["minWidth", "maxWidth", "minHeight", "maxHeight"];
-/** fill・fill:n・auto・数 + 単位・calc() などの CSS の関数 */
 /** 0 か、数 + 単位 */
 const LENGTH = /^(?:0|\d+(?:\.\d+)?(?:px|em|rem|%|vw|vh|svh|dvh))$/;
+/** fill・fill:n・auto・数 + 単位・calc() などの CSS の関数 */
 const SIZE = /^(?:fill(?::\d+(?:\.\d+)?)?|auto|\d+(?:\.\d+)?(?:px|%|vw|vh|svw|svh|dvw|dvh|lvw|lvh|em|rem)|(?:calc|clamp|min|max)\([\w\s.,%+*/()-]*\))$/;
 
 /**
@@ -163,12 +163,13 @@ export function checkLayouts(data: unknown, slots: readonly string[], boxes: rea
   if (data.version !== 1) errs.push(`version は 1 (いまは ${JSON.stringify(data.version)})`);
   if (!Array.isArray(data.layouts) || data.layouts.length === 0) return [...errs, "layouts が空か、配列でない"];
   if (data.layouts.every((l) => isObj(l) && l.manual === true)) errs.push("manual でない定義が 1 つも無い");
-  data.layouts.forEach((l, i) => {
+  data.layouts.forEach((l, i, all) => {
     const at = `layouts[${i}]`;
     if (!isObj(l)) return void errs.push(`${at}: オブジェクトでない`);
     const name = `${at} (${String(l.name)})`;
     keys(l, name, ["name", "when", "scroll", "manual", "root"]);
     if (typeof l.name !== "string" || !l.name) errs.push(`${at}: name が無い`);
+    else if (all.slice(0, i).some((o) => isObj(o) && o.name === l.name)) errs.push(`${name}: 名前「${l.name}」が重なっている`);
     if (l.when !== undefined) {
       if (!isObj(l.when)) errs.push(`${name}: when がオブジェクトでない`);
       else for (const [k, v] of Object.entries(l.when)) if (!WHEN.includes(k) || typeof v !== "number") errs.push(`${name}: when.${k} は使えない (${WHEN.join("・")} に数)`);
