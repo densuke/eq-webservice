@@ -369,6 +369,7 @@ body[data-layout="trial"] #demo-panel { max-height: 25vh; overflow: auto; }
 .sub-caption-text { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .sub-kind { color: var(--muted); }
 .sub-kind.forecast { color: #b35900; }
+.sub-caption .sub-kind.forecast { color: #f0883e; } /* 暗い背景の札では #b35900 が沈むので明るい橙 */
 .sub-kind.warning { color: var(--alert); }
 .sub-title { font-size: 14px; font-weight: bold; }
 .sub-facts, .sub-time { color: var(--muted); }
