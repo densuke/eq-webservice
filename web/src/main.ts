@@ -407,7 +407,7 @@ Promise.all([
   map.loadAreas("areas.geojson").catch(() => {}),
   map.loadNeighbors("neighbors.geojson").catch(() => {}),
   // サブの地図は津波・警報・天気を読まない
-  subMap.load("japan.geojson"),
+  subMap.load("japan.geojson").catch(() => {}),
   subMap.loadAreas("areas.geojson").catch(() => {}),
   subMap.loadNeighbors("neighbors.geojson").catch(() => {}),
   loadStations().catch(() => {}),
