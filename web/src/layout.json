@@ -187,7 +187,7 @@
                 "size": "fill",
                 "children": [
                   {"slot": "settings", "size": "auto"},
-                  {"slot": "map-sub", "size": "fill"},
+                  {"slot": "map-sub", "size": "40%"},
                   {"slot": "detail", "size": "auto"},
                   {"slot": "eew-panel", "size": "auto"},
                   {"slot": "history-head", "size": "auto"},

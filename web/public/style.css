@@ -354,3 +354,4 @@ body[data-layout="landscape"] .inset-okinawa { height: 140px; }
 body[data-layout="landscape"] .inset-ogasawara { height: 100px; }
 body[data-layout="trial"] .ld-box:has(> #clock) { border-top: 1px solid var(--line); background: var(--panel); align-items: center; gap: 12px; padding: 0 12px; }
 body[data-layout="trial"] .banner { border-top: none; }
+body[data-layout="trial"] #demo-panel { max-height: 25vh; overflow: auto; }
