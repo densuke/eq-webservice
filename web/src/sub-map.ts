@@ -22,8 +22,11 @@ export function invalidateSubMap(): void {
 export function renderSubMap(now: number): void {
   const w = box.clientWidth;
   const h = box.clientHeight;
-  // 隠し置き場 (trial 以外) にいる間は描かない
-  if (w === 0 || h === 0) return;
+  // 隠し置き場 (trial 以外) にいる間は描かない。再び見えたときにカメラを合わせ直すため署名を消す
+  if (w === 0 || h === 0) {
+    invalidateSubMap();
+    return;
+  }
   const g = currentGroup();
   const q = g && relatedQuake(g);
   const cfg = subMapConfig();
