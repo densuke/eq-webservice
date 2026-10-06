@@ -364,7 +364,7 @@ systemctl --user daemon-reload && systemctl --user enable --now eq-broadcast
 journalctl --user -u eq-broadcast -f
 ```
 
-`eq-server` の入れ替えは、ファイルを置き換えてから `systemctl --user restart eq-broadcast` です。
+`eq-server` の入れ替えは、ファイルを置き換えてから `systemctl --user restart eq-server` です。`eq-broadcast` と `eq-bgm` は `PartOf=eq-server.service` で `eq-server` にひも付いているので、一緒に再起動され、web・配信・BGM の版がそろいます (配信は数秒途切れます)。配信だけを再起動するときは `systemctl --user restart eq-broadcast`。
 
 #### 記録から地震の動画を作る (replay-video)
 
