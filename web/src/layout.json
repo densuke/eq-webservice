@@ -146,7 +146,7 @@
     },
     {
       "name": "trial",
-      "note": "試験中。?layout=trial で選ぶ。JDQ の画面の形 (左: 全国の地図 + 下の帯 / 右: 寄り図の場所 + パネル群)。地図は 1 枚で、右上の寄り図の場所はいまは地震の詳細で代用 (段 B で 2 枚目の地図にする)",
+      "note": "試験中。?layout=trial で選ぶ。JDQ の画面の形 (左: 全国の地図 + 下の帯 / 右: 右上はサブの地図 (最近の地震) + パネル群)",
       "manual": true,
       "root": {
         "dir": "column",
@@ -187,7 +187,8 @@
                 "size": "fill",
                 "children": [
                   {"slot": "settings", "size": "auto"},
-                  {"slot": "detail", "size": "fill"},
+                  {"slot": "map-sub", "size": "fill"},
+                  {"slot": "detail", "size": "auto"},
                   {"slot": "eew-panel", "size": "auto"},
                   {"slot": "history-head", "size": "auto"},
                   {"slot": "history", "size": "fill"},

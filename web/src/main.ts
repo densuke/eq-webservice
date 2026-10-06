@@ -15,7 +15,8 @@ import { activeEews, calmState, currentGroup, displayedInfoMs, placeOf, priority
 import { renderMarkers, renderScene, scene } from "./scene.ts";
 import { pipSlot } from "./replay-sound.ts";
 import { play, soundEnabled } from "./sound.ts";
-import { $, map } from "./dom.ts";
+import { $, map, subMap } from "./dom.ts";
+import { renderSubMap } from "./sub-map.ts";
 import { type World, app, hooks, liveWorld, now, now as serverNow } from "./state.ts";
 import { activeAreas, latestTsunami, tsunamiAlert } from "./tsunami.ts";
 import type { EewEvent, EqEvent, UserquakeEvent } from "./types.ts";
@@ -84,6 +85,7 @@ export function tick(): void {
   updateTour(now, map.userMoved);
   if (app.tourKey && app.tourKey !== prevTour) showTourToast(app.tourKey);
   renderBanner(now);
+  renderSubMap(now);
   renderEewPanel(now);
   renderMarkers(now);
   const sc = scene(now);
@@ -402,6 +404,10 @@ Promise.all([
   // 無ければ寄っても都道府県で塗る
   map.loadAreas("areas.geojson").catch(() => {}),
   map.loadNeighbors("neighbors.geojson").catch(() => {}),
+  // サブの地図は津波・警報・天気を読まない
+  subMap.load("japan.geojson"),
+  subMap.loadAreas("areas.geojson").catch(() => {}),
+  subMap.loadNeighbors("neighbors.geojson").catch(() => {}),
   loadStations().catch(() => {}),
   loadUserquakeAreas().catch(() => {}),
   loadWarnings().catch(() => {}),

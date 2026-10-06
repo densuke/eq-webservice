@@ -8,6 +8,7 @@ import { byPriority, rotationIndex, sameQuake } from "./priority.ts";
 import { activeEews, currentGroup, groupPlace, groupScale, relatedQuake } from "./quakes.ts";
 import { scaleColor, scaleLabel, scaleTextColor } from "./scale.ts";
 import { $, map } from "./dom.ts";
+import type { JapanMap } from "./map.ts";
 import { listOpen, shownInList } from "./personal.ts";
 import { app, now } from "./state.ts";
 import { activeAreas } from "./tsunami.ts";
@@ -119,7 +120,7 @@ function forecastLayers(g: EewGroup): { prefs: AreaScale[]; areas: AreaScale[] }
 }
 
 /** 地図の塗り分けと震央 */
-function paintMap(g: Group | undefined): void {
+export function paintMap(target: JapanMap, g: Group | undefined): void {
   if (g?.kind === "quake") {
     const q = summarizeQuake(g);
     const d = quakeDetail(q.points, app.stations);
@@ -137,15 +138,15 @@ function paintMap(g: Group | undefined): void {
       );
     const f = eg ? forecastLayers(eg) : { prefs: [], areas: [] };
     const prefs = overlayForecast(byName(q.prefMax), f.prefs);
-    map.setPrefScales(prefs.map(({ name, ...rest }) => ({ pref: name, ...rest })));
-    map.setDetail(overlayForecast(d.areas, f.areas), false, d.dots);
+    target.setPrefScales(prefs.map(({ name, ...rest }) => ({ pref: name, ...rest })));
+    target.setDetail(overlayForecast(d.areas, f.areas), false, d.dots);
   } else if (g?.kind === "eew") {
     const f = forecastLayers(g);
-    map.setPrefScales(f.prefs.map(({ name, ...rest }) => ({ pref: name, ...rest })), true);
-    map.setDetail(f.areas, true, []);
+    target.setPrefScales(f.prefs.map(({ name, ...rest }) => ({ pref: name, ...rest })), true);
+    target.setDetail(f.areas, true, []);
   } else {
-    map.setPrefScales([]);
-    map.setDetail([], false, []);
+    target.setPrefScales([]);
+    target.setDetail([], false, []);
   }
 }
 
@@ -164,7 +165,7 @@ export function updatePointsOpen(): void {
 export function renderDetail(): void {
   const g = currentGroup();
   const box = $("#detail");
-  paintMap(g && relatedQuake(g));
+  paintMap(map, g && relatedQuake(g));
   if (!g) {
     box.innerHTML = `<p class="muted">受信した情報はまだありません。</p>`;
     return;

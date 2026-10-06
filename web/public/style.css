@@ -75,6 +75,7 @@ body {
 @keyframes blink { 50% { background: #8b0f1f; } }
 
 .map-wrap { position: relative; background: var(--sea); min-height: 0; overflow: hidden; }
+.map-sub { border-bottom: 1px solid var(--line); min-height: 160px; }
 .map { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
 .map:active { cursor: grabbing; }
 

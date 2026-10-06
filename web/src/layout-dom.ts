@@ -8,6 +8,7 @@ export const SLOTS: Record<string, string> = {
   topbar: "header.topbar",
   banners: "#eew-banner, #tsunami-banner, #warn-banner",
   main: "#map",
+  "map-sub": "#map-sub",
   settings: "#settings-panel, #demo-panel",
   "eew-panel": "#eew-panel",
   detail: "#detail",

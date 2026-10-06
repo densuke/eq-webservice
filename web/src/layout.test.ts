@@ -156,7 +156,7 @@ test("trial (manual) is the JDQ-shaped layout", () => {
   const t = chooseLayout(LAYOUTS, 1440, 900, "trial");
   assert.equal(t.name, "trial");
   assert.equal(pickLayout(LAYOUTS, 1440, 900).name, "regular");
-  const want = ["topbar", "main", "banners", "inset", "caption", "countdown", "legend", "ogasawara", "toast", "hint", "clock", "notice", "settings", "detail", "eew-panel", "history-head", "history", "credit"];
+  const want = ["topbar", "main", "map-sub", "banners", "inset", "caption", "countdown", "legend", "ogasawara", "toast", "hint", "clock", "notice", "settings", "detail", "eew-panel", "history-head", "history", "credit"];
   assert.deepEqual([...slotsOf(t.root)].sort(), [...want].sort());
 });
 
