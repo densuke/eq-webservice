@@ -560,27 +560,90 @@ fn quake_event(received_ms: u64) -> Event {
     }
 }
 
-#[test]
-fn the_sub_map_shows_the_latest_quake_when_calm() {
-    let received = (T0 + 60_000) as u64;
-    let ev = [quake_event(received)];
+const QUAKE_RECEIVED: u64 = (T0 + 60_000) as u64;
+
+/// 場面 (緊急地震速報 / 確定の地震 / 落ち着いた後) の 1 コマ目を sub_map の有無で描いた画面
+fn still_of(ev: &[Event], now: u64, sub: bool) -> (tiny_skia::Pixmap, bool) {
     let icons = Icons::new();
+    let mut cfg = config_sub(false, sub);
+    cfg.font = std::env::var("EQ_NATIVE_FONT").unwrap_or(cfg.font);
+    let mut st = Stepper::new(load_renderer(&cfg).unwrap());
+    let o = st.step(&input(ev, now, &icons)).unwrap();
+    (st.still_pixmap().unwrap().clone(), o.calm)
+}
+
+fn quake_scenes() -> [(&'static str, Vec<Event>, u64); 2] {
+    [
+        ("eew", chiba_events(), SHOWN_AT),
+        ("quake", vec![quake_event(QUAKE_RECEIVED)], QUAKE_RECEIVED + 10_000),
+    ]
+}
+
+#[test]
+fn the_sub_map_does_not_draw_when_calm() {
+    let ev = [quake_event(QUAKE_RECEIVED)];
     // 落ち着きの時間 (3 分) を過ぎた後 = 平時
-    let now = received + 10 * 60_000;
+    let now = QUAKE_RECEIVED + 10 * 60_000;
+    let (off, calm) = still_of(&ev, now, false);
+    let (on, _) = still_of(&ev, now, true);
+    assert!(calm);
+    assert!(off.pixels() == on.pixels());
+}
+
+#[test]
+fn the_sub_map_leaves_the_detail_alone_during_a_quake() {
+    // 詳細は右パネルの y 36〜181 (区切り線まで)。サブの地図 (y 190〜) はその下
+    let in_detail = |i: usize| i % draw::W as usize >= draw::MAP_W as usize && i / (draw::W as usize) < 182;
+    for (name, ev, now) in quake_scenes() {
+        let (off, _) = still_of(&ev, now, false);
+        let (on, _) = still_of(&ev, now, true);
+        let diff = |f: &dyn Fn(usize) -> bool| {
+            off.pixels()
+                .iter()
+                .zip(on.pixels())
+                .enumerate()
+                .filter(|&(i, (a, b))| a != b && f(i))
+                .count()
+        };
+        assert_eq!(diff(&in_detail), 0, "{name}");
+        assert!(diff(&in_sub_rect) > 0, "{name}");
+    }
+}
+
+#[test]
+fn the_sub_map_shows_shaking_colors_during_a_confirmed_quake() {
     let s4 = model::scale_color(Scale::S4);
-    let count = |sub| {
-        let mut st = Stepper::new(load_renderer(&config_sub(false, sub)).unwrap());
-        let o = st.step(&input(&ev, now, &icons)).unwrap();
-        assert!(o.calm);
-        let pm = st.still_pixmap().unwrap();
-        pm.pixels()
-            .iter()
-            .enumerate()
-            .filter(|&(i, p)| in_sub_rect(i) && [p.red(), p.green(), p.blue()] == s4)
-            .count()
+    // 緊急地震速報の予測は半透明の塗りなので、色が決まる確定の地震で見る
+    {
+        let (name, ev, now) = {
+            let [_, q] = quake_scenes();
+            q
+        };
+        let count = |sub| {
+            let (pm, calm) = still_of(&ev, now, sub);
+            assert!(!calm, "{name}");
+            pm.pixels()
+                .iter()
+                .enumerate()
+                .filter(|&(i, p)| in_sub_rect(i) && [p.red(), p.green(), p.blue()] == s4)
+                .count()
+        };
+        let (on, off) = (count(true), count(false));
+        assert!(on > off + 100, "{name}: {on} {off}");
+    }
+}
+
+/// サブの地図を有効にした地震の画面を PNG に書く (EQ_NATIVE_PNG_DIR があるときだけ。フォントは EQ_NATIVE_FONT)
+#[test]
+fn write_sub_map_png_when_asked() {
+    let Ok(out) = std::env::var("EQ_NATIVE_PNG_DIR") else {
+        return;
     };
-    let (on, off) = (count(true), count(false));
-    assert!(on > off + 500, "{on} {off}");
+    for (name, ev, now) in quake_scenes() {
+        let (pm, _) = still_of(&ev, now, true);
+        pm.save_png(std::path::Path::new(&out).join(format!("submap_{name}.png")))
+            .unwrap();
+    }
 }
 
 #[test]

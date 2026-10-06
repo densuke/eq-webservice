@@ -33,8 +33,10 @@ pub const MAP_W: f32 = 900.0;
 /// 地図の枠 (x, y, 幅, 高さ)
 pub const MAP_RECT: (f64, f64, f64, f64) = (0.0, BAR_H as f64, MAP_W as f64, H as f64 - BAR_H as f64);
 
-/// サブの地図の枠 (x, y, 幅, 高さ)。右パネルの上。試験 (BroadcastConfig::sub_map)
-pub const SUB_RECT: (f64, f64, f64, f64) = (MAP_W as f64, BAR_H as f64, W as f64 - MAP_W as f64, 300.0);
+/// サブの地図の枠 (x, y, 幅, 高さ)。試験 (BroadcastConfig::sub_map)。地震の画面だけに描く。
+/// 右パネルの「詳細」(地震・緊急地震速報とも、下端は panel.rs の区切り線 y 180〜181。文字は 1 行に収めるので伸びない) と
+/// 出典 (最上行の文字の上端が H-5-5*15-9 = 631) の間、y 190〜490 に置く。履歴 (y 204〜476) は隠れる
+pub const SUB_RECT: (f64, f64, f64, f64) = (MAP_W as f64, 190.0, W as f64 - MAP_W as f64, 300.0);
 
 /// 描くときに渡す、そのときの状態
 pub struct Scene<'a> {
@@ -191,7 +193,7 @@ impl Renderer {
         }
         for (slot, f) in frames(&self.main, &self.insets, &self.zoomed).into_iter().enumerate() {
             match Shake::of(scene) {
-                Some(s) => draw_shake(&mut pm, &mut self.text, &self.prefs, f, &s),
+                Some(s) => draw_shake(&mut pm, &mut self.text, &self.prefs, f, &s, true),
                 None => {
                     let (fixed, bounds) = card_room(f, &self.insets, self.zoomed.is_some(), scene.test);
                     let env = calm::CardEnv {
@@ -208,7 +210,7 @@ impl Renderer {
             }
         }
         panel::draw_dynamic(&mut pm, &mut self.text, scene);
-        if let Some(f) = &self.sub {
+        if let (Some(f), true) = (&self.sub, scene.quake.is_some() || scene.eew.is_some()) {
             draw_sub_map(&mut pm, &mut self.text, &self.neighbors, &self.prefs, f, scene);
         }
         // お知らせは平時だけ (右パネルの下半分。地震の画面では出さない)
@@ -275,8 +277,8 @@ fn draw_land(pm: &mut Pixmap, f: &Frame, neighbors: &[Shape], prefs: &[Shape]) {
     }
 }
 
-/// サブの地図 (試験): SUB_RECT を海で塗り、陸と、地震の揺れ (県の塗り・震度の札・震央) を描いて、1px の枠を付ける。
-/// 札 (tag) は出さない。区域の塗りと観測点の点は無い
+/// サブの地図 (試験): SUB_RECT を海で塗り、陸と、地震の揺れ (県の塗り・震央) を描いて、1px の枠を付ける。
+/// 震度の札・緊急地震速報の札 (tag) は出さない (枠の外にはみ出しうる)。区域の塗りと観測点の点は無い
 fn draw_sub_map(pm: &mut Pixmap, text: &mut Text, neighbors: &[Shape], prefs: &[Shape], f: &Frame, scene: &Scene) {
     let (x, y, w, h) = (
         SUB_RECT.0 as f32,
@@ -286,8 +288,8 @@ fn draw_sub_map(pm: &mut Pixmap, text: &mut Text, neighbors: &[Shape], prefs: &[
     );
     rect(pm, x, y, w, h, SEA, 1.0);
     draw_land(pm, f, neighbors, prefs);
-    if let Some(s) = sub_shake(scene) {
-        draw_shake(pm, text, prefs, f, &s);
+    if let Some(s) = Shake::of(scene) {
+        draw_shake(pm, text, prefs, f, &s, false);
     }
     for (rx, ry, rw, rh) in [
         (x, y, w, 1.0),
@@ -296,19 +298,6 @@ fn draw_sub_map(pm: &mut Pixmap, text: &mut Text, neighbors: &[Shape], prefs: &[
         (x + w - 1.0, y, 1.0, h),
     ] {
         rect(pm, rx, ry, rw, rh, INSET_LINE, 1.0);
-    }
-}
-
-/// サブの地図に描く揺れ: 表示中の地震・緊急地震速報、無ければ最新の地震 (観測)。札は付けない
-fn sub_shake<'a>(scene: &Scene<'a>) -> Option<Shake<'a>> {
-    match Shake::of(scene) {
-        Some(s) => Some(Shake { tag: None, ..s }),
-        None => scene.history.first().map(|q| Shake {
-            scales: &q.pref_scales,
-            forecast: false,
-            hypocenter: q.hypocenter.as_ref(),
-            tag: None,
-        }),
     }
 }
 
@@ -370,7 +359,7 @@ fn wave_paths(view: &View, waves: &[Wave]) -> Vec<WavePaths> {
 }
 
 /// 揺れの画面: 都道府県を震度の色で塗り、震度の札と震央 (と札) を出す (札は本図だけ)
-fn draw_shake(pm: &mut Pixmap, text: &mut Text, prefs: &[Shape], frame: &Frame, shake: &Shake) {
+fn draw_shake(pm: &mut Pixmap, text: &mut Text, prefs: &[Shape], frame: &Frame, shake: &Shake, cards: bool) {
     let hit: Vec<(&Shape, Scale)> = shake
         .scales
         .iter()
@@ -385,8 +374,8 @@ fn draw_shake(pm: &mut Pixmap, text: &mut Text, prefs: &[Shape], frame: &Frame, 
         frame.fill(pm, &s.path, scale_color(*sc), alpha);
         frame.stroke(pm, &s.path, edge, 1.0, if shake.forecast { 1.2 } else { 1.0 });
     }
-    // 数字の札 (文字が描けないときは出さない)
-    if text.enabled() && !frame.is_inset() {
+    // 震度の札・緊急地震速報の札 (cards のときだけ。文字が描けないときは出さない)
+    if cards && text.enabled() && !frame.is_inset() {
         for (s, sc) in &hit {
             let label = sc.label();
             let w = 12.0 + 9.0 * label.chars().count() as f32;
@@ -409,7 +398,7 @@ fn draw_shake(pm: &mut Pixmap, text: &mut Text, prefs: &[Shape], frame: &Frame, 
     }
     if let Some((x, y)) = shake.hypocenter.and_then(|h| frame.marker(h.longitude?, h.latitude?)) {
         epicenter(pm, x, y);
-        if let (Some(tag), true) = (&shake.tag, text.enabled()) {
+        if let (Some(tag), true) = (&shake.tag, cards && text.enabled()) {
             let w = text.width(tag, 13.0) + 14.0;
             // 印の右に置く。別枠の右端をはみ出すときは左に置く
             let edge = frame.inset_box().map_or(MAP_W, |((bx, _, bw, _), _)| bx + bw);
