@@ -146,7 +146,7 @@
       </table></div>
       <p class="small muted">各定義は、部品 (<code>web/src/layout-dom.ts</code> の <code>SLOTS</code>) を高々 1 回ずつ置く。必須は <code>main</code> だけ。省いた部品と使わない容器は、body 直下の隠し置き場 (<code>.ld-unused</code>、<code>hidden</code>) へ移る (文書から外れないので、他のコードが要素を探せる)。知らないキーも誤りにする (書き間違いに気づけるように)。</p>
       <h3>試験定義 trial (JDQ の形)</h3>
-      <p><code>?layout=trial</code> で選ぶ (<code>manual</code>)。JDQ の画面の形に並べる。</p>
+      <p><code>?layout=trial</code> で選ぶ (<code>manual</code>)。JDQ の画面の形に並べる。幅 800 以下 (スマホ縦) のほか、高さ 480 以下 (横向きのスマホ) でも選ばれず、自動の定義になる。</p>
       <ul>
         <li><b>左</b>: 全国の地図 (<code>main</code>)。下の帯に時計 (<code>clock</code>) とお知らせ (<code>notice</code>) を置く。帯 (<code>banners</code>) の札は地図の左上に重ねる。</li>
         <li><b>右</b>: サブの地図 (<code>map-sub</code>、右列の 40%)・詳細 (<code>detail</code>、<code>auto</code>)・緊急地震速報の常設パネル (<code>eew-panel</code>)・履歴・出典。デモの操作パネルは trial では高さ 25vh まで。</li>

@@ -35,6 +35,10 @@ test("a manual layout is chosen only by name (?layout=)", () => {
 test("a forced layout with a non-matching when falls back to the automatic pick", () => {
   assert.equal(chooseLayout(LAYOUTS, 375, 812, "trial").name, "compact");
   assert.equal(chooseLayout(LAYOUTS, 1440, 900, "trial").name, "trial");
+  // 横向きのスマホ (高さ 480 以下) では trial を使わない
+  assert.equal(chooseLayout(LAYOUTS, 1000, 420, "trial").name, "landscape");
+  assert.equal(chooseLayout(LAYOUTS, 844, 390, "trial").name, "landscape");
+  assert.equal(chooseLayout(LAYOUTS, 1280, 720, "trial").name, "trial");
   // 自動で選ばれる定義も、合わなければ名前で指しても使わない
   assert.equal(chooseLayout(LAYOUTS, 390, 844, "regular").name, "compact");
 });
