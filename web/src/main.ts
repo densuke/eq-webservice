@@ -16,7 +16,8 @@ import { renderMarkers, renderScene, scene } from "./scene.ts";
 import { pipSlot } from "./replay-sound.ts";
 import { play, soundEnabled } from "./sound.ts";
 import { $, map, subMap } from "./dom.ts";
-import { invalidateSubMap, renderSubMap } from "./sub-map.ts";
+import { mainMapTarget } from "./hold.ts";
+import { invalidateSubMap, renderSubMap, subMapShown } from "./sub-map.ts";
 import { type World, app, hooks, liveWorld, now, now as serverNow } from "./state.ts";
 import { activeAreas, latestTsunami, tsunamiAlert } from "./tsunami.ts";
 import type { EewEvent, EqEvent, UserquakeEvent } from "./types.ts";
@@ -107,7 +108,7 @@ export function tick(): void {
     map.setWaves([]);
     $("#wave-info").textContent = "";
   }
-  map.setTarget(box);
+  map.setTarget(mainMapTarget(box, subMapShown(), app.selectedKey != null));
   // 平時は地震の塗り分けを消して気象警報・注意報を塗る。BGM は地震・津波・揺れの報告の間とデモ中は止める
   const { calm, quiet } = renderWarnings(now, renderUserquake(now));
   updateBgm(quiet);
