@@ -1,7 +1,7 @@
 // レイアウトの定義 (layout.ts) どおりに、いまのページの要素を並べ直す。
 // 部品の要素は index.html (と JapanMap が作る別枠) にあるものをそのまま使い、置き場所と大きさだけを決める。
 
-import { type Layout, type LayoutNode, type Part, type Stack, LAYOUTS, checkLayouts, flexOf, pickLayout } from "./layout.ts";
+import { type Layout, type LayoutNode, type Part, type Stack, LAYOUTS, checkLayouts, chooseLayout, flexOf, slotsOf } from "./layout.ts";
 
 /** 部品の名前 → 要素 (複数なら順に並べる) */
 export const SLOTS: Record<string, string> = {
@@ -51,6 +51,13 @@ function stack(spec: Stack, cls: string): HTMLElement {
   const box = document.createElement("div");
   box.className = cls;
   box.style.flexDirection = spec.flow;
+  if (spec.gap) box.style.gap = spec.gap;
+  if (spec.pad) box.style.padding = spec.pad;
+  if (spec.minHeight) {
+    box.style.minHeight = spec.minHeight;
+    // 中身が全部 hidden でも消えずに場所を取る (style.css の .ld-stack:not(:has(> :not([hidden]))) より inline が勝つ)
+    box.style.display = "flex";
+  }
   for (const item of spec.items) {
     if (typeof item === "string") box.append(...part(item));
     else if ("slot" in item) box.append(...part((item as Part).slot, (item as Part).variant));
@@ -99,12 +106,10 @@ function place(node: LayoutNode, parent: HTMLElement, pageColumn: boolean): void
 
 /** 定義の中で、ページに見つからない部品と容器 (並べる前に確かめ、一つでもあれば並べ直さない) */
 function missing(node: LayoutNode): string[] {
-  const names = (s: Stack): string[] => s.items.flatMap((i) => (typeof i === "string" ? [i] : "slot" in i ? [(i as Part).slot] : names(i)));
-  const used = [...(node.slot ? [node.slot] : []), ...Object.values(node.overlays ?? {}).flatMap((s) => (s ? names(s) : []))];
+  const boxes = (n: LayoutNode): string[] => [...(n.box ? [n.box] : []), ...(n.children ?? []).flatMap(boxes)];
   return [
-    ...used.filter((n) => !SLOTS[n] || elements(n).length === 0).map((n) => `部品「${n}」`),
-    ...(node.box && !document.querySelector(BOXES[node.box] ?? "") ? [`容器「${node.box}」`] : []),
-    ...(node.children ?? []).flatMap(missing),
+    ...slotsOf(node).filter((n) => !SLOTS[n] || elements(n).length === 0).map((n) => `部品「${n}」`),
+    ...boxes(node).filter((b) => !document.querySelector(BOXES[b] ?? "")).map((b) => `容器「${b}」`),
   ];
 }
 
@@ -115,7 +120,7 @@ let layouts: readonly Layout[] = LAYOUTS;
 /** 画面の大きさに合う定義で並べる。前と同じ定義なら何もしない。
  *  部品や容器が見つからなければ、ログを出していまの並びのままにする (ページ全体を止めない) */
 export function applyLayout(): void {
-  const next = pickLayout(layouts, window.innerWidth, window.innerHeight);
+  const next = chooseLayout(layouts, window.innerWidth, window.innerHeight, new URLSearchParams(location.search).get("layout"));
   if (next === current) return;
   const lack = missing(next.root);
   if (lack.length) {
@@ -129,6 +134,14 @@ export function applyLayout(): void {
   made = [];
   document.body.dataset.layout = next.name;
   place(next.root, document.body, next.scroll === "page");
+  // 定義に無い部品は隠し置き場へ (文書から外すと、document.querySelector で探すコードや ResizeObserver が対象を失う)
+  const used = slotsOf(next.root);
+  const unused = document.createElement("div");
+  unused.className = "ld-unused";
+  unused.hidden = true;
+  for (const slot of Object.keys(SLOTS)) if (!used.includes(slot)) unused.append(...part(slot));
+  document.body.append(unused);
+  made.push(unused);
   for (const el of old) el.remove();
 }
 
