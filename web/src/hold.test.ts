@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { holdMs, subMapSigs, subMapState } from "./hold.ts";
+import { holdMs, mainMapTarget, subMapSigs, subMapState } from "./hold.ts";
 import { SUB_MAP } from "./layout.ts";
 
 test("hold time follows the max scale (boundaries fall on the right side)", () => {
@@ -29,4 +29,14 @@ test("subMapSigs: fading changes only the fade signature, not the paint one", ()
   const g2 = { ...g, updatedAt: 1500 };
   assert.notEqual(solid.paint, subMapSigs(subMapState(2000, g2, 20, SUB_MAP), g2, 300, 200, 0.4).paint);
   assert.equal(subMapSigs(null, undefined, 300, 200, 0.4).paint, "|300x200");
+});
+
+test("mainMapTarget: 左の地図はサブの地図が見えている間、履歴で選んだとき以外は日本全体のまま", () => {
+  const box = { x: 1, y: 2, w: 3, h: 4 };
+  assert.equal(mainMapTarget(box, true, false), null);
+  assert.equal(mainMapTarget(box, true, true), box);
+  assert.equal(mainMapTarget(box, false, false), box);
+  assert.equal(mainMapTarget(box, false, true), box);
+  assert.equal(mainMapTarget(null, true, true), null);
+  assert.equal(mainMapTarget(null, false, false), null);
 });

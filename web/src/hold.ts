@@ -28,3 +28,8 @@ export function subMapSigs(state: SubMapState | null, g: { updatedAt: number } |
     fade: state ? `${state.faded}|${fadedAlpha}` : "",
   };
 }
+
+/** 左の地図のカメラの目標。サブの地図が見えている間は日本全体のまま (null)、履歴で選んだときだけ寄る */
+export function mainMapTarget<T>(box: T | null, subShown: boolean, selected: boolean): T | null {
+  return subShown && !selected ? null : box;
+}
