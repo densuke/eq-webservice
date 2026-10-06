@@ -6,9 +6,9 @@
 出した 464 件のうち、次の 12 件を選ぶ。
   - 最大震度の大きいもの (当時の震度5。10 件。うち 1966-04-05 の M5.4 は期間中の最大)
   - 震度4 のうち M の大きいもの (M5.3 の 2 件)
-実際の発生は 1965 年 11 月〜1967 年 10 月に散らばっているが、そのまま再生すると 1 件ごとに揺れを描く 3 分ほどがかかり
-何十分にもなる。そこで時系列の順は保ったまま、発生を 30 秒おきに詰める (実際の日付の間隔は再現しない。
-時計は最初の地震の発生の日時から進むので、2 件目以降の日時は実際のものではない)。
+実際の発生は 1966-01-23〜1967-10-14 に散らばっているが、そのまま再生すると 1 件ごとに揺れを描く 3 分ほどがかかり
+何十分にもなる。そこで時系列の順は保ったまま、発生を 60 秒おきに詰める (秒は毎回同じ。web は同じ分・同じ震源名の情報を 1 件にまとめるので、各件が別の分に入るようにする。
+実際の日付の間隔は再現せず、時計と履歴の日時は最初の地震の発生の日時から進む。実際の発生は詳細の欄 (comments) に書く)。
 各地の震度は当時の階級 (5・6 に弱・強の区別なし)。震度が「不明」の観測点は使わない。
 緊急地震速報は無く、当時の発表の時刻は再現しない: 発生の 5 秒後に震源、25 秒後に各地の震度を出す。
 出典: 気象庁ホームページのデータを加工して作成
@@ -29,8 +29,8 @@ SID = "matsushiro1965"
 NAME = "記録: 松代群発地震 (1965〜1967年から 12 件)"
 DESCRIPTION = (
     "長野県北部 (松代) の群発地震。1965 年 8 月から数年続き、有感地震は数万回。ここでは震度データベースの 464 件 (震度3以上) から、"
-    "最大震度5 の 10 件 (最大は M5.4) と M5.3 の震度4 の 2 件を選び、時系列の順に 30 秒おきに詰めて再生する"
-    " (発生は実際には 1965〜1967 年にまたがり、日時は実際のものではない)。"
+    "最大震度5 の 10 件 (最大は M5.4) と M5.3 の震度4 の 2 件を選び、時系列の順に 60 秒おきに詰めて再生する (全体で約 12 分)"
+    " (発生は実際には 1966〜1967 年にまたがる。時計と履歴の日時は実際のものではなく、実際の発生は各報の詳細に書いた)。"
     "震度は当時の階級 (5・6 に弱・強の区別なし)。緊急地震速報は無く、発表の時刻は再現していない"
 )
 # 震度データベースの地震の ID (発生時刻)。時系列順
@@ -48,7 +48,7 @@ EVENTS = [
     "19661026030409",  # M5.3 震度4
     "19671014044846",  # M5.3 震度5
 ]
-STEP = timedelta(seconds=30)
+STEP = timedelta(seconds=60)
 HYPO_AFTER = timedelta(seconds=5)
 DETAIL_AFTER = timedelta(seconds=25)
 
@@ -60,13 +60,15 @@ def build(current: dict[str, list]) -> list[dict]:
         if i:
             time.sleep(2)  # 震度データベースに負荷をかけない
         hyp = event(eid)["hyp"][0]
+        real = datetime.strptime(hyp["ot"][:19], FMT)
+        comment = f"実際の発生: {real.year}年{real.month}月{real.day}日 {real:%H:%M}"
         pts = points(eid, current)
         # 発生の時刻だけを詰めた時刻に差し替える
         t0 = t0 or datetime.strptime(hyp["ot"][:19], FMT)
         origin = t0 + STEP * i
         hyp = {**hyp, "ot": origin.strftime(FMT)}
-        out.append(p2p_quake(f"{SID}-{i + 1}-hypo", origin + HYPO_AFTER, "Destination", hyp, []))
-        out.append(p2p_quake(f"{SID}-{i + 1}-detail", origin + DETAIL_AFTER, "DetailScale", hyp, pts))
+        out.append(p2p_quake(f"{SID}-{i + 1}-hypo", origin + HYPO_AFTER, "Destination", hyp, [], comment))
+        out.append(p2p_quake(f"{SID}-{i + 1}-detail", origin + DETAIL_AFTER, "DetailScale", hyp, pts, comment))
     return out
 
 
