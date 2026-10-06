@@ -93,6 +93,15 @@ test("the check names what is wrong in a layout file", () => {
   assert.equal(broken((d) => d.layouts[2].root.children.splice(1, 1)), "");
   assert.match(broken((d) => (d.layouts[1].root.children[2].children[0] = { slot: "notice" })), /regular\): 部品「main」を置いていない/);
   assert.match(broken((d) => d.layouts[1].root.children.push({ slot: "clock" })), /「clock」を 2 回置いている/);
+  // 積みの余白と場所取り (隅の積みと入れ子の積みの両方で使える)
+  const corner = (d: any) => d.layouts[2].root.children[2].children[0].overlays["top-left"];
+  assert.equal(broken((d) => Object.assign(corner(d), { gap: "8px", pad: "4px 8px" })), "");
+  assert.equal(broken((d) => Object.assign(corner(d).items[0], { gap: "4px", minHeight: "140px" })), "");
+  for (const bad of ["big", "8", "1px; color: red", "", "1px 2px 3px 4px 5px"]) {
+    assert.match(broken((d) => (corner(d).pad = bad)), /pad .* は使えない/, bad);
+  }
+  assert.match(broken((d) => (corner(d).items[0].minHeight = "fill")), /minHeight .* は使えない/);
+  assert.match(broken((d) => (corner(d).margin = "4px")), /知らないキー「margin」/);
   // 大きさ・向き・容器・隅・条件・キーの書き間違い
   for (const size of ["380", "big", "fill:x", "1px; color: red", ""]) {
     assert.match(broken((d) => (d.layouts[1].root.children[2].children[1].size = size)), /大きさ .* は使えない/, size);

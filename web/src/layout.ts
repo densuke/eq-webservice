@@ -17,6 +17,10 @@ export interface Part {
 export interface Stack {
   flow: "row" | "column";
   items: (string | Part | Stack)[];
+  /** 中身の間隔・内側の余白 (pad は 1〜4 個)・最小の高さ。CSS の長さ。minHeight は中身が全部隠れても場所を取る */
+  gap?: string;
+  pad?: string;
+  minHeight?: string;
 }
 
 export type Corner = "top-left" | "top-right" | "bottom-left" | "bottom-right" | "top" | "bottom";
@@ -80,6 +84,8 @@ export const LAYOUTS: readonly Layout[] = (BUILTIN as unknown as { layouts: Layo
 const CORNERS: readonly string[] = ["top-left", "top-right", "bottom-left", "bottom-right", "top", "bottom"];
 const WHEN: readonly string[] = ["minWidth", "maxWidth", "minHeight", "maxHeight"];
 /** fill・fill:n・auto・数 + 単位・calc() などの CSS の関数 */
+/** 0 か、数 + 単位 */
+const LENGTH = /^(?:0|\d+(?:\.\d+)?(?:px|em|rem|%|vw|vh|svh|dvh))$/;
 const SIZE = /^(?:fill(?::\d+(?:\.\d+)?)?|auto|\d+(?:\.\d+)?(?:px|%|vw|vh|svw|svh|dvw|dvh|lvw|lvh|em|rem)|(?:calc|clamp|min|max)\([\w\s.,%+*/()-]*\))$/;
 
 /**
@@ -99,7 +105,12 @@ export function checkLayouts(data: unknown, slots: readonly string[], boxes: rea
   };
   const stack = (s: unknown, at: string, placed: string[]): void => {
     if (!isObj(s)) return void errs.push(`${at}: 重ね方がオブジェクトでない`);
-    keys(s, at, ["flow", "items"]);
+    keys(s, at, ["flow", "items", "gap", "pad", "minHeight"]);
+    for (const k of ["gap", "minHeight"]) if (s[k] !== undefined && !(typeof s[k] === "string" && LENGTH.test(s[k]))) errs.push(`${at}: ${k} ${JSON.stringify(s[k])} は使えない`);
+    if (s.pad !== undefined) {
+      const parts = typeof s.pad === "string" ? s.pad.split(" ") : [];
+      if (parts.length < 1 || parts.length > 4 || !parts.every((p) => LENGTH.test(p))) errs.push(`${at}: pad ${JSON.stringify(s.pad)} は使えない`);
+    }
     if (s.flow !== "row" && s.flow !== "column") errs.push(`${at}: flow は "row" か "column"`);
     if (!Array.isArray(s.items)) return void errs.push(`${at}: items が配列でない`);
     s.items.forEach((it, i) => {

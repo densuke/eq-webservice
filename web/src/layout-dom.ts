@@ -51,6 +51,13 @@ function stack(spec: Stack, cls: string): HTMLElement {
   const box = document.createElement("div");
   box.className = cls;
   box.style.flexDirection = spec.flow;
+  if (spec.gap) box.style.gap = spec.gap;
+  if (spec.pad) box.style.padding = spec.pad;
+  if (spec.minHeight) {
+    box.style.minHeight = spec.minHeight;
+    // 中身が全部 hidden でも消えずに場所を取る (style.css の .ld-stack:not(:has(> :not([hidden]))) より inline が勝つ)
+    box.style.display = "flex";
+  }
   for (const item of spec.items) {
     if (typeof item === "string") box.append(...part(item));
     else if ("slot" in item) box.append(...part((item as Part).slot, (item as Part).variant));

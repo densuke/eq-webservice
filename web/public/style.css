@@ -326,11 +326,6 @@ a.banner-item:hover p { text-decoration: underline; }
 .ld-bottom { bottom: 0; }
 /* 案内のボタンが無いときも、通知は前と同じ高さ (地図の下端から 60px) に出す */
 .ld-bottom > #tour-toast:has(+ #sound-hint[hidden]) { margin-bottom: 50px; }
-/* スマホ (compact) は、いまの見た目に合わせる: 時計は角から 6px、別枠と案内の間 4px・凡例まで 8px。
-   寄って別枠が隠れても、凡例の位置は変えない (別枠の高さ 140px を空けておく) */
-body[data-layout="compact"] .ld-bottom-right { padding: 6px; }
-body[data-layout="compact"] .ld-top-left { gap: 8px; }
-body[data-layout="compact"] .ld-top-left > .ld-stack { display: flex; gap: 4px; min-height: 140px; }
 
 /* 横向きのスマホ (landscape): 帯は地図の左上に重ねる札にする (EEW は 1 件ずつ巡回、view.ts)。上部バーは細く */
 body[data-layout="landscape"] .topbar { padding: 3px 10px; gap: 6px; }
