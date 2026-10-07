@@ -3,7 +3,7 @@
 
 use tiny_skia::Pixmap;
 
-use super::banner::draw_pages;
+use super::banner::{draw_pages, Section};
 use super::data::{warning_level, warning_summary, WarningLevel, Warnings};
 use super::layout_resolve::Rect;
 use super::text::Text;
@@ -34,8 +34,8 @@ impl Tone {
 pub struct QuakeBand {
     /// 帯の地の色を決める、いちばん重い種類 (= 先頭の文)
     pub top: Tone,
-    /// 種類ごとの文 (「【大津波警報】 宮城県・岩手県」)。重い順
-    pub segments: Vec<String>,
+    /// 種類ごとの見出しと本文 (「【大津波警報】」「宮城県・岩手県」)。重い順
+    pub sections: Vec<Section>,
 }
 
 /// いま発表中の津波予報区 (届いた津波の報のうち発行が最新のもの。解除なら空)。web/src/tsunami.ts と同じ規則
@@ -51,22 +51,22 @@ pub fn current_areas(events: &[Event]) -> &[TsunamiArea] {
         .map_or(&[], |t| &t.areas)
 }
 
-fn tsunami_segment(areas: &[TsunamiArea], grade: TsunamiGrade, heading: &str) -> Option<String> {
+fn tsunami_section(areas: &[TsunamiArea], grade: TsunamiGrade, heading: &str) -> Option<Section> {
     let names: Vec<&str> = areas
         .iter()
         .filter(|a| a.grade == grade)
         .map(|a| a.name.as_str())
         .collect();
-    (!names.is_empty()).then(|| format!("【{heading}】 {}", names.join("・")))
+    (!names.is_empty()).then(|| Section::new(heading, names.join("・")))
 }
 
 /// 帯に出す内容。該当が無ければ None
 pub fn quake_band(areas: &[TsunamiArea], w: Option<&Warnings>) -> Option<QuakeBand> {
     let mut parts = Vec::new();
-    if let Some(s) = tsunami_segment(areas, TsunamiGrade::MajorWarning, "大津波警報") {
+    if let Some(s) = tsunami_section(areas, TsunamiGrade::MajorWarning, "【大津波警報】") {
         parts.push((Tone::MajorTsunami, s));
     }
-    if let Some(s) = tsunami_segment(areas, TsunamiGrade::Warning, "津波警報") {
+    if let Some(s) = tsunami_section(areas, TsunamiGrade::Warning, "【津波警報】") {
         parts.push((Tone::Tsunami, s));
     }
     if let Some(w) = w {
@@ -77,20 +77,20 @@ pub fn quake_band(areas: &[TsunamiArea], w: Option<&Warnings>) -> Option<QuakeBa
         }
         special.areas.retain(|_, kinds| !kinds.is_empty());
         if let Some(sum) = warning_summary(&special, PER_PREF) {
-            parts.push((Tone::Special, format!("【特別警報】 {}", sum.lines.join("、"))));
+            parts.push((Tone::Special, Section::new("【特別警報】", sum.lines.join("、"))));
         }
     }
     let top = parts.first()?.0;
     Some(QuakeBand {
         top,
-        segments: parts.into_iter().map(|p| p.1).collect(),
+        sections: parts.into_iter().map(|p| p.1).collect(),
     })
 }
 
 /// 帯の矩形 at の中に描く。該当が無ければ何も描かない
 pub fn draw(pm: &mut Pixmap, text: &mut Text, areas: &[TsunamiArea], w: Option<&Warnings>, at: Rect, now_ms: u64) {
     let Some(b) = quake_band(areas, w) else { return };
-    draw_pages(pm, text, at, b.top.level(), "", &b.segments, now_ms);
+    draw_pages(pm, text, at, b.top.level(), &b.sections, now_ms);
 }
 
 #[cfg(test)]
@@ -162,11 +162,11 @@ mod tests {
         let b = quake_band(&a, Some(&w)).unwrap();
         assert_eq!(b.top, Tone::MajorTsunami);
         assert_eq!(
-            b.segments,
+            b.sections,
             [
-                "【大津波警報】 宮城県・福島県",
-                "【津波警報】 岩手県・茨城県",
-                "【特別警報】 大雨特別警報: 宮城県 仙台市"
+                Section::new("【大津波警報】", "宮城県・福島県".into()),
+                Section::new("【津波警報】", "岩手県・茨城県".into()),
+                Section::new("【特別警報】", "大雨特別警報: 宮城県 仙台市".into()),
             ]
         );
     }
