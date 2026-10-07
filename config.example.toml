@@ -121,3 +121,5 @@ enabled = false
 # cache_dir = "data/tts"
 # monthly_char_limit = 900000
 # prewarm = true
+# POST /api/tts/announce (公開) の、接続元 IP ごとの 1 分あたりの回数。超えると 429
+# announce_per_min = 12

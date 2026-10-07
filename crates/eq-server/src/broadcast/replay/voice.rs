@@ -123,6 +123,8 @@ pub struct Http {
     url: String,
     /// 503 (同時実行の枠が満杯) のあとの待ち
     retry_wait: Duration,
+    /// 429 (IP ごとの頻度制限。固定窓は 1 分) のあとの待ち。3 回やり直せば窓を過ぎる長さ
+    rate_wait: Duration,
 }
 
 /// 503 のやり直しの回数
@@ -135,8 +137,10 @@ enum Reply {
     Voice,
     /// その報だけ無音 (読むものがない 404、長すぎる・上限超過の 413/422)
     Skip,
-    /// 枠が満杯 (503)。待ってやり直す
+    /// 枠が満杯 (503)。短く待ってやり直す
     Retry,
+    /// 頻度制限 (429)。窓が過ぎるまで待ってやり直す。再現動画は 300ms ごとに頼むので、本番に向けるとここに当たる
+    RateLimited,
     /// それ以外は失敗
     Fail,
 }
@@ -146,6 +150,7 @@ fn classify(status: reqwest::StatusCode) -> Reply {
         200..=299 => Reply::Voice,
         404 | 413 | 422 => Reply::Skip,
         503 => Reply::Retry,
+        429 => Reply::RateLimited,
         _ => Reply::Fail,
     }
 }
@@ -156,6 +161,7 @@ impl Http {
             client: crate::net::client(Duration::from_secs(30))?,
             url: format!("{}/api/tts/announce", base.trim_end_matches('/')),
             retry_wait: Duration::from_secs(1),
+            rate_wait: Duration::from_secs(30),
         })
     }
 }
@@ -173,7 +179,8 @@ impl Announce for Http {
             match classify(res.status()) {
                 Reply::Skip => return Ok(None),
                 Reply::Retry if attempt < RETRIES => tokio::time::sleep(self.retry_wait).await,
-                Reply::Retry | Reply::Fail => {
+                Reply::RateLimited if attempt < RETRIES => tokio::time::sleep(self.rate_wait).await,
+                Reply::Retry | Reply::RateLimited | Reply::Fail => {
                     res.error_for_status()?;
                     anyhow::bail!("想定外の応答");
                 }
@@ -439,6 +446,7 @@ mod tests {
             assert_eq!(classify(c), Reply::Skip, "{c}");
         }
         assert_eq!(classify(S::SERVICE_UNAVAILABLE), Reply::Retry);
+        assert_eq!(classify(S::TOO_MANY_REQUESTS), Reply::RateLimited);
         assert_eq!(classify(S::INTERNAL_SERVER_ERROR), Reply::Fail);
     }
 
@@ -470,6 +478,7 @@ mod tests {
     fn http_to(base: &str) -> Http {
         Http {
             retry_wait: Duration::from_millis(10),
+            rate_wait: Duration::from_millis(10),
             ..Http::new(base).unwrap()
         }
     }
@@ -512,5 +521,22 @@ mod tests {
                 pcm: vec![7, 7]
             }]
         );
+    }
+
+    #[tokio::test]
+    async fn http_waits_out_429_instead_of_dropping_the_voice() {
+        let (base, n) = serve(vec![(429, vec![]), (429, vec![]), (200, wav::encode(&[4, 5]))]).await;
+        let got = http_to(&base).announce("{}".into()).await.unwrap();
+        assert_eq!(got, Some(vec![4, 5]));
+        assert_eq!(n.load(std::sync::atomic::Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn collect_keeps_every_voice_when_the_server_rate_limits_midway() {
+        let (base, _) = serve(vec![(200, wav::encode(&[1])), (429, vec![]), (200, wav::encode(&[2]))]).await;
+        let events = many_events(2);
+        let slots = vec![Slot { index: 0, at_ms: 100 }, Slot { index: 1, at_ms: 200 }];
+        let clips = collect(&http_to(&base), &events, &slots, Duration::ZERO).await;
+        assert_eq!(clips.len(), 2);
     }
 }
