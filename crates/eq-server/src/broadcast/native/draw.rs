@@ -21,6 +21,7 @@ use super::notice::{self, LayoutCache, Notices};
 use super::paint::{epicenter, ghost_epicenter, rect, rrect, LAND, LAND_EDGE, MUTED, NEIGHBOR, NEIGHBOR_EDGE, SEA};
 use super::panel;
 use super::placed::Placed;
+use super::pref_list;
 use super::quake_band;
 use super::shaken::{Stations, Zones};
 use super::test_mark;
@@ -273,13 +274,30 @@ impl Renderer {
             );
         }
         // お知らせは平時だけ (右パネルの下半分。地震の画面では出さない)
-        if let (None, None, Some(n), Some(area)) = (scene.quake, scene.eew, scene.notices, placed.notice) {
-            notice::draw(&mut pm, &mut self.text, &mut self.notice_lines, n, scene.now_ms, area);
+        // 気象警報が出ているあいだは、同じ矩形を県ごとの一覧に置き換える (告知は一覧の最後のページ)
+        let calm = scene.quake.is_none() && scene.eew.is_none();
+        let rows = scene.warnings.map(pref_list::pref_rows).unwrap_or_default();
+        let list_shown = calm && !rows.is_empty() && placed.notice.is_some();
+        if let (true, Some(area)) = (calm, placed.notice) {
+            if list_shown {
+                let n = scene.notices;
+                pref_list::draw(
+                    &mut pm,
+                    &mut self.text,
+                    &mut self.notice_lines,
+                    &rows,
+                    n,
+                    scene.now_ms,
+                    area,
+                );
+            } else if let Some(n) = scene.notices {
+                notice::draw(&mut pm, &mut self.text, &mut self.notice_lines, n, scene.now_ms, area);
+            }
         }
         // 警報の帯は定義の banners の矩形の中に描く。平時は気象警報・注意報、地震の画面は緊急性の高いものだけ
         if let Some(at) = placed.banners {
             if scene.quake.is_none() && scene.eew.is_none() {
-                banner::draw(&mut pm, &mut self.text, scene.warnings, at, scene.now_ms);
+                banner::draw(&mut pm, &mut self.text, scene.warnings, list_shown, at, scene.now_ms);
             } else {
                 quake_band::draw(&mut pm, &mut self.text, scene.tsunami, scene.warnings, at, scene.now_ms);
             }

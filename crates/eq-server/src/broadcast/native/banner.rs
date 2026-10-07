@@ -1,16 +1,16 @@
 //! 平時の気象警報の帯 (docs/broadcast-native.md 14 章)。web の #warn-banner と同じ規則・文・色。
 //! 定義の banners (上部バーのすぐ下、横いっぱい。地図と右の列はその下) の矩形の中に描く。流さない。
 //! 2 行に収まらないときは、2 行ずつのページに分け、PAGE_MS ごとに置き換える (右端に「1/3」)。
-//! 警報が無いときは落ち着いた色で「ありません」、地震の画面では描かない (矩形は空のまま)。
+//! 中身は県名の要約 (pref_list::band。県ごとの一覧は右の列)。警報が無いときは落ち着いた色で「ありません」、地震の画面では描かない (矩形は空のまま)。
 
 use tiny_skia::Pixmap;
 
-use super::data::{warning_summary, WarnSummary, WarningLevel, Warnings};
+use super::data::{WarningLevel, Warnings};
 use super::layout_resolve::Rect;
 use super::paint::{rect, MUTED};
+use super::pref_list::{band, Band};
 use super::text::Text;
 
-const PER_PREF: usize = 5;
 const MAX_LINES: usize = 2;
 const PX: f32 = 15.0;
 /// 1 ページを出している時間 (ミリ秒)
@@ -128,20 +128,18 @@ pub fn page_at(now_ms: u64, pages: usize) -> usize {
     (now_ms / PAGE_MS) as usize % pages.max(1)
 }
 
-/// 帯の矩形 at の中に描く。警報以上があれば帯 (長ければ now_ms で選んだページ)、
+/// 帯の矩形 at の中に描く。警報以上があれば県名の要約 (長ければ now_ms で選んだページ。list は右に一覧が出ているか)、
 /// 警報が無ければ落ち着いた色の「ありません」。w が None (まだ取れていない) なら何も描かない
-pub fn draw(pm: &mut Pixmap, text: &mut Text, w: Option<&Warnings>, at: Rect, now_ms: u64) {
+pub fn draw(pm: &mut Pixmap, text: &mut Text, w: Option<&Warnings>, list: bool, at: Rect, now_ms: u64) {
     let Some(w) = w else { return };
-    let Some(WarnSummary { top, lines }) = warning_summary(w, PER_PREF) else {
-        let msg = if w.areas.is_empty() {
-            "気象警報・注意報はありません"
-        } else {
-            "気象警報はありません"
-        };
-        text.draw(pm, msg, at.x + PAD_X, at.y + at.h / 2.0 + PX * 0.35, PX, MUTED);
-        return;
-    };
-    draw_pages(pm, text, at, top, &[Section::new(HEADING, lines.join(" ／ "))], now_ms);
+    match band(w, list) {
+        Band::Quiet(msg) => {
+            text.draw(pm, &msg, at.x + PAD_X, at.y + at.h / 2.0 + PX * 0.35, PX, MUTED);
+        }
+        Band::Alert(top, summary) => {
+            draw_pages(pm, text, at, top, &[Section::new(HEADING, summary)], now_ms);
+        }
+    }
 }
 
 /// 帯の地 (top の色。特別警報は白い縁) を塗り、種別ごとの文 sections を 2 行ずつのページで描く

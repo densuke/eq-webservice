@@ -134,6 +134,14 @@ const PREFS: [&str; 47] = [
     "沖縄県",
 ];
 
+/// 市町村等のコードの頭 2 桁の都道府県番号 (01〜47)。範囲外は None
+pub fn pref_code(code: &str) -> Option<usize> {
+    code.get(..2)?
+        .parse::<usize>()
+        .ok()
+        .filter(|n| (1..=PREFS.len()).contains(n))
+}
+
 pub fn pref_of(code: &str) -> &'static str {
     code.get(..2)
         .and_then(|n| n.parse::<usize>().ok())

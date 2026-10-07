@@ -26,6 +26,9 @@ mod notice;
 mod paint;
 mod panel;
 mod placed;
+mod pref_list;
+#[cfg(test)]
+mod pref_tests;
 mod quake_band;
 mod shaken;
 mod step;
