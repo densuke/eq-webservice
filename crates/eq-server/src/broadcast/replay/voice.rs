@@ -121,6 +121,33 @@ pub fn push_due<'a>(
 pub struct Http {
     client: reqwest::Client,
     url: String,
+    /// 503 (同時実行の枠が満杯) のあとの待ち
+    retry_wait: Duration,
+}
+
+/// 503 のやり直しの回数
+const RETRIES: usize = 3;
+
+/// 応答の扱い
+#[derive(Debug, PartialEq, Eq)]
+enum Reply {
+    /// 声が届いた
+    Voice,
+    /// その報だけ無音 (読むものがない 404、長すぎる・上限超過の 413/422)
+    Skip,
+    /// 枠が満杯 (503)。待ってやり直す
+    Retry,
+    /// それ以外は失敗
+    Fail,
+}
+
+fn classify(status: reqwest::StatusCode) -> Reply {
+    match status.as_u16() {
+        200..=299 => Reply::Voice,
+        404 | 413 | 422 => Reply::Skip,
+        503 => Reply::Retry,
+        _ => Reply::Fail,
+    }
 }
 
 impl Http {
@@ -128,25 +155,36 @@ impl Http {
         Ok(Http {
             client: crate::net::client(Duration::from_secs(30))?,
             url: format!("{}/api/tts/announce", base.trim_end_matches('/')),
+            retry_wait: Duration::from_secs(1),
         })
     }
 }
 
 impl Announce for Http {
     async fn announce(&self, body: String) -> anyhow::Result<Option<Vec<i16>>> {
-        let res = self
-            .client
-            .post(&self.url)
-            .header("content-type", "application/json")
-            .body(body)
-            .send()
-            .await?;
-        if res.status() == reqwest::StatusCode::NOT_FOUND {
-            return Ok(None);
+        for attempt in 0..=RETRIES {
+            let res = self
+                .client
+                .post(&self.url)
+                .header("content-type", "application/json")
+                .body(body.clone())
+                .send()
+                .await?;
+            match classify(res.status()) {
+                Reply::Skip => return Ok(None),
+                Reply::Retry if attempt < RETRIES => tokio::time::sleep(self.retry_wait).await,
+                Reply::Retry | Reply::Fail => {
+                    res.error_for_status()?;
+                    anyhow::bail!("想定外の応答");
+                }
+                Reply::Voice => {
+                    // 声は 1 本で数 MB (数十秒〜数分の 44.1kHz モノ)。サーバは自分たちのもの
+                    let bytes = res.bytes().await?;
+                    return Ok(Some(wav::parse(&bytes).context("声の WAV を読めません")?));
+                }
+            }
         }
-        // 声は 1 本で数百 KB (数十秒の 44.1kHz モノ)。サーバは自分たちのもの
-        let bytes = res.error_for_status()?.bytes().await?;
-        Ok(Some(wav::parse(&bytes).context("声の WAV を読めません")?))
+        unreachable!("最後のやり直しは return か Err で終わる")
     }
 }
 
@@ -391,5 +429,88 @@ mod tests {
         // つながらない
         let down = Http::new("http://127.0.0.1:1").unwrap();
         assert!(down.announce("{}".into()).await.is_err());
+    }
+
+    #[test]
+    fn classify_skips_only_that_report_for_404_413_422_and_retries_503() {
+        use reqwest::StatusCode as S;
+        assert_eq!(classify(S::OK), Reply::Voice);
+        for c in [S::NOT_FOUND, S::PAYLOAD_TOO_LARGE, S::UNPROCESSABLE_ENTITY] {
+            assert_eq!(classify(c), Reply::Skip, "{c}");
+        }
+        assert_eq!(classify(S::SERVICE_UNAVAILABLE), Reply::Retry);
+        assert_eq!(classify(S::INTERNAL_SERVER_ERROR), Reply::Fail);
+    }
+
+    /// 決まった応答を順に返すだけの HTTP サーバ。最後の応答は繰り返す。(base URL, 受けた回数)
+    async fn serve(replies: Vec<(u16, Vec<u8>)>) -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let n = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = n.clone();
+        tokio::spawn(async move {
+            loop {
+                let (mut sock, _) = listener.accept().await.unwrap();
+                let i = count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let (status, body) = replies[i.min(replies.len() - 1)].clone();
+                let mut buf = [0u8; 8192];
+                let _ = sock.read(&mut buf).await;
+                let head = format!(
+                    "HTTP/1.1 {status} X\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = sock.write_all(head.as_bytes()).await;
+                let _ = sock.write_all(&body).await;
+            }
+        });
+        (base, n)
+    }
+
+    fn http_to(base: &str) -> Http {
+        Http {
+            retry_wait: Duration::from_millis(10),
+            ..Http::new(base).unwrap()
+        }
+    }
+
+    #[tokio::test]
+    async fn http_skips_the_report_on_413_and_422() {
+        for status in [413, 422, 404] {
+            let (base, n) = serve(vec![(status, vec![])]).await;
+            assert_eq!(http_to(&base).announce("{}".into()).await.unwrap(), None, "{status}");
+            assert_eq!(n.load(std::sync::atomic::Ordering::SeqCst), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn http_retries_503_then_gets_the_voice() {
+        let (base, n) = serve(vec![(503, vec![]), (503, vec![]), (200, wav::encode(&[1, 2, 3]))]).await;
+        let got = http_to(&base).announce("{}".into()).await.unwrap();
+        assert_eq!(got, Some(vec![1, 2, 3]));
+        assert_eq!(n.load(std::sync::atomic::Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn http_gives_up_after_three_retries_of_503() {
+        let (base, n) = serve(vec![(503, vec![])]).await;
+        assert!(http_to(&base).announce("{}".into()).await.is_err());
+        assert_eq!(n.load(std::sync::atomic::Ordering::SeqCst), 1 + RETRIES);
+    }
+
+    #[tokio::test]
+    async fn collect_goes_on_to_the_next_voice_after_a_skipped_report() {
+        let (base, _) = serve(vec![(422, vec![]), (200, wav::encode(&[7, 7]))]).await;
+        let http = http_to(&base);
+        let events = many_events(2);
+        let slots = vec![Slot { index: 0, at_ms: 100 }, Slot { index: 1, at_ms: 200 }];
+        let clips = collect(&http, &events, &slots, Duration::ZERO).await;
+        assert_eq!(
+            clips,
+            vec![Clip {
+                at_ms: 200,
+                pcm: vec![7, 7]
+            }]
+        );
     }
 }

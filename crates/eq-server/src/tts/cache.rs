@@ -137,10 +137,12 @@ impl<S: Synth> Cache<S> {
 /// announce_cached が組み立てる出力の上限 (部品の数)。
 /// 正当な最大の報 (大津波警報で全 66 予報区) は約 70 部品。
 pub const MAX_ANNOUNCE_SEGMENTS: usize = 128;
-/// 同じく総サンプル数の上限 (180 秒)。全 66 予報区の大津波警報は、1 部品 約 1.5〜2 秒でも約 2 分に収まる。
-/// 出力は 16 MB 弱 (PCM と WAV で約 2 倍、ブラウザ向けの 22.05kHz 化で更に増える)。
-/// 同時 3 本でも eq-server の MemoryMax (256MB) に収まる大きさ。
-pub const MAX_ANNOUNCE_SAMPLES: usize = 180 * wav::RATE as usize;
+/// 同じく総サンプル数の上限 (300 秒)。n2 の実キャッシュの部品は平均 2.6 秒・最大 5.6 秒で、
+/// 全 66 予報区の大津波警報は見出し・無音込みで 200 秒前後 (部品が 3.5 秒でも 250 秒前後) になる。
+/// メモリ: 300 秒は 13.2M サンプル = PCM 26.5MB。1 本あたり PCM と、書き出した WAV (22.05kHz なら半分) が
+/// 同時に存在して最大 約 53MB。送信中は WAV だけ (26.5MB) が残る。同時 2 本で 約 106MB で、
+/// 平常 約 37MB と合わせても eq-server の MemoryMax (256MB) に収まる。
+pub const MAX_ANNOUNCE_SAMPLES: usize = 300 * wav::RATE as usize;
 /// 部品の間の無音 (ms)
 const GAP_MS: u32 = 150;
 
@@ -149,9 +151,9 @@ const GAP_MS: u32 = 150;
 pub struct TooLong;
 
 impl<S: Synth> Cache<S> {
-    /// キャッシュ済みの部品だけで組み立てる。合成も予算も使わない。無い部品は飛ばし、1 つも無ければ Ok(None)。
+    /// キャッシュ済みの部品だけで組み立てた PCM を返す。合成も予算も使わない。無い部品は飛ばし、1 つも無ければ Ok(None)。
     /// 部品の数と総サンプル数が上限を超えるときは、PCM を読み込む前 (ファイルの大きさだけ見て) に Err。
-    pub async fn announce_cached(&self, segs: &[String]) -> Result<Option<Vec<u8>>, TooLong> {
+    pub async fn announce_cached(&self, segs: &[String]) -> Result<Option<Vec<i16>>, TooLong> {
         if segs.len() > MAX_ANNOUNCE_SEGMENTS {
             return Err(TooLong);
         }
@@ -165,20 +167,24 @@ impl<S: Synth> Cache<S> {
                 found.push(path);
             }
         }
-        let gaps = found.len().saturating_sub(1) * (wav::RATE as usize * GAP_MS as usize / 1000);
-        if samples + gaps > MAX_ANNOUNCE_SAMPLES {
+        let gap = wav::RATE as usize * GAP_MS as usize / 1000;
+        let total = samples + found.len().saturating_sub(1) * gap;
+        if total > MAX_ANNOUNCE_SAMPLES {
             return Err(TooLong);
         }
-        let mut parts = Vec::new();
+        // 1 本のバッファに部品を直接つなぐ (部品の一覧と連結後の 2 つ分を持たない)
+        let mut out: Vec<i16> = Vec::with_capacity(total);
+        let mut any = false;
         for path in &found {
             if let Some(pcm) = Self::read_cached(path).await {
-                parts.push(pcm);
+                if any {
+                    out.resize(out.len() + gap, 0);
+                }
+                out.extend_from_slice(&pcm);
+                any = true;
             }
         }
-        if parts.is_empty() {
-            return Ok(None);
-        }
-        Ok(Some(wav::encode(&wav::join(&parts, GAP_MS))))
+        Ok(any.then_some(out))
     }
 }
 
@@ -380,9 +386,9 @@ mod tests {
         cache.segment("A", None).await.unwrap();
         let before = fake.count();
         let segs = vec!["A".to_string(), "B".to_string()];
-        let bytes = cache.announce_cached(&segs).await.unwrap().unwrap();
+        let pcm = cache.announce_cached(&segs).await.unwrap().unwrap();
         // A だけ (間は入らない)
-        assert_eq!(wav::parse(&bytes).unwrap().len(), 10);
+        assert_eq!(pcm.len(), 10);
         assert_eq!(fake.count(), before);
     }
 

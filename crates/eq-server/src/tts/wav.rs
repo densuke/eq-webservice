@@ -55,14 +55,18 @@ pub fn encode(pcm: &[i16]) -> Vec<u8> {
 /// ブラウザ向けに半分の点数 (22.05kHz) へ落とす。読み上げは声だけなので十分聞き取れ、
 /// 遠い回線 (n2 は米国西部) でも届くまでの時間が半分になる。隣り合う 2 点の平均で、端の 1 点は捨てる
 pub fn half_rate(wav: &[u8]) -> anyhow::Result<Vec<u8>> {
-    let pcm = parse(wav)?;
+    Ok(encode_half(&parse(wav)?))
+}
+
+/// PCM を半分の点数 (22.05kHz) にして WAV に書く。
+pub fn encode_half(pcm: &[i16]) -> Vec<u8> {
     let half: Vec<i16> = pcm
         .as_chunks::<2>()
         .0
         .iter()
         .map(|[a, b]| ((*a as i32 + *b as i32) / 2) as i16)
         .collect();
-    Ok(encode_at(&half, RATE / 2))
+    encode_at(&half, RATE / 2)
 }
 
 fn encode_at(pcm: &[i16], rate: u32) -> Vec<u8> {
