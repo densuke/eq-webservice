@@ -4,19 +4,24 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::extract::{DefaultBodyLimit, Path, Query, State};
+use axum::body::{Body, Bytes};
+use axum::extract::{ConnectInfo, DefaultBodyLimit, Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
-use super::cache::{Cache, TtsError};
+use super::cache::{Cache, TooLong, TtsError};
 use super::google::Synth;
+use super::limits::sanitize;
 use super::priors::priors_of;
 use super::{phrase, wav};
+use crate::client_ip::client_ip;
 use crate::hub::Hub;
 use crate::quake::model::{Event, EventBody};
+use crate::ws_guard::WsGuard;
 
 const MAX_TEXT_CHARS: usize = 500;
 
@@ -24,9 +29,42 @@ struct AppState<S> {
     hub: Arc<Hub>,
     cache: Option<Arc<Cache<S>>>,
     token: Option<String>,
+    /// POST /api/tts/announce の同時実行枠 (満杯なら待たせず 503)
+    announce_slots: Arc<Semaphore>,
+    /// POST /api/tts/announce の IP ごとの頻度制限 (WebSocket と同じ仕組み。同時接続の上限は使わない)
+    announce_rate: Arc<WsGuard>,
+    /// announce の本文の送信にかけてよい時間 (テストで短くする)
+    send_timeout: Duration,
 }
 
-pub fn router<S: Synth>(hub: Arc<Hub>, cache: Option<Arc<Cache<S>>>, token: Option<String>) -> Router {
+/// POST /api/tts/announce の同時実行数。1 本あたり最大 約 53MB (cache::MAX_ANNOUNCE_SAMPLES のコメント参照)、
+/// 送信が終わるまで枠を持つので、2 本で 約 106MB。256MB の MemoryMax に収まる数
+const MAX_ANNOUNCE_CONCURRENCY: usize = 2;
+
+pub fn router<S: Synth>(
+    hub: Arc<Hub>,
+    cache: Option<Arc<Cache<S>>>,
+    token: Option<String>,
+    announce_rate: Arc<WsGuard>,
+) -> Router {
+    router_with_slots(
+        hub,
+        cache,
+        token,
+        announce_rate,
+        Arc::new(Semaphore::new(MAX_ANNOUNCE_CONCURRENCY)),
+        ANNOUNCE_SEND_TIMEOUT,
+    )
+}
+
+fn router_with_slots<S: Synth>(
+    hub: Arc<Hub>,
+    cache: Option<Arc<Cache<S>>>,
+    token: Option<String>,
+    announce_rate: Arc<WsGuard>,
+    announce_slots: Arc<Semaphore>,
+    send_timeout: Duration,
+) -> Router {
     Router::new()
         .route("/api/tts/event/{id}", get(event::<S>))
         .route("/api/tts", post(custom::<S>))
@@ -34,7 +72,14 @@ pub fn router<S: Synth>(hub: Arc<Hub>, cache: Option<Arc<Cache<S>>>, token: Opti
             "/api/tts/announce",
             post(announce::<S>).layer(DefaultBodyLimit::max(1 << 20)),
         )
-        .with_state(Arc::new(AppState { hub, cache, token }))
+        .with_state(Arc::new(AppState {
+            hub,
+            cache,
+            token,
+            announce_slots,
+            announce_rate,
+            send_timeout,
+        }))
 }
 
 /// `?rate=22050` でブラウザ向けの小さい WAV にする。無ければ 44.1kHz (配信の mixer はこちら)
@@ -47,6 +92,14 @@ impl RateQuery {
     /// 受け付ける周波数か (44.1kHz とその半分だけ)
     fn valid(&self) -> bool {
         matches!(self.rate, None | Some(wav::RATE) | Some(22_050))
+    }
+
+    /// 組み立てた PCM を、指定の周波数の WAV にする
+    fn encode(&self, pcm: &[i16]) -> Vec<u8> {
+        match self.rate {
+            Some(22_050) => wav::encode_half(pcm),
+            _ => wav::encode(pcm),
+        }
     }
 
     fn apply(&self, bytes: Vec<u8>) -> Vec<u8> {
@@ -63,6 +116,63 @@ fn wav_response(bytes: Vec<u8>, cache_control: Option<&'static str>) -> Response
         res.headers_mut().insert(header::CACHE_CONTROL, cc.parse().unwrap());
     }
     res
+}
+
+/// 本文の送信全体にかけてよい時間。300 秒の WAV は 44.1kHz で約 26MB、ブラウザ向けの 22.05kHz で約 13MB。
+/// 60 秒なら 22.05kHz を約 1.5Mbps、44.1kHz を約 3Mbps 以上で受ければ間に合う。
+/// 通常の応答 (数 MB) はそれより十分速く終わる。これを超える低速の相手は打ち切って枠を返す
+const ANNOUNCE_SEND_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// 本文を 64KB ずつ送る Body。同時実行の枠 (permit) を本文が持ち、送り終わる・Body が捨てられる (切断)・
+/// `timeout` を過ぎる、のどれかで返す。遅いクライアントに送っている間も本文はメモリに残るので、その間は枠を埋めておくが、
+/// hyper は書き込みが詰まると本文を読みに来ないので、期限は別の見張りのタスクで数える。
+/// 見張りは期限が来たら本文と枠を手放す (送り出した 64KB のかたまりは本文と別の確保なので、全体は解放される)。
+/// 以後に読まれると、エラーで終わって接続を切らせる。
+fn permit_body(bytes: Vec<u8>, permit: OwnedSemaphorePermit, timeout: Duration) -> Body {
+    const CHUNK: usize = 64 * 1024;
+    type Held = Arc<std::sync::Mutex<Option<(Bytes, OwnedSemaphorePermit)>>>;
+    /// Body が捨てられたら、見張りを止め、本文と枠をその場で手放す (見張りのタスクも同じものを持っているため)
+    struct Release(Held, tokio::task::JoinHandle<()>);
+    impl Drop for Release {
+        fn drop(&mut self) {
+            self.1.abort();
+            self.0.lock().unwrap_or_else(|e| e.into_inner()).take();
+        }
+    }
+    let held: Held = Arc::new(std::sync::Mutex::new(Some((Bytes::from(bytes), permit))));
+    let watchdog = {
+        let held = held.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(timeout).await;
+            held.lock().unwrap_or_else(|e| e.into_inner()).take();
+        })
+    };
+    let chunks = futures_util::stream::unfold(
+        (held.clone(), Release(held, watchdog), false),
+        |(held, dog, ended)| async move {
+            if ended {
+                return None;
+            }
+            let mut g = held.lock().unwrap_or_else(|e| e.into_inner());
+            let item = match g.as_mut() {
+                None => Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "送信が時間切れ")),
+                Some((rest, _)) if rest.is_empty() => {
+                    g.take(); // 枠を返す
+                    return None;
+                }
+                Some((rest, _)) => {
+                    let n = rest.len().min(CHUNK);
+                    let chunk = Bytes::copy_from_slice(&rest[..n]);
+                    *rest = rest.slice(n..);
+                    Ok(chunk)
+                }
+            };
+            let ended = item.is_err();
+            drop(g);
+            Some((item, (held, dog, ended)))
+        },
+    );
+    Body::from_stream(chunks)
 }
 
 async fn event<S: Synth>(
@@ -106,21 +216,47 @@ async fn event<S: Synth>(
 }
 
 /// 履歴の再生・デモ用。キャッシュ済みの部品だけで組み立てる (docs/tts.md S10)
-async fn announce<S: Synth>(State(st): State<Arc<AppState<S>>>, Query(q): Query<RateQuery>, body: String) -> Response {
+async fn announce<S: Synth>(
+    State(st): State<Arc<AppState<S>>>,
+    Query(q): Query<RateQuery>,
+    peer: Option<axum::Extension<ConnectInfo<std::net::SocketAddr>>>,
+    headers: HeaderMap,
+    body: String,
+) -> Response {
     if !q.valid() {
         return StatusCode::BAD_REQUEST.into_response();
     }
     let Some(cache) = st.cache.as_ref() else {
         return StatusCode::NOT_FOUND.into_response();
     };
+    // 接続元 IP ごとの頻度制限 (S-02 の client_ip・ws_guard と同じ)。同時接続は数えないので、取ってすぐ返す。
+    // 相手が分からないときは、信頼プロキシに当たらない番兵にして X-Forwarded-For を信じない
+    let peer_ip = peer.map_or(std::net::Ipv6Addr::UNSPECIFIED.into(), |c| (c.0).0.ip());
+    let ip = client_ip(peer_ip, &headers, &st.announce_rate.trusted_proxies);
+    if st.announce_rate.acquire(ip).is_err() {
+        tracing::debug!(%ip, "announce rate limited");
+        return StatusCode::TOO_MANY_REQUESTS.into_response();
+    }
     let Ok(req) = serde_json::from_str::<AnnounceReq>(&body) else {
         return StatusCode::BAD_REQUEST.into_response();
     };
     if req.priors.len() > MAX_PRIORS {
         return StatusCode::BAD_REQUEST.into_response();
     }
+    // 件数・長さの上限と重複の除去 (S-01)。超えていれば 422
+    let AnnounceReq { event, priors } = req;
+    let Some(event) = sanitize(event) else {
+        return StatusCode::UNPROCESSABLE_ENTITY.into_response();
+    };
+    let Some(mut priors) = priors.into_iter().map(sanitize).collect::<Option<Vec<_>>>() else {
+        return StatusCode::UNPROCESSABLE_ENTITY.into_response();
+    };
+    // 重い処理 (差分の計算と PCM の組み立て) の前に枠を取る。満杯なら待たせない。
+    // 枠は本文の側に持たせ (permit_body)、送り終わるか切断されるまで返さない
+    let Ok(slot) = st.announce_slots.clone().try_acquire_owned() else {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
     // 位置で順序を決められるよう、対象を末尾に置く
-    let AnnounceReq { event, mut priors } = req;
     priors.push(event.clone());
     let p = priors_of(&event, &priors);
     let segs = phrase::announce_segments(&event, &p);
@@ -128,8 +264,22 @@ async fn announce<S: Synth>(State(st): State<Arc<AppState<S>>>, Query(q): Query<
         return StatusCode::NOT_FOUND.into_response();
     }
     match cache.announce_cached(&segs).await {
-        Some(bytes) => wav_response(q.apply(bytes), Some("no-store")),
-        None => StatusCode::NOT_FOUND.into_response(),
+        Ok(Some(pcm)) => {
+            let bytes = q.encode(&pcm);
+            drop(pcm);
+            let len = bytes.len();
+            let mut res = (
+                [(header::CONTENT_TYPE, "audio/wav")],
+                permit_body(bytes, slot, st.send_timeout),
+            )
+                .into_response();
+            res.headers_mut()
+                .insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
+            res.headers_mut().insert(header::CONTENT_LENGTH, len.into());
+            res
+        }
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Err(TooLong) => StatusCode::PAYLOAD_TOO_LARGE.into_response(),
     }
 }
 
@@ -222,6 +372,8 @@ mod tests {
     #[derive(Clone, Default)]
     struct Fake {
         texts: Arc<std::sync::Mutex<Vec<String>>>,
+        /// 指定すると、文字数でなくこの長さのサンプルを返す
+        samples: Option<usize>,
     }
     impl Fake {
         fn texts(&self) -> Vec<String> {
@@ -231,11 +383,16 @@ mod tests {
     impl Synth for Fake {
         async fn synth(&self, text: &str, _voice: &str) -> anyhow::Result<Vec<i16>> {
             self.texts.lock().unwrap().push(text.to_string());
-            Ok(vec![100i16; text.chars().count()])
+            Ok(vec![100i16; self.samples.unwrap_or(text.chars().count())])
         }
     }
 
     const TOKEN: &str = "secret-token";
+
+    /// IP ごとの頻度制限だけを使う (同時接続の上限は無し)
+    fn test_rate(per_min: u32) -> Arc<WsGuard> {
+        WsGuard::new(crate::ws_guard::WsLimits::new(usize::MAX, per_min), vec![], vec![])
+    }
 
     struct Env {
         _dir: tempfile::TempDir,
@@ -245,9 +402,12 @@ mod tests {
     }
 
     fn env(limit: usize) -> Env {
+        env_with(limit, Fake::default())
+    }
+
+    fn env_with(limit: usize, fake: Fake) -> Env {
         let dir = tempfile::tempdir().unwrap();
         let budget = Budget::load(dir.path().join("usage.json"), limit);
-        let fake = Fake::default();
         let cache = Arc::new(Cache::new(
             dir.path().to_path_buf(),
             "ja-JP-Neural2-B".into(),
@@ -263,7 +423,12 @@ mod tests {
     }
 
     fn app(e: &Env) -> Router {
-        router(e.hub.clone(), Some(e.cache.clone()), Some(TOKEN.into()))
+        router(
+            e.hub.clone(),
+            Some(e.cache.clone()),
+            Some(TOKEN.into()),
+            test_rate(1000),
+        )
     }
 
     fn event(id: &str, body: EventBody) -> Event {
@@ -321,7 +486,7 @@ mod tests {
 
     async fn call(app: Router, req: Request<Body>) -> (axum::http::response::Parts, Vec<u8>) {
         let (parts, body) = app.oneshot(req).await.unwrap().into_parts();
-        (parts, to_bytes(body, 1 << 24).await.unwrap().to_vec())
+        (parts, to_bytes(body, 1 << 26).await.unwrap().to_vec())
     }
 
     async fn get(app: Router, path: &str) -> (axum::http::response::Parts, Vec<u8>) {
@@ -397,7 +562,7 @@ mod tests {
     async fn get_without_cache_is_404() {
         let e = env(1_000_000);
         e.hub.publish(event("q1", quake_body(QuakeInfoType::Destination)));
-        let app = router::<Fake>(e.hub.clone(), None, Some(TOKEN.into()));
+        let app = router::<Fake>(e.hub.clone(), None, Some(TOKEN.into()), test_rate(1000));
         let (parts, _) = get(app, "/api/tts/event/q1").await;
         assert_eq!(parts.status, StatusCode::NOT_FOUND);
     }
@@ -461,7 +626,7 @@ mod tests {
     #[tokio::test]
     async fn post_without_token_configured_is_404() {
         let e = env(1_000_000);
-        let app = router(e.hub.clone(), Some(e.cache.clone()), None);
+        let app = router(e.hub.clone(), Some(e.cache.clone()), None, test_rate(1000));
         let (parts, _) = post(app, Some(&bearer()), serde_json::json!({"text": "こんにちは"})).await;
         assert_eq!(parts.status, StatusCode::NOT_FOUND);
     }
@@ -469,7 +634,7 @@ mod tests {
     #[tokio::test]
     async fn post_without_cache_is_404() {
         let e = env(1_000_000);
-        let app = router::<Fake>(e.hub.clone(), None, Some(TOKEN.into()));
+        let app = router::<Fake>(e.hub.clone(), None, Some(TOKEN.into()), test_rate(1000));
         let (parts, _) = post(app, Some(&bearer()), serde_json::json!({"text": "こんにちは"})).await;
         assert_eq!(parts.status, StatusCode::NOT_FOUND);
     }
@@ -687,9 +852,391 @@ mod tests {
     #[tokio::test]
     async fn announce_without_cache_is_404() {
         let e = env(1_000_000);
-        let app = router::<Fake>(e.hub.clone(), None, Some(TOKEN.into()));
+        let app = router::<Fake>(e.hub.clone(), None, Some(TOKEN.into()), test_rate(1000));
         let j = announce_json(event("f1", followup_body()), vec![event("p1", prior_body())]);
         let (parts, _) = post_announce(app, j).await;
         assert_eq!(parts.status, StatusCode::NOT_FOUND);
+    }
+
+    // ---- S-01: POST /api/tts/announce の入力・出力・同時実行の上限 ----
+
+    use crate::quake::model::{Tsunami, TsunamiArea, TsunamiGrade};
+
+    fn tsunami_event(names: &[String], grade: TsunamiGrade) -> Event {
+        event(
+            "t1",
+            EventBody::Tsunami(Tsunami {
+                cancelled: false,
+                issued_at: String::new(),
+                areas: names
+                    .iter()
+                    .map(|n| TsunamiArea {
+                        name: n.clone(),
+                        grade,
+                        immediate: false,
+                        first_height: None,
+                        max_height: None,
+                    })
+                    .collect(),
+            }),
+        )
+    }
+
+    fn area_names(n: usize) -> Vec<String> {
+        (0..n).map(|i| format!("予報区{i}")).collect()
+    }
+
+    /// 報が読む部品をすべてキャッシュに置く (合成器は fake)
+    async fn warm(e: &Env, ev: &Event) {
+        for seg in phrase::announce_segments(ev, &[]) {
+            e.cache.segment(&seg, None).await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn announce_tsunami_repeating_one_area_128_times_is_rejected() {
+        // 監査 S-01 の再現: 同じ地域を 128 回含む津波警報 (約 963 倍に増幅していた)
+        let e = env_with(
+            1_000_000,
+            Fake {
+                samples: Some(44_100),
+                ..Default::default()
+            },
+        );
+        let ev = tsunami_event(&vec!["伊勢・三河湾".to_string(); 128], TsunamiGrade::MajorWarning);
+        warm(
+            &e,
+            &tsunami_event(&["伊勢・三河湾".to_string()], TsunamiGrade::MajorWarning),
+        )
+        .await;
+        let (parts, body) = post_announce(app(&e), announce_json(ev, vec![])).await;
+        assert_eq!(parts.status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(body.len() < 100);
+    }
+
+    #[tokio::test]
+    async fn announce_duplicate_area_names_are_read_once() {
+        let e = env(1_000_000);
+        let one = tsunami_event(&["伊勢・三河湾".to_string()], TsunamiGrade::MajorWarning);
+        warm(&e, &one).await;
+        let many = tsunami_event(&vec!["伊勢・三河湾".to_string(); 100], TsunamiGrade::MajorWarning);
+        let (_, a) = post_announce(app(&e), announce_json(one, vec![])).await;
+        let (parts, b) = post_announce(app(&e), announce_json(many, vec![])).await;
+        assert_eq!(parts.status, StatusCode::OK);
+        assert_eq!(a, b);
+    }
+
+    #[tokio::test]
+    async fn announce_legitimate_largest_major_tsunami_warning_passes() {
+        // 大津波警報で全 66 予報区。n2 の実キャッシュの部品は平均 2.6 秒・最大 5.6 秒。3.5 秒でも通る
+        let e = env_with(
+            10_000_000,
+            Fake {
+                samples: Some(3 * 44_100 + 22_050),
+                ..Default::default()
+            },
+        );
+        let ev = tsunami_event(&area_names(66), TsunamiGrade::MajorWarning);
+        warm(&e, &ev).await;
+        let (parts, body) = post_announce(app(&e), announce_json(ev, vec![])).await;
+        assert_eq!(parts.status, StatusCode::OK);
+        assert!(wav::parse(&body).unwrap().len() > 66 * 3 * 44_100);
+    }
+
+    #[tokio::test]
+    async fn announce_output_over_the_sample_limit_is_413_before_reading() {
+        let e = env_with(
+            10_000_000,
+            Fake {
+                samples: Some(4 * 44_100),
+                ..Default::default()
+            },
+        );
+        // 上限の件数 (100 区) でも入力の検証は通るが、4 秒 x 100 = 400 秒は出力の上限 (300 秒) を超える
+        let ev = tsunami_event(&area_names(100), TsunamiGrade::MajorWarning);
+        warm(&e, &ev).await;
+        let (parts, _) = post_announce(app(&e), announce_json(ev, vec![])).await;
+        assert_eq!(parts.status, StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[tokio::test]
+    async fn announce_overlong_area_name_is_422() {
+        let e = env(1_000_000);
+        let ev = tsunami_event(&["あ".repeat(65)], TsunamiGrade::Warning);
+        let (parts, _) = post_announce(app(&e), announce_json(ev, vec![])).await;
+        assert_eq!(parts.status, StatusCode::UNPROCESSABLE_ENTITY);
+        let ev = tsunami_event(&["あ".repeat(64)], TsunamiGrade::Warning);
+        let (parts, _) = post_announce(app(&e), announce_json(ev, vec![])).await;
+        assert_ne!(parts.status, StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[tokio::test]
+    async fn announce_prior_over_the_limits_is_422() {
+        let e = env(1_000_000);
+        let prior = tsunami_event(&vec!["x".to_string(); 101], TsunamiGrade::Warning);
+        let (parts, _) = post_announce(app(&e), announce_json(followup_event(), vec![prior])).await;
+        assert_eq!(parts.status, StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    fn followup_event() -> Event {
+        event("f1", followup_body())
+    }
+
+    #[tokio::test]
+    async fn announce_returns_503_when_all_slots_are_taken() {
+        let e = env(1_000_000);
+        e.cache.segment(FOLLOW, None).await.unwrap();
+        e.cache.segment(ISHIKAWA7, None).await.unwrap();
+        let slots = Arc::new(Semaphore::new(2));
+        let app = router_with_slots(
+            e.hub.clone(),
+            Some(e.cache.clone()),
+            Some(TOKEN.into()),
+            test_rate(1000),
+            slots.clone(),
+            Duration::from_secs(60),
+        );
+        let j = announce_json(followup_event(), vec![event("p1", prior_body())]);
+        let held: Vec<_> = (0..2).map(|_| slots.clone().try_acquire_owned().unwrap()).collect();
+        let (parts, _) = post_announce(app.clone(), j.clone()).await;
+        assert_eq!(parts.status, StatusCode::SERVICE_UNAVAILABLE);
+        drop(held);
+        let (parts, body) = post_announce(app.clone(), j.clone()).await;
+        assert_wav(&parts, &body);
+        // 応答を返し終えたら枠も戻る
+        assert_eq!(slots.available_permits(), 2);
+    }
+
+    /// 枠が 1 つだけの app で announce を呼び、読まれる前の応答を返す
+    async fn announce_response_unread() -> (Arc<Semaphore>, Response, Env) {
+        let e = env(1_000_000);
+        e.cache.segment(FOLLOW, None).await.unwrap();
+        e.cache.segment(ISHIKAWA7, None).await.unwrap();
+        let slots = Arc::new(Semaphore::new(1));
+        let app = router_with_slots(
+            e.hub.clone(),
+            Some(e.cache.clone()),
+            Some(TOKEN.into()),
+            test_rate(1000),
+            slots.clone(),
+            Duration::from_secs(60),
+        );
+        let j = announce_json(followup_event(), vec![event("p1", prior_body())]);
+        let req = Request::post("/api/tts/announce")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(j.to_string()))
+            .unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        (slots, res, e)
+    }
+
+    #[tokio::test]
+    async fn announce_slot_stays_taken_until_the_body_is_read_to_the_end() {
+        let (slots, res, _e) = announce_response_unread().await;
+        // 本文を送り終えるまで枠は埋まったまま (遅いクライアントに送っている間もメモリに残るため)
+        assert_eq!(slots.available_permits(), 0);
+        let len: usize = res.headers()[header::CONTENT_LENGTH].to_str().unwrap().parse().unwrap();
+        let body = to_bytes(res.into_body(), 1 << 24).await.unwrap();
+        assert_eq!(body.len(), len);
+        assert_eq!(slots.available_permits(), 1);
+    }
+
+    #[tokio::test]
+    async fn announce_slot_is_returned_when_the_body_is_dropped() {
+        let (slots, res, _e) = announce_response_unread().await;
+        assert_eq!(slots.available_permits(), 0);
+        drop(res);
+        assert_eq!(slots.available_permits(), 1);
+    }
+
+    #[tokio::test]
+    async fn announce_large_body_is_sent_in_chunks_and_holds_the_slot_midway() {
+        use futures_util::StreamExt;
+        let e = env_with(
+            10_000_000,
+            Fake {
+                samples: Some(100_000),
+                ..Default::default()
+            },
+        );
+        let ev = tsunami_event(&area_names(3), TsunamiGrade::Warning);
+        warm(&e, &ev).await;
+        let slots = Arc::new(Semaphore::new(1));
+        let app = router_with_slots(
+            e.hub.clone(),
+            Some(e.cache.clone()),
+            Some(TOKEN.into()),
+            test_rate(1000),
+            slots.clone(),
+            Duration::from_secs(60),
+        );
+        let req = Request::post("/api/tts/announce")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(announce_json(ev, vec![]).to_string()))
+            .unwrap();
+        let mut body = app.oneshot(req).await.unwrap().into_body().into_data_stream();
+        let first = body.next().await.unwrap().unwrap();
+        assert_eq!(first.len(), 64 * 1024);
+        assert_eq!(slots.available_permits(), 0);
+        while body.next().await.is_some() {}
+        assert_eq!(slots.available_permits(), 1);
+    }
+
+    #[tokio::test]
+    async fn announce_body_gives_the_slot_back_after_the_timeout_even_if_never_polled() {
+        let slots = Arc::new(Semaphore::new(1));
+        let body = permit_body(
+            vec![0u8; 200_000],
+            slots.clone().try_acquire_owned().unwrap(),
+            Duration::from_millis(50),
+        );
+        assert_eq!(slots.available_permits(), 0);
+        // 読み出しが止まったまま (poll されない) でも、期限のタイマーで枠が戻る
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(slots.available_permits(), 1);
+        // 以後に読まれるとエラーで終わる
+        assert!(to_bytes(body, 1 << 20).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn two_stalled_receivers_do_not_keep_announce_at_503() {
+        use tokio::io::AsyncWriteExt;
+        // 大きな WAV (約 12MB) を要求したまま読まない接続を 2 本。期限後に枠が戻り、続く正常な要求が 200 になる
+        let e = env_with(
+            100_000_000,
+            Fake {
+                samples: Some(2_000_000),
+                ..Default::default()
+            },
+        );
+        let ev = tsunami_event(&area_names(3), TsunamiGrade::Warning);
+        warm(&e, &ev).await;
+        let slots = Arc::new(Semaphore::new(2));
+        let app = router_with_slots(
+            e.hub.clone(),
+            Some(e.cache.clone()),
+            Some(TOKEN.into()),
+            test_rate(1000),
+            slots.clone(),
+            Duration::from_secs(1),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let served = app.clone();
+        tokio::spawn(async move {
+            axum::serve(
+                listener,
+                served.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
+            .await
+            .unwrap();
+        });
+        let json = announce_json(ev, vec![]).to_string();
+        let mut stalled = Vec::new();
+        for _ in 0..2 {
+            let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let req = format!(
+                "POST /api/tts/announce HTTP/1.1\r\nhost: x\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{json}",
+                json.len()
+            );
+            s.write_all(req.as_bytes()).await.unwrap();
+            stalled.push(s); // 読まない
+        }
+        // 遅い環境では要求の処理が始まるのが遅れるので、固定の待ちでなく条件が成り立つまで (最大 5 秒) 待つ
+        wait_for_permits(&slots, 0).await;
+        let (parts, _) = post_announce(
+            app.clone(),
+            announce_json(tsunami_event(&area_names(3), TsunamiGrade::Warning), vec![]),
+        )
+        .await;
+        assert_eq!(parts.status, StatusCode::SERVICE_UNAVAILABLE);
+        wait_for_permits(&slots, 2).await; // 期限後に枠が戻る
+        let (parts, body) = post_announce(
+            app.clone(),
+            announce_json(tsunami_event(&area_names(3), TsunamiGrade::Warning), vec![]),
+        )
+        .await;
+        assert_wav(&parts, &body);
+        drop(stalled);
+    }
+
+    // ---- S-02 の接続元 IP ごとの頻度制限 ----
+
+    /// 枠の空きが want になるまで短い間隔で待つ (最大 5 秒)。ならなければ失敗
+    async fn wait_for_permits(slots: &Semaphore, want: usize) {
+        for _ in 0..500 {
+            if slots.available_permits() == want {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("枠の空きが {want} にならない (今 {})", slots.available_permits());
+    }
+
+    async fn announce_from(app: Router, peer: &str, xff: Option<&str>) -> StatusCode {
+        let mut b = Request::post("/api/tts/announce").header(header::CONTENT_TYPE, "application/json");
+        if let Some(x) = xff {
+            b = b.header("x-forwarded-for", x);
+        }
+        let mut req = b
+            .body(Body::from(announce_json(followup_event(), vec![]).to_string()))
+            .unwrap();
+        req.extensions_mut()
+            .insert(ConnectInfo(peer.parse::<std::net::SocketAddr>().unwrap()));
+        app.oneshot(req).await.unwrap().status()
+    }
+
+    #[tokio::test]
+    async fn announce_is_limited_to_12_per_minute_per_ip_and_other_ips_have_their_own() {
+        let e = env(1_000_000);
+        let app = router(e.hub.clone(), Some(e.cache.clone()), Some(TOKEN.into()), test_rate(12));
+        for _ in 0..12 {
+            assert_ne!(
+                announce_from(app.clone(), "198.51.100.7:1000", None).await,
+                StatusCode::TOO_MANY_REQUESTS
+            );
+        }
+        assert_eq!(
+            announce_from(app.clone(), "198.51.100.7:1000", None).await,
+            StatusCode::TOO_MANY_REQUESTS
+        );
+        assert_ne!(
+            announce_from(app.clone(), "198.51.100.8:1000", None).await,
+            StatusCode::TOO_MANY_REQUESTS
+        );
+    }
+
+    #[tokio::test]
+    async fn announce_rate_uses_the_forwarded_ip_only_behind_a_trusted_proxy() {
+        let e = env(1_000_000);
+        let rate = WsGuard::new(
+            crate::ws_guard::WsLimits::new(usize::MAX, 1),
+            vec!["127.0.0.1".parse().unwrap()],
+            vec![],
+        );
+        let app = router(e.hub.clone(), Some(e.cache.clone()), Some(TOKEN.into()), rate);
+        // プロキシ経由: 利用者ごとの枠
+        assert_ne!(
+            announce_from(app.clone(), "127.0.0.1:1", Some("203.0.113.1")).await,
+            StatusCode::TOO_MANY_REQUESTS
+        );
+        assert_ne!(
+            announce_from(app.clone(), "127.0.0.1:1", Some("203.0.113.2")).await,
+            StatusCode::TOO_MANY_REQUESTS
+        );
+        assert_eq!(
+            announce_from(app.clone(), "127.0.0.1:1", Some("203.0.113.1")).await,
+            StatusCode::TOO_MANY_REQUESTS
+        );
+        // 信頼しない相手が書いた X-Forwarded-For では枠を増やせない
+        assert_ne!(
+            announce_from(app.clone(), "198.51.100.7:1", Some("1.1.1.1")).await,
+            StatusCode::TOO_MANY_REQUESTS
+        );
+        assert_eq!(
+            announce_from(app.clone(), "198.51.100.7:1", Some("2.2.2.2")).await,
+            StatusCode::TOO_MANY_REQUESTS
+        );
     }
 }

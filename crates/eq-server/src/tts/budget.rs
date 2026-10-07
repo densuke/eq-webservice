@@ -1,7 +1,8 @@
 //! 月間の合成文字数の予算管理 (docs/tts.md の S4)。
 //!
 //! `{cache_dir}/usage.json` に `{"month":"YYYY-MM","chars":N}` を保存する。
-//! 月は UTC。月が変わると 0 に戻る。合成の前に `check`、成功後に `record` を呼ぶ。
+//! 月は UTC。月が変わると 0 に戻る。合成の前に `reserve` で枠を予約し (使用済み + 予約中を同じロックで確認)、
+//! 成功したら `Reservation::commit`、失敗・時間切れ・キャンセルなら Drop で返す (S-04)。
 //! ファイルは一時ファイル + rename で原子的に書く。欠損・破損は 0 から始めて警告を出す。
 
 use std::path::PathBuf;
@@ -20,10 +21,40 @@ struct Usage {
     chars: usize,
 }
 
+/// 使用済み (usage) と、合成中でまだ確定していない予約の文字数。同じロックで守る
+struct State {
+    usage: Usage,
+    reserved: usize,
+}
+
 pub struct Budget {
     path: PathBuf,
     limit: usize,
-    usage: Mutex<Usage>,
+    state: Mutex<State>,
+}
+
+/// 予約した文字数。commit しないまま Drop (失敗・キャンセル) すると返却される。
+#[must_use = "予約は合成が終わるまで持つ。すぐ捨てると返却される"]
+pub struct Reservation<'a> {
+    budget: &'a Budget,
+    chars: usize,
+    settled: bool,
+}
+
+impl Reservation<'_> {
+    /// 合成に成功した。予約を使用済みに変えて保存する。
+    pub fn commit(mut self, now: SystemTime) -> anyhow::Result<()> {
+        self.settled = true;
+        self.budget.settle(self.chars, Some(now))
+    }
+}
+
+impl Drop for Reservation<'_> {
+    fn drop(&mut self) {
+        if !self.settled {
+            let _ = self.budget.settle(self.chars, None);
+        }
+    }
 }
 
 impl Budget {
@@ -46,43 +77,60 @@ impl Budget {
         Budget {
             path,
             limit,
-            usage: Mutex::new(usage),
+            state: Mutex::new(State { usage, reserved: 0 }),
         }
     }
 
-    /// `chars` 文字を足しても上限を超えないか。超えるなら Err。
-    pub fn check(&self, chars: usize, now: SystemTime) -> Result<(), BudgetExceeded> {
-        if self.used(now).saturating_add(chars) > self.limit {
-            Err(BudgetExceeded)
+    fn lock(&self) -> std::sync::MutexGuard<'_, State> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// `chars` 文字を予約する。使用済み + 予約中 + chars が上限を超えるなら Err。
+    pub fn reserve(&self, chars: usize, now: SystemTime) -> Result<Reservation<'_>, BudgetExceeded> {
+        let mut st = self.lock();
+        let used = if st.usage.month == month_utc(now) {
+            st.usage.chars
         } else {
-            Ok(())
+            0
+        };
+        if used.saturating_add(st.reserved).saturating_add(chars) > self.limit {
+            return Err(BudgetExceeded);
         }
+        st.reserved += chars;
+        Ok(Reservation {
+            budget: self,
+            chars,
+            settled: false,
+        })
     }
 
-    /// 合成に成功した文字数を加算して保存する。
-    pub fn record(&self, chars: usize, now: SystemTime) -> anyhow::Result<()> {
+    /// 予約を解く。`commit` が Some(now) なら使用済みに加算して保存する。
+    fn settle(&self, chars: usize, commit: Option<SystemTime>) -> anyhow::Result<()> {
+        let mut st = self.lock();
+        st.reserved = st.reserved.saturating_sub(chars);
+        let Some(now) = commit else { return Ok(()) };
         let month = month_utc(now);
-        let mut u = self.usage.lock().unwrap_or_else(|e| e.into_inner());
-        if u.month != month {
-            u.month = month;
-            u.chars = 0;
+        if st.usage.month != month {
+            st.usage.month = month;
+            st.usage.chars = 0;
         }
-        u.chars = u.chars.saturating_add(chars);
+        st.usage.chars = st.usage.chars.saturating_add(chars);
         if let Some(dir) = self.path.parent() {
             std::fs::create_dir_all(dir)?;
         }
         let mut tmp = self.path.clone().into_os_string();
         tmp.push(".tmp");
-        std::fs::write(&tmp, serde_json::to_vec(&*u)?)?;
+        std::fs::write(&tmp, serde_json::to_vec(&st.usage)?)?;
         std::fs::rename(&tmp, &self.path)?;
         Ok(())
     }
 
-    /// 今月の使用済み文字数 (月が変わっていれば 0)。
+    /// 今月の使用済み文字数 (月が変わっていれば 0)。予約中は含まない。テストで確かめるためだけに使う
+    #[cfg(test)]
     pub fn used(&self, now: SystemTime) -> usize {
-        let u = self.usage.lock().unwrap_or_else(|e| e.into_inner());
-        if u.month == month_utc(now) {
-            u.chars
+        let st = self.lock();
+        if st.usage.month == month_utc(now) {
+            st.usage.chars
         } else {
             0
         }
@@ -111,6 +159,11 @@ mod tests {
     const OCT_END: u64 = 1793491199; // 2026-10-31T23:59:59Z
     const NOV_START: u64 = 1793491200; // 2026-11-01T00:00:00Z
 
+    /// 予約して確定する
+    fn spend(b: &Budget, chars: usize, now: SystemTime) {
+        b.reserve(chars, now).unwrap().commit(now).unwrap();
+    }
+
     #[test]
     fn month_utc_epoch() {
         assert_eq!(month_utc(at(0)), "1970-01");
@@ -137,24 +190,52 @@ mod tests {
     fn fresh_budget_allows_up_to_limit() {
         let dir = tempfile::tempdir().unwrap();
         let b = Budget::load(dir.path().join("usage.json"), 10);
-        assert_eq!(b.check(10, at(NOV_START)), Ok(()));
-        assert_eq!(b.check(11, at(NOV_START)), Err(BudgetExceeded));
+        assert!(b.reserve(10, at(NOV_START)).is_ok());
+        assert!(b.reserve(11, at(NOV_START)).is_err());
     }
 
     #[test]
-    fn record_then_check_respects_limit() {
+    fn spend_then_reserve_respects_limit() {
         let dir = tempfile::tempdir().unwrap();
         let b = Budget::load(dir.path().join("usage.json"), 10);
-        b.record(7, at(NOV_START)).unwrap();
-        assert_eq!(b.check(3, at(NOV_START)), Ok(()));
-        assert_eq!(b.check(4, at(NOV_START)), Err(BudgetExceeded));
+        spend(&b, 7, at(NOV_START));
+        assert!(b.reserve(3, at(NOV_START)).is_ok());
+        assert!(b.reserve(4, at(NOV_START)).is_err());
+    }
+
+    #[test]
+    fn outstanding_reservation_counts_against_the_limit() {
+        // 監査 S-04: 上限 3 に 3 文字を 2 本同時に頼むと、1 本だけ通る
+        let dir = tempfile::tempdir().unwrap();
+        let b = Budget::load(dir.path().join("usage.json"), 3);
+        let first = b.reserve(3, at(NOV_START)).unwrap();
+        assert!(b.reserve(3, at(NOV_START)).is_err());
+        drop(first);
+    }
+
+    #[test]
+    fn dropping_a_reservation_returns_it_without_using_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let b = Budget::load(dir.path().join("usage.json"), 3);
+        drop(b.reserve(3, at(NOV_START)).unwrap());
+        assert_eq!(b.used(at(NOV_START)), 0);
+        assert!(b.reserve(3, at(NOV_START)).is_ok());
+    }
+
+    #[test]
+    fn commit_moves_the_reservation_to_used() {
+        let dir = tempfile::tempdir().unwrap();
+        let b = Budget::load(dir.path().join("usage.json"), 3);
+        spend(&b, 3, at(NOV_START));
+        assert_eq!(b.used(at(NOV_START)), 3);
+        assert!(b.reserve(1, at(NOV_START)).is_err());
     }
 
     #[test]
     fn usage_survives_reload() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("usage.json");
-        Budget::load(&path, 10).record(6, at(NOV_START)).unwrap();
+        spend(&Budget::load(&path, 10), 6, at(NOV_START));
         let b2 = Budget::load(&path, 10);
         assert_eq!(b2.used(at(NOV_START)), 6);
     }
@@ -163,10 +244,10 @@ mod tests {
     fn month_rollover_resets_usage() {
         let dir = tempfile::tempdir().unwrap();
         let b = Budget::load(dir.path().join("usage.json"), 10);
-        b.record(5, at(OCT_END)).unwrap();
+        spend(&b, 5, at(OCT_END));
         assert_eq!(b.used(at(OCT_END)), 5);
         assert_eq!(b.used(at(NOV_START)), 0);
-        assert_eq!(b.check(10, at(NOV_START)), Ok(()));
+        assert!(b.reserve(10, at(NOV_START)).is_ok());
     }
 
     #[test]
@@ -186,10 +267,10 @@ mod tests {
     }
 
     #[test]
-    fn record_writes_json_with_month_and_chars() {
+    fn commit_writes_json_with_month_and_chars() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("usage.json");
-        Budget::load(&path, 10).record(4, at(NOV_START)).unwrap();
+        spend(&Budget::load(&path, 10), 4, at(NOV_START));
         let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(v["month"], "2026-11");
         assert_eq!(v["chars"], 4);

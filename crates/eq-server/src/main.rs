@@ -133,7 +133,8 @@ async fn main() -> anyhow::Result<()> {
     // 音声アナウンス。キーが無ければ警告して無効 (エンドポイントは 404)
     let tts_cache = build_tts(&cfg.tts, archive_path, cfg.server.static_dir.join("demo"))?;
     let tts_token = std::env::var("EQ_TTS_TOKEN").ok().filter(|t| !t.is_empty());
-    routes.push(tts::http::router(hub.clone(), tts_cache, tts_token));
+    let announce_rate = cfg.server.rate_guard(cfg.tts.announce_per_min)?;
+    routes.push(tts::http::router(hub.clone(), tts_cache, tts_token, announce_rate));
 
     let listener = tokio::net::TcpListener::bind(&cfg.server.listen)
         .await

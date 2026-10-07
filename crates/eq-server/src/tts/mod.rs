@@ -5,6 +5,7 @@ pub mod budget;
 pub mod cache;
 pub mod google;
 pub mod http;
+pub mod limits;
 pub mod phrase;
 pub mod prewarm;
 pub mod priors;
@@ -23,6 +24,8 @@ pub struct TtsConfig {
     pub cache_dir: PathBuf,
     pub monthly_char_limit: usize,
     pub prewarm: bool,
+    /// POST /api/tts/announce (公開) の、接続元 IP ごとの 1 分あたりの回数 (超えると 429)
+    pub announce_per_min: u32,
 }
 
 impl Default for TtsConfig {
@@ -33,6 +36,7 @@ impl Default for TtsConfig {
             cache_dir: "data/tts".into(),
             monthly_char_limit: 900_000,
             prewarm: true,
+            announce_per_min: 12,
         }
     }
 }
