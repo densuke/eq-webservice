@@ -16,7 +16,7 @@ YouTube の配信は DVR を切っているので、配信の画面は後から�
 ## 1. 道具の棚卸し (2026-09-30 に確かめたこと)
 
 - **記録 (jsonl)**
-  - 本番 (e2) は `[[sinks]] type = "jsonl"`、`path = "data/events.jsonl"` で、受けた情報を全部追記している。
+  - 本番 (e2) は `[[sinks]] type = "jsonl"`、`path = "data/events.jsonl"` で、受けた情報を全部追記している。書き込み先は path の隣の日付ごとのファイル (`data/events-YYYY-MM-DD.jsonl`、書いた時刻の UTC の日付)。分割前の path そのもののファイルは、あれば読むだけ (2026-10 以降、#190)。
   - 中身は内部の `Event` を `serde_json` にしたもの。`received_at_ms` と `kind` が入っている。
   - 14:00 の地震は 14 行が全部そろっていた。
     - 緊急地震速報 (wolfx) の第 1〜11 報。どの報にも秒単位の発生時刻がある。

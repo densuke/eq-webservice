@@ -40,16 +40,23 @@ fn dedupe(it: impl IntoIterator<Item = String>) -> Vec<String> {
     it.into_iter().filter(|s| seen.insert(s.clone())).collect()
 }
 
-/// JSON Lines の Event を読む。壊れた行・空行は飛ばし、ファイルがなければ空。
+/// JSON Lines の Event を読む (旧ファイル + 日付ファイルの全部。archive_store)。壊れた行・空行は飛ばし、ファイルがなければ空。
 pub fn load_jsonl(path: &Path) -> Vec<Event> {
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return Vec::new();
-    };
+    let files = crate::archive_store::files_in_range(path, 0, u64::MAX).unwrap_or_default();
     let mut broken = 0;
-    let events = text
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .filter_map(|l| serde_json::from_str::<Event>(l).map_err(|_| broken += 1).ok())
+    let events = files
+        .iter()
+        .filter_map(|f| {
+            std::fs::read_to_string(f)
+                .map_err(|e| tracing::warn!("tts prewarm: {} を読めない: {e}", f.display()))
+                .ok()
+        })
+        .flat_map(|text| {
+            text.lines()
+                .filter(|l| !l.trim().is_empty())
+                .filter_map(|l| serde_json::from_str::<Event>(l).map_err(|_| broken += 1).ok())
+                .collect::<Vec<_>>()
+        })
         .collect();
     if broken > 0 {
         tracing::warn!("tts prewarm: {} の壊れた行を {broken} 件飛ばした", path.display());
@@ -226,6 +233,14 @@ mod tests {
         let body = format!("{}\nnot json\n\n{}\n", ev_json("a"), ev_json("b"));
         std::fs::write(&p, body).unwrap();
         assert_eq!(load_jsonl(&p).len(), 2);
+    }
+
+    #[test]
+    fn load_jsonl_reads_the_legacy_file_and_the_daily_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("e.jsonl"), format!("{}\n", ev_json("a"))).unwrap();
+        std::fs::write(dir.path().join("e-2026-10-07.jsonl"), format!("{}\n", ev_json("b"))).unwrap();
+        assert_eq!(load_jsonl(&dir.path().join("e.jsonl")).len(), 2);
     }
 
     #[test]

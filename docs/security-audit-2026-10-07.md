@@ -102,3 +102,4 @@ CI の `npm audit --omit=dev`（`.github/workflows/ci.yml:178`）は、全て `d
 | S-03 | PR #189 で対処 |
 | S-04 | PR #188 で対処 |
 | S-05 | PR #189 で対処 |
+| R-02 | Issue #190 で対処 (jsonl を日付ごとのファイルに分け、問い合わせの範囲のファイルだけ読む) |
