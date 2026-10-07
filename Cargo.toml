@@ -15,3 +15,7 @@ serde_json = "1"
 # 配布バイナリを小さくする (デバッグ情報を除き、LTO を効かせる)
 strip = true
 lto = "thin"
+
+# 依存のクレート (tiny-skia など) は debug でも最適化する。自分のクレート (eq-server) は opt-level 0 のまま
+[profile.dev.package."*"]
+opt-level = 2
