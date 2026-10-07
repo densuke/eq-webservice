@@ -488,7 +488,10 @@ fn eew_scene<'a>(e: &'a eew::EewSummary, icons: &'a Icons, now_ms: u64) -> Scene
 
 fn in_sub_rect(i: usize) -> bool {
     let (x, y) = ((i % draw::W as usize) as f64, (i / draw::W as usize) as f64);
-    let sub = Placed::builtin().unwrap().sub.unwrap();
+    // 画素ごとに呼ばれるので、定義の読み込みは 1 度だけにする
+    static SUB: std::sync::LazyLock<super::layout_resolve::Rect> =
+        std::sync::LazyLock::new(|| Placed::builtin().unwrap().sub.unwrap());
+    let sub = *SUB;
     (sub.x as f64..sub.right() as f64).contains(&x) && (sub.y as f64..sub.bottom() as f64).contains(&y)
 }
 

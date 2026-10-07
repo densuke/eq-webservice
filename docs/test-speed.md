@@ -53,7 +53,11 @@
 
 (同居の負荷で 2 倍ほどぶれる。opt2 の欄の小さい値は負荷の軽い時間に測ったもの。)
 
-## 直し方の案 (この PR では直さない)
+## 修正後 (この PR に入れた)
+
+`in_sub_rect()` の定義の読み込みを `LazyLock` で 1 度だけにした (`Placed::builtin()` を画素ごとに呼ぶ箇所はほかに無い)。依存の opt-level 2 と合わせて、debug の `cargo test -p eq-server` (668 本) は壁 27 秒 (cargo test の表示は 20.9 秒、user 47 秒)。`cargo test -p eq-server the_sub_map` (7 本) は 14 秒。同居の負荷あり。
+
+## 直し方の案 (1 は上のとおり修正済み)
 
 1. **`zoom_tests.rs` の `in_sub_rect()`**: `Placed::builtin().unwrap().sub.unwrap()` を画素ごとに呼んでいる (画面 1280x720 なら 1 回の比較で 90 万回、JSON の解析)。矩形を `OnceLock` か引数で 1 度だけ求める。これだけで debug 全体が 85 分から 3 分 (実験の値)。呼び元は `the_sub_map_paints_only_inside_its_rect`、`the_sub_map_leaves_the_detail_alone_during_a_quake`、`the_sub_map_shows_shaking_colors_during_a_confirmed_quake`。`the_sub_map_leaves_the_detail_alone_during_a_quake` の `in_detail` は矩形を先に取っているので問題ない。
 2. `the_sub_map_does_not_add_redraws`・`the_forecast_areas_of_the_eew_stay_in_the_view_after_the_scale_prompt`・`a_scale_prompt_zooms_in_on_its_area_while_the_waves_are_still_drawn`: 何十コマも進めている。確かめたいのは「描き直しが増えない」「寄りが戻る」ことなので、時刻を一気に進めて (`fast_forward` や now を飛ばす) 節目のコマだけ見れば、コマ数を 1/5 ほどにできる。
