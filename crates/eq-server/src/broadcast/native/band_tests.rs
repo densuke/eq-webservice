@@ -106,15 +106,16 @@ fn write_quake_band_pngs_when_asked() {
     ];
     let watch = [area("福井県", TsunamiGrade::Watch)];
     let all: Vec<_> = major.iter().chain(&warn).cloned().collect();
-    let cases: [(&str, &[TsunamiArea], &Warnings, u64); 6] = [
+    let cases: [(&str, &[TsunamiArea], &Warnings, u64); 7] = [
         ("major", &major, &minor, 0),
         ("warning", &warn, &minor, 0),
         ("special", &[], &special, 0),
         ("none", &watch, &minor, 0),
         ("all_three_p1", &all, &many_special, 0),
         ("all_three_p2", &all, &many_special, 8000),
+        ("all_three_p3", &all, &many_special, 16000),
     ];
-    let now = scene(None, &[], None, None).now_ms / 16000 * 16000;
+    let now = scene(None, &[], None, None).now_ms / 24000 * 24000;
     for (name, areas, w, dt) in cases {
         let mk = |a, w| Scene {
             tsunami: a,
