@@ -253,7 +253,7 @@ impl Stepper {
     pub fn still_pixmap(&self) -> Option<Pixmap> {
         match self.still.as_ref().map(|(_, s)| s)? {
             Still::Flat(pm) => Some(pm.clone()),
-            Still::Layered(l) => Some(self.renderer.waved(l, &[])),
+            Still::Layered(l) => Some(self.renderer.waved(l, &[], None)),
         }
     }
 
@@ -273,6 +273,8 @@ impl Stepper {
         self.aim_sub(current, &eews);
         // 地震波は地震の画面のときだけ描く (のちに分かった震源の波は、平時の画面でも描く)
         let waves = frame_waves(&groups, &eews, current.is_some(), i.hindsight, now);
+        // サブの地図の波は、サブの地図に映している地震の波だけ (保持時間・薄さは配信のサブの地図には無い)
+        let sub_wave = current.and_then(|c| eew::sub_wave(c, &groups, &eews, now));
         // 地震波以外を描き直すのは、データが変わったとき・平時と地震が切り替わったとき・秒が進んだときだけ。
         // 地震波が動いている間は、その上にコマごとに波だけを重ねる
         let still_key = (
@@ -325,7 +327,7 @@ impl Stepper {
         let pm = match still {
             Still::Flat(pm) => pm,
             Still::Layered(l) => {
-                with_waves = self.renderer.waved(l, &waves);
+                with_waves = self.renderer.waved(l, &waves, sub_wave.as_ref());
                 &with_waves
             }
         };

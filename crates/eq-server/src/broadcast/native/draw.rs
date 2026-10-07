@@ -434,9 +434,13 @@ impl Renderer {
     }
 
     /// 地震波の円を重ねる。札などが塗っている画素は塗らない (波は札の下)。
-    pub fn waved(&self, layers: &Layers, waves: &[Wave]) -> Pixmap {
+    /// sub はサブの地図に映している地震の波 (サブの地図の中だけに描く)
+    pub fn waved(&self, layers: &Layers, waves: &[Wave], sub: Option<&Wave>) -> Pixmap {
         let mut pm = layers.full.clone();
         self.draw_waves(&mut pm, waves);
+        if let (Some(w), Some(f)) = (sub, &self.sub) {
+            self.draw_rings(&mut pm, std::slice::from_ref(w), [f]);
+        }
         let (now, before) = (pm.data_mut(), layers.full.data());
         for &(at, len) in &layers.covered {
             now[at..at + len].copy_from_slice(&before[at..at + len]);
