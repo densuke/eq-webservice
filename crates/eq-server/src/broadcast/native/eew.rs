@@ -187,6 +187,23 @@ fn source_of(place: &Place, h: Option<&Hypocenter>, now_ms: u64) -> Option<Sourc
 
 /// 地震波を描く地震。起点は緊急地震速報 (秒単位の発生時刻) を優先し、同じ地震の地震情報 (分単位) では描かない
 pub fn waves(quakes: &[QuakeSummary], eews: &[EewSummary], now_ms: u64) -> Vec<Wave> {
+    wave_sources(quakes, eews, now_ms).into_iter().map(|(_, w)| w).collect()
+}
+
+/// サブの地図に映している地震 (current) の波。web の renderSubWaves と同じく、同じ地震の波だけ (別の地震の波は映さない)
+pub fn sub_wave(current: Current, quakes: &[QuakeSummary], eews: &[EewSummary], now_ms: u64) -> Option<Wave> {
+    let place = match current {
+        Current::Quake(q) => quake_place(q),
+        Current::Eew(e) => eew_place(e),
+    };
+    wave_sources(quakes, eews, now_ms)
+        .into_iter()
+        .find(|(p, _)| same_quake(p, &place))
+        .map(|(_, w)| w)
+}
+
+/// 波と、その地震の発生時刻・震央
+fn wave_sources(quakes: &[QuakeSummary], eews: &[EewSummary], now_ms: u64) -> Vec<(Place, Wave)> {
     let from_eews: Vec<(Place, Source)> = eews
         .iter()
         .filter_map(|e| {
@@ -205,14 +222,15 @@ pub fn waves(quakes: &[QuakeSummary], eews: &[EewSummary], now_ms: u64) -> Vec<W
     from_eews
         .iter()
         .chain(&from_quakes)
-        .map(|(_, s)| {
+        .map(|(p, s)| {
             let t = (now_ms as i64 - s.origin_ms) as f64 / 1000.0;
-            Wave {
+            let wave = Wave {
                 lat: s.lat,
                 lon: s.lon,
                 p_km: surface_radius_km(VP_KM_S, s.depth_km, t),
                 s_km: surface_radius_km(VS_KM_S, s.depth_km, t),
-            }
+            };
+            (*p, wave)
         })
         .collect()
 }
@@ -397,6 +415,25 @@ mod tests {
         assert_eq!(waves(&other, &eews, t + 3_600_000).len(), 1); // 1 時間後: EEW の波は 180 秒で消えている
         let both = waves(&other, &eews, t + 10_000); // 発生前の地震情報は数に入るが、半径はまだ無い
         assert_eq!((both.len(), both[0].s_km.is_some(), both[1].s_km), (2, true, None));
+    }
+
+    #[test]
+    fn the_sub_map_gets_only_the_wave_of_the_quake_it_shows() {
+        let t = T0 as u64;
+        let eews = latest_eews(&[eew_event("a", 1, t + 5_000, |_| {})]);
+        let tokyo = quake(t + 60_000, T0 - 20_000, Scale::S4, Some((35.7, 139.8)));
+        let sapporo = quake(t + 60_000, T0 - 5_000, Scale::S4, Some((43.0, 141.3)));
+        let both = [tokyo, sapporo];
+        let now = t + 10_000;
+        // 札幌の地震を映すなら札幌の波 (先頭の東京の波ではない)
+        let w = sub_wave(Current::Quake(&both[1]), &both, &eews, now).unwrap();
+        assert_eq!(w.lat, 43.0);
+        // 東京の地震と、その緊急地震速報は、緊急地震速報の波 (秒単位の発生時刻) を映す
+        let w = sub_wave(Current::Eew(&eews[0]), &both, &eews, now).unwrap();
+        assert_eq!(w.s_km, surface_radius_km(3.75, 10.0, 10.0));
+        assert_eq!(sub_wave(Current::Quake(&both[0]), &both, &eews, now), Some(w));
+        // 波が消えた (180 秒を過ぎた) ら映さない
+        assert_eq!(sub_wave(Current::Eew(&eews[0]), &both, &eews, t + 200_000), None);
     }
 
     #[test]

@@ -12,7 +12,7 @@ fn config(zoom: bool) -> BroadcastConfig {
     config_sub(zoom, false)
 }
 
-fn config_sub(zoom: bool, sub_map: bool) -> BroadcastConfig {
+pub(super) fn config_sub(zoom: bool, sub_map: bool) -> BroadcastConfig {
     BroadcastConfig {
         sub_map,
         map_dir: std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -37,7 +37,7 @@ fn area(name: &str, from: Scale, to: Scale) -> EewArea {
 }
 
 /// 千葉県北東部の沖 (35.7N 140.8E) の緊急地震速報。第 5 報で千葉県北東部と茨城県南部が震度 4
-fn chiba_events() -> Vec<Event> {
+pub(super) fn chiba_events() -> Vec<Event> {
     let pref = |p: &str| PrefScale {
         pref: p.into(),
         scale: Scale::S4,
@@ -72,7 +72,7 @@ fn chiba_events() -> Vec<Event> {
     }]
 }
 
-fn input<'a>(events: &'a [Event], now: u64, icons: &'a Icons) -> Input<'a> {
+pub(super) fn input<'a>(events: &'a [Event], now: u64, icons: &'a Icons) -> Input<'a> {
     Input {
         events,
         now,
@@ -106,7 +106,7 @@ fn run(st: &mut Stepper, events: &[Event], from_ms: u64, n: u64) -> Vec<u8> {
     last
 }
 
-const SHOWN_AT: u64 = (T0 + 58_000) as u64;
+pub(super) const SHOWN_AT: u64 = (T0 + 58_000) as u64;
 
 #[test]
 fn the_view_zooms_in_on_the_epicenter_and_returns_to_the_whole_country_when_the_quake_screen_ends() {
@@ -471,7 +471,7 @@ fn write_zoomed_png_when_asked() {
 
 // ---- sub_map (配信の右パネルの上にサブの地図を描く試験。docs/native-submap-bench.md) ----
 
-fn eew_scene<'a>(e: &'a eew::EewSummary, icons: &'a Icons, now_ms: u64) -> Scene<'a> {
+pub(super) fn eew_scene<'a>(e: &'a eew::EewSummary, icons: &'a Icons, now_ms: u64) -> Scene<'a> {
     Scene {
         quake: None,
         eew: Some(e),
@@ -494,12 +494,12 @@ fn eew_scene<'a>(e: &'a eew::EewSummary, icons: &'a Icons, now_ms: u64) -> Scene
     }
 }
 
-fn in_rect(i: usize, r: Rect) -> bool {
+pub(super) fn in_rect(i: usize, r: Rect) -> bool {
     let (x, y) = ((i % draw::W as usize) as f32, (i / draw::W as usize) as f32);
     (r.x..r.right()).contains(&x) && (r.y..r.bottom()).contains(&y)
 }
 
-fn in_sub_rect(i: usize) -> bool {
+pub(super) fn in_sub_rect(i: usize) -> bool {
     // 画素ごとに呼ばれるので、定義の読み込みは 1 度だけにする (毎回読むと debug で数十分かかっていた)
     static SUB: std::sync::LazyLock<Rect> = std::sync::LazyLock::new(|| Placed::builtin().unwrap().sub.unwrap());
     in_rect(i, *SUB)
@@ -633,7 +633,7 @@ fn still_of(ev: &[Event], now: u64, sub: bool) -> (tiny_skia::Pixmap, bool) {
     cfg.font = std::env::var("EQ_NATIVE_FONT").unwrap_or(cfg.font);
     let mut st = Stepper::new(load_renderer(&cfg).unwrap());
     let o = st.step(&input(ev, now, &icons)).unwrap();
-    (st.still_pixmap().unwrap().clone(), o.calm)
+    (st.still_pixmap().unwrap(), o.calm)
 }
 
 fn quake_scenes() -> [(&'static str, Vec<Event>, u64); 2] {

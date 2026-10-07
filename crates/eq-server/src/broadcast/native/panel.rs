@@ -56,7 +56,7 @@ pub fn draw_legend(pm: &mut Pixmap, text: &mut Text, area: Rect) {
     }
 }
 
-/// 動かない部分: バーと右パネルの地、題、震度の凡例、出典
+/// 動かない部分: バーと右パネルの地、題、出典 (震度の凡例は地図の上の札なので draw_legend を別に呼ぶ)
 pub fn draw_frame(pm: &mut Pixmap, text: &mut Text, p: &Placed) {
     if let Some(bar) = p.topbar {
         rect(pm, bar.x, bar.y, bar.w, bar.h, PANEL, 1.0);
@@ -80,9 +80,6 @@ pub fn draw_frame(pm: &mut Pixmap, text: &mut Text, p: &Placed) {
             12.0,
             MUTED,
         );
-    }
-    if let Some(legend) = p.legend {
-        draw_legend(pm, text, legend);
     }
     if let Some(credit) = p.credit {
         for (i, line) in CREDIT.iter().enumerate() {

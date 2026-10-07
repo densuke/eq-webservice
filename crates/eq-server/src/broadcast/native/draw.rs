@@ -74,6 +74,83 @@ pub struct Scene<'a> {
     pub notices: Option<&'a Notices>,
 }
 
+/// 波の円を挟んで描くための絵: 札・時計・凡例まで重ねた 1 枚と、そのうち札などが塗っている画素 (波はそこを塗らない)。
+/// 札が塗っていない画素は、札を重ねる前 (地図・震度の塗り・海岸線) と同じなので、波を後から描いても波が札の下になる
+pub struct Layers {
+    full: Pixmap,
+    /// 地図の中で、札などが塗っている画素の並び (バイト位置と長さ)。札や時計の箱は半透明なので、
+    /// 下に波があるとそのまま透けて見えてしまう
+    covered: Vec<(usize, usize)>,
+}
+
+/// pm の rect の中で、塗られている (透明でない) 画素の連なり
+fn covered_runs(pm: &Pixmap, rect: Rect) -> Vec<(usize, usize)> {
+    let (w, h) = (W as usize, H as usize);
+    let (x0, x1) = (
+        (rect.x.max(0.0) as usize).min(w),
+        ((rect.x + rect.w).ceil() as usize).min(w),
+    );
+    let (y0, y1) = (
+        (rect.y.max(0.0) as usize).min(h),
+        ((rect.y + rect.h).ceil() as usize).min(h),
+    );
+    let data = pm.data();
+    let mut runs = Vec::new();
+    for y in y0..y1 {
+        let mut start = None;
+        for x in x0..=x1 {
+            let on = x < x1 && data[(y * w + x) * 4 + 3] != 0;
+            match (start, on) {
+                (None, true) => start = Some(x),
+                (Some(s), false) => {
+                    runs.push(((y * w + s) * 4, (x - s) * 4));
+                    start = None;
+                }
+                _ => {}
+            }
+        }
+    }
+    runs
+}
+
+/// 描き先。split でなければ 1 枚だけで、上も下も同じ絵に重ねる (描く順序は今までどおり)
+pub(super) struct Target {
+    under: Pixmap,
+    over: Option<Pixmap>,
+}
+
+impl Target {
+    fn new(under: Pixmap, split: bool) -> Target {
+        let over = split.then(|| Pixmap::new(W, H).expect("size"));
+        Target { under, over }
+    }
+
+    /// 波の下に描くもの
+    pub(super) fn low(&mut self) -> &mut Pixmap {
+        &mut self.under
+    }
+
+    /// 波の上に描くもの
+    pub(super) fn top(&mut self) -> &mut Pixmap {
+        self.over.as_mut().unwrap_or(&mut self.under)
+    }
+
+    /// 上の絵の r の中を消す (下の絵を海で塗り直したとき、古い札を残さない)
+    fn clear_over(&mut self, r: Rect) {
+        let Some(over) = self.over.as_mut() else { return };
+        let (x0, x1) = (r.x as usize, ((r.x + r.w) as usize).min(W as usize));
+        let (y0, y1) = (r.y as usize, ((r.y + r.h) as usize).min(H as usize));
+        let data = over.data_mut();
+        for y in y0..y1 {
+            data[(y * W as usize + x0) * 4..(y * W as usize + x1) * 4].fill(0);
+        }
+    }
+
+    fn flat(self) -> Pixmap {
+        self.under
+    }
+}
+
 pub struct Renderer {
     pub(super) text: Text,
     /// 日本全体の本図 (path はこの座標で作ってある)
@@ -96,6 +173,8 @@ pub struct Renderer {
     coast: Vec<Coast>,
     areas: HashMap<String, Shape>,
     base: Pixmap,
+    /// base を波の下 (海・陸・県境) と上 (凡例・別枠の題) に分けたもの。波の円を挟む描き方で初めて要るときに作る
+    base_split: Option<(Pixmap, Pixmap)>,
     /// 天気の札の置き場所 (警報を避けた位置) を面ごとに覚える
     cards: CardCache,
     /// お知らせの並べた行の覚え
@@ -135,11 +214,12 @@ impl Renderer {
             coast: Vec::new(),
             areas: areas.into_iter().map(|s| (s.key.clone(), s)).collect(),
             base: Pixmap::new(W, H).expect("size"),
+            base_split: None,
             cards: CardCache::default(),
             notice_lines: LayoutCache::default(),
             placed,
         };
-        r.base = r.draw_base();
+        r.base = r.draw_base(false).flat();
         r
     }
 
@@ -205,45 +285,73 @@ impl Renderer {
         });
     }
 
-    /// 動かない部分: 海・陸・県境、別枠、パネルの枠
-    fn draw_base(&mut self) -> Pixmap {
-        let mut pm = Pixmap::new(W, H).expect("size");
+    /// 動かない部分: 海・陸・県境、別枠、パネルの枠。split なら、凡例と別枠の題 (波より上の札) を別の絵に分ける
+    fn draw_base(&mut self, split: bool) -> Target {
+        let mut t = Target::new(Pixmap::new(W, H).expect("size"), split);
         let main = self.placed.main;
-        rect(&mut pm, main.x, main.y, main.w, main.h, SEA, 1.0);
+        rect(t.low(), main.x, main.y, main.w, main.h, SEA, 1.0);
         for f in std::iter::once(&self.main).chain(&self.insets) {
             if let Some(((x, y, w, h), _)) = f.inset_box() {
-                rrect(&mut pm, x - 1.0, y - 1.0, w + 2.0, h + 2.0, 4.0, INSET_LINE, 1.0);
-                rect(&mut pm, x, y, w, h, SEA, 1.0);
+                rrect(t.low(), x - 1.0, y - 1.0, w + 2.0, h + 2.0, 4.0, INSET_LINE, 1.0);
+                rect(t.low(), x, y, w, h, SEA, 1.0);
             }
-            draw_land(&mut pm, f, &self.neighbors, &self.prefs);
+            draw_land(t.low(), f, &self.neighbors, &self.prefs);
             if let Some(((x, y, _, _), title)) = f.inset_box() {
-                self.text.draw(&mut pm, title, x + 4.0, y + 12.0, 10.0, MUTED);
+                self.text.draw(t.top(), title, x + 4.0, y + 12.0, 10.0, MUTED);
             }
         }
-        panel::draw_frame(&mut pm, &mut self.text, &self.placed);
-        pm
+        panel::draw_frame(t.low(), &mut self.text, &self.placed);
+        if let Some(legend) = self.placed.legend {
+            panel::draw_legend(t.top(), &mut self.text, legend);
+        }
+        t
     }
 
     /// 1 コマ描く (premultiplied RGBA。全面が不透明)。地震波は含まない。
     /// 文字や塗りは重いので、波が動く間も 1 秒ごとにここで描き、コマごとには draw_waves だけを重ねる
     pub fn render(&mut self, scene: &Scene) -> Pixmap {
-        let mut pm = self.base.clone();
+        self.render_into(scene, false).flat()
+    }
+
+    /// render と同じ絵を、波の円を挟めるよう 2 枚に分けて描く (下: 地図・震度の塗り・海岸線、上: 札・時計・凡例)
+    pub fn render_layers(&mut self, scene: &Scene) -> Layers {
+        let Target { mut under, over } = self.render_into(scene, true);
+        let over = over.expect("split");
+        // 波の円が出る面: 地図の枠とサブの地図
+        let mut covered = covered_runs(&over, self.placed.main);
+        if let Some(sub) = self.placed.sub.filter(|_| self.sub.is_some()) {
+            covered.extend(covered_runs(&over, sub));
+        }
+        under.draw_pixmap(
+            0,
+            0,
+            over.as_ref(),
+            &tiny_skia::PixmapPaint::default(),
+            tiny_skia::Transform::identity(),
+            None,
+        );
+        Layers { full: under, covered }
+    }
+
+    fn render_into(&mut self, scene: &Scene, split: bool) -> Target {
+        let mut t = self.base_target(split);
         // サブの地図を描く地震の画面は、右の列を broadcast-quake の矩形で描く (描かないときは平時の矩形のまま)
         let placed = self
             .placed
             .for_screen(self.sub.is_some() && (scene.quake.is_some() || scene.eew.is_some()));
         let main = placed.main;
         if let Some(z) = &self.zoomed {
-            // 日本全体の地図 (と別枠) を海で隠し、寄った地図を描き直す
-            rect(&mut pm, main.x, main.y, main.w, main.h, SEA, 1.0);
-            draw_land(&mut pm, z, &self.neighbors, &self.prefs);
+            // 日本全体の地図 (と別枠) を海で隠し、寄った地図を描き直す (隠した凡例と別枠の題は上の絵からも消す)
+            rect(t.low(), main.x, main.y, main.w, main.h, SEA, 1.0);
+            t.clear_over(main);
+            draw_land(t.low(), z, &self.neighbors, &self.prefs);
             if let Some(legend) = placed.legend {
-                panel::draw_legend(&mut pm, &mut self.text, legend);
+                panel::draw_legend(t.top(), &mut self.text, legend);
             }
         }
         for (slot, f) in frames(&self.main, &self.insets, &self.zoomed).into_iter().enumerate() {
             match Shake::of(scene) {
-                Some(s) => draw_shake(&mut pm, &mut self.text, &self.prefs, f, &s, true, main.right()),
+                Some(s) => draw_shake(&mut t, &mut self.text, &self.prefs, f, &s, true, main.right()),
                 None => {
                     let (fixed, bounds) = card_room(f, &self.insets, self.zoomed.is_some(), scene.test, &placed);
                     let env = calm::CardEnv {
@@ -253,18 +361,18 @@ impl Renderer {
                         bounds,
                         info: calm::info_window(placed.main),
                     };
-                    calm::draw(&mut pm, &mut self.text, &self.areas, f, scene, &env, &mut self.cards)
+                    calm::draw(&mut t, &mut self.text, &self.areas, f, scene, &env, &mut self.cards)
                 }
             }
-            tsunami_coast::draw(&mut pm, f, &self.coast, scene.tsunami);
+            tsunami_coast::draw(t.low(), f, &self.coast, scene.tsunami);
             if let Some(h) = scene.hindsight {
-                draw_hindsight(&mut pm, &mut self.text, f, h);
+                draw_hindsight(t.top(), &mut self.text, f, h);
             }
         }
-        panel::draw_dynamic(&mut pm, &mut self.text, scene, &placed);
+        panel::draw_dynamic(t.top(), &mut self.text, scene, &placed);
         if let (Some(f), Some(at), true) = (&self.sub, placed.sub, scene.quake.is_some() || scene.eew.is_some()) {
             draw_sub_map(
-                &mut pm,
+                &mut t,
                 &mut self.text,
                 &self.neighbors,
                 &self.prefs,
@@ -283,7 +391,7 @@ impl Renderer {
             if list_shown {
                 let n = scene.notices;
                 pref_list::draw(
-                    &mut pm,
+                    t.top(),
                     &mut self.text,
                     &mut self.notice_lines,
                     &rows,
@@ -292,28 +400,63 @@ impl Renderer {
                     area,
                 );
             } else if let Some(n) = scene.notices {
-                notice::draw(&mut pm, &mut self.text, &mut self.notice_lines, n, scene.now_ms, area);
+                notice::draw(t.top(), &mut self.text, &mut self.notice_lines, n, scene.now_ms, area);
             }
         }
         // 警報の帯は定義の banners の矩形の中に描く。平時は気象警報・注意報、地震の画面は緊急性の高いものだけ
         if let Some(at) = placed.banners {
             if scene.quake.is_none() && scene.eew.is_none() {
-                banner::draw(&mut pm, &mut self.text, scene.warnings, at, scene.now_ms);
+                banner::draw(t.top(), &mut self.text, scene.warnings, at, scene.now_ms);
             } else {
-                quake_band::draw(&mut pm, &mut self.text, scene.tsunami, scene.warnings, at, scene.now_ms);
+                quake_band::draw(t.top(), &mut self.text, scene.tsunami, scene.warnings, at, scene.now_ms);
             }
         }
         if scene.test {
-            test_mark::draw(&mut pm, &mut self.text, &placed);
+            test_mark::draw(t.top(), &mut self.text, &placed);
+        }
+        t
+    }
+
+    /// 描き始めの絵 (動かない部分)。split なら、波より上の札だけの絵も付く
+    fn base_target(&mut self, split: bool) -> Target {
+        if !split {
+            return Target::new(self.base.clone(), false);
+        }
+        if self.base_split.is_none() {
+            let t = self.draw_base(true);
+            self.base_split = t.over.map(|o| (t.under, o));
+        }
+        let (under, over) = self.base_split.as_ref().expect("split");
+        Target {
+            under: under.clone(),
+            over: Some(over.clone()),
+        }
+    }
+
+    /// 地震波の円を重ねる。札などが塗っている画素は塗らない (波は札の下)。
+    /// sub はサブの地図に映している地震の波 (サブの地図の中だけに描く)
+    pub fn waved(&self, layers: &Layers, waves: &[Wave], sub: Option<&Wave>) -> Pixmap {
+        let mut pm = layers.full.clone();
+        self.draw_waves(&mut pm, waves);
+        if let (Some(w), Some(f)) = (sub, &self.sub) {
+            self.draw_rings(&mut pm, std::slice::from_ref(w), [f]);
+        }
+        let (now, before) = (pm.data_mut(), layers.full.data());
+        for &(at, len) in &layers.covered {
+            now[at..at + len].copy_from_slice(&before[at..at + len]);
         }
         pm
     }
 
     /// 地震波の円 (P 波は青、S 波は赤で、内側をうっすら塗る) を重ねる
     pub fn draw_waves(&self, pm: &mut Pixmap, waves: &[Wave]) {
-        // 円の path は日本全体の本図の座標で作り、寄った本図・別枠は変換して映す
+        self.draw_rings(pm, waves, frames(&self.main, &self.insets, &self.zoomed));
+    }
+
+    /// 円の path は日本全体の本図の座標で作り、寄った本図・別枠・サブの地図は変換して映す
+    fn draw_rings<'a>(&self, pm: &mut Pixmap, waves: &[Wave], faces: impl IntoIterator<Item = &'a Frame> + Clone) {
         for (p, s) in wave_paths(&self.main.view, waves) {
-            for f in frames(&self.main, &self.insets, &self.zoomed) {
+            for f in faces.clone() {
                 if let Some(path) = &s {
                     f.fill(pm, path, S_WAVE, 0.05);
                     f.stroke(pm, path, S_WAVE, 1.0, WAVE_WIDTH);
@@ -363,7 +506,7 @@ fn draw_land(pm: &mut Pixmap, f: &Frame, neighbors: &[Shape], prefs: &[Shape]) {
 /// 震度の札・緊急地震速報の札 (tag) は出さない (枠の外にはみ出しうる)。区域の塗りと観測点の点は無い
 #[allow(clippy::too_many_arguments)]
 fn draw_sub_map(
-    pm: &mut Pixmap,
+    t: &mut Target,
     text: &mut Text,
     neighbors: &[Shape],
     prefs: &[Shape],
@@ -373,12 +516,14 @@ fn draw_sub_map(
     at: Rect,
 ) {
     let Rect { x, y, w, h } = at;
-    rect(pm, x, y, w, h, SEA, 1.0);
-    draw_land(pm, f, neighbors, prefs);
+    rect(t.low(), x, y, w, h, SEA, 1.0);
+    draw_land(t.low(), f, neighbors, prefs);
     if let Some(s) = Shake::of(scene) {
-        draw_shake(pm, text, prefs, f, &s, false, x + w);
+        draw_shake(t, text, prefs, f, &s, false, x + w);
     }
-    tsunami_coast::draw(pm, f, coast, scene.tsunami);
+    tsunami_coast::draw(t.low(), f, coast, scene.tsunami);
+    // 枠線は波より上 (波の円が枠の 1px を塗りつぶさない)
+    let pm = t.top();
     for (rx, ry, rw, rh) in [
         (x, y, w, 1.0),
         (x, y + h - 1.0, w, 1.0),
@@ -449,7 +594,7 @@ fn wave_paths(view: &View, waves: &[Wave]) -> Vec<WavePaths> {
 /// 揺れの画面: 都道府県を震度の色で塗り、震度の札と震央 (と札) を出す (札は本図だけ)。
 /// map_right は地図の枠 (定義の main) の右端 (緊急地震速報の札が本図の右端をはみ出さないため)
 fn draw_shake(
-    pm: &mut Pixmap,
+    t: &mut Target,
     text: &mut Text,
     prefs: &[Shape],
     frame: &Frame,
@@ -468,9 +613,11 @@ fn draw_shake(
         (1.0, LAND_EDGE)
     };
     for (s, sc) in &hit {
-        frame.fill(pm, &s.path, scale_color(*sc), alpha);
-        frame.stroke(pm, &s.path, edge, 1.0, if shake.forecast { 1.2 } else { 1.0 });
+        frame.fill(t.low(), &s.path, scale_color(*sc), alpha);
+        frame.stroke(t.low(), &s.path, edge, 1.0, if shake.forecast { 1.2 } else { 1.0 });
     }
+    // ここから先は札と印: 波の円より上
+    let pm = t.top();
     // 震度の札・緊急地震速報の札 (cards のときだけ。文字が描けないときは出さない)
     if cards && text.enabled() && !frame.is_inset() {
         for (s, sc) in &hit {
