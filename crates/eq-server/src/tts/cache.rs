@@ -139,9 +139,9 @@ impl<S: Synth> Cache<S> {
 pub const MAX_ANNOUNCE_SEGMENTS: usize = 128;
 /// 同じく総サンプル数の上限 (300 秒)。n2 の実キャッシュの部品は平均 2.6 秒・最大 5.6 秒で、
 /// 全 66 予報区の大津波警報は見出し・無音込みで 200 秒前後 (部品が 3.5 秒でも 250 秒前後) になる。
-/// メモリ: 300 秒は 13.2M サンプル = PCM 26.5MB。1 本あたり PCM と、書き出した WAV (22.05kHz なら半分) が
-/// 同時に存在して最大 約 53MB。送信中は WAV だけ (26.5MB) が残る。同時 2 本で 約 106MB で、
-/// 平常 約 37MB と合わせても eq-server の MemoryMax (256MB) に収まる。
+/// メモリ: 300 秒は 13.2M サンプル = 26.5MB。出力の WAV (22.05kHz なら半分) を 1 つのバッファに直接書き、
+/// 部品の PCM は 1 つ (最大 約 5.6 秒 = 0.5MB) ずつ読んで捨てるので、組み立て中も送信中も 1 本あたり最大 約 27MB (22.05kHz で約 13MB)。
+/// 同時 2 本で 約 54MB で、平常 約 37MB と合わせても eq-server の MemoryMax (256MB) に十分収まる (以前は 1 本 約 53MB)。
 pub const MAX_ANNOUNCE_SAMPLES: usize = 300 * wav::RATE as usize;
 /// 部品の間の無音 (ms)
 const GAP_MS: u32 = 150;
@@ -151,9 +151,10 @@ const GAP_MS: u32 = 150;
 pub struct TooLong;
 
 impl<S: Synth> Cache<S> {
-    /// キャッシュ済みの部品だけで組み立てた PCM を返す。合成も予算も使わない。無い部品は飛ばし、1 つも無ければ Ok(None)。
+    /// キャッシュ済みの部品だけで組み立てた WAV を返す (half なら 22.05kHz)。合成も予算も使わない。無い部品は飛ばし、1 つも無ければ Ok(None)。
     /// 部品の数と総サンプル数が上限を超えるときは、PCM を読み込む前 (ファイルの大きさだけ見て) に Err。
-    pub async fn announce_cached(&self, segs: &[String]) -> Result<Option<Vec<i16>>, TooLong> {
+    /// 出力の Vec に部品を 1 つずつ直接書く。PCM を連結した大きなバッファは作らない。
+    pub async fn announce_wav(&self, segs: &[String], half: bool) -> Result<Option<Vec<u8>>, TooLong> {
         if segs.len() > MAX_ANNOUNCE_SEGMENTS {
             return Err(TooLong);
         }
@@ -172,19 +173,18 @@ impl<S: Synth> Cache<S> {
         if total > MAX_ANNOUNCE_SAMPLES {
             return Err(TooLong);
         }
-        // 1 本のバッファに部品を直接つなぐ (部品の一覧と連結後の 2 つ分を持たない)
-        let mut out: Vec<i16> = Vec::with_capacity(total);
+        let mut out = wav::Sink::new(total, if half { wav::RATE / 2 } else { wav::RATE });
         let mut any = false;
         for path in &found {
             if let Some(pcm) = Self::read_cached(path).await {
                 if any {
-                    out.resize(out.len() + gap, 0);
+                    out.silence(gap);
                 }
-                out.extend_from_slice(&pcm);
+                out.extend(&pcm);
                 any = true;
             }
         }
-        Ok(any.then_some(out))
+        Ok(any.then(|| out.finish()))
     }
 }
 
@@ -374,7 +374,7 @@ mod tests {
         let fake = Fake::default();
         let cache = make(tmp.path(), 1000, fake.clone());
         let segs = vec!["A".to_string(), "B".to_string()];
-        assert_eq!(cache.announce_cached(&segs).await, Ok(None));
+        assert_eq!(cache.announce_wav(&segs, false).await, Ok(None));
         assert_eq!(fake.count(), 0);
     }
 
@@ -386,7 +386,7 @@ mod tests {
         cache.segment("A", None).await.unwrap();
         let before = fake.count();
         let segs = vec!["A".to_string(), "B".to_string()];
-        let pcm = cache.announce_cached(&segs).await.unwrap().unwrap();
+        let pcm = wav::parse(&cache.announce_wav(&segs, false).await.unwrap().unwrap()).unwrap();
         // A だけ (間は入らない)
         assert_eq!(pcm.len(), 10);
         assert_eq!(fake.count(), before);
@@ -397,7 +397,29 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let cache = make(tmp.path(), 1000, Fake::default());
         let segs = vec!["A".to_string(); MAX_ANNOUNCE_SEGMENTS + 1];
-        assert_eq!(cache.announce_cached(&segs).await, Err(TooLong));
+        assert_eq!(cache.announce_wav(&segs, false).await, Err(TooLong));
+    }
+
+    #[tokio::test]
+    async fn announce_wav_is_byte_identical_to_joining_the_pcm_then_encoding() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = make(tmp.path(), 1000, Fake::default());
+        // 長さ 3・8・5 (奇数をまぜて、半分にするときの組が部品の境目でずれる)
+        let texts = ["abc", "defghijk", "lmnop"];
+        let mut parts = Vec::new();
+        for t in texts {
+            parts.push(cache.segment(t, None).await.unwrap());
+        }
+        let segs: Vec<String> = texts.iter().map(|t| t.to_string()).collect();
+        let all = wav::join(&parts, GAP_MS);
+        assert_eq!(
+            cache.announce_wav(&segs, false).await.unwrap().unwrap(),
+            wav::encode(&all)
+        );
+        assert_eq!(
+            cache.announce_wav(&segs, true).await.unwrap().unwrap(),
+            wav::encode_half(&all)
+        );
     }
 
     // ---- S-04: 予算の予約と、合成の同時実行数 ----

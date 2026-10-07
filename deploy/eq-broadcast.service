@@ -18,7 +18,10 @@ Restart=always
 RestartSec=10
 Nice=19
 CPUQuota=25%
-MemoryMax=200M
+MemoryMax=320M
+# 配信に MemoryHigh は最初は設定しない: 平常の anon が 104〜142MB で、MemoryHigh を下回ると swap がほぼ無いため
+# 強い throttling で配信が壊れる。上限に当たるのは主にページキャッシュ (Issue #196) で、ring の破棄で減らす。
+# 必要になったら MemoryMax の 9 割 (MemoryMax=320M なら MemoryHigh=288M) にする
 MemorySwapMax=0
 
 [Install]

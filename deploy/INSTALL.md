@@ -45,6 +45,26 @@ journalctl -u eq-server -f
 ポートはユニットファイルの `Environment=EQ_PORT=8080` で変えられます。
 Discord の Webhook URL などは `/etc/default/eq-server` に `DISCORD_WEBHOOK_URL=...` と書きます。
 
+### メモリの記録
+
+eq-server と `eq-server broadcast` は、自分の cgroup (systemd のユニット) のメモリを 1 分ごとにログへ出します
+(`memory: current_mb=... anon_mb=... file_mb=... peak_mb=... max_mb=... events_max=... oom_kill=...`)。
+`current` にはページキャッシュ (`file`) も数えられ、`MemoryMax` に張り付いてもカーネルが回収するので落ちるとは限りません。
+本当の余裕は `anon` で見ます。anon が `MemoryMax` の 80% を超えると WARN になります。`events_max` は上限に当たった回数です。
+最大値がいつ出たかは `journalctl -u eq-server | grep 'memory:'` (配信は `journalctl --user -u eq-broadcast`) で追えます。
+
+eq-server のユニットの例には、任意のコメントアウトした `MemoryHigh` があります (`MemoryMax` の少し下)。
+配信には `MemoryHigh` を最初は設定しません (anon の平常が 104〜142MB で、下回ると throttling で配信が壊れるため)。
+ring のページキャッシュを捨てる版に差し替えたあと、ログの `file_mb` が 20〜40 に下がるか、`events_max` の増分が 0 になるかを見ます。
+それでも上限に当たるなら、配信に `MemoryMax` の 9 割 (320M なら 288M) の `MemoryHigh` を足します。
+
+```sh
+sudo systemctl edit eq-server        # [Service] に MemoryHigh=200M を書く (system のユニット)
+sudo systemctl restart eq-server
+systemctl --user edit eq-broadcast   # 配信 (user のユニット。eq-server の再起動にも連動)
+systemctl --user restart eq-broadcast
+```
+
 ## 4. Caddy から転送
 
 `deploy/Caddyfile.example` を参考に `reverse_proxy 127.0.0.1:<port>` を追加して `caddy reload` します。

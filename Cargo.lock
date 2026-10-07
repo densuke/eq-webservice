@@ -327,13 +327,14 @@ dependencies = [
 
 [[package]]
 name = "eq-server"
-version = "0.46.1"
+version = "0.46.2"
 dependencies = [
  "ab_glyph",
  "anyhow",
  "axum",
  "base64 0.22.1",
  "futures-util",
+ "libc",
  "openh264",
  "reqwest",
  "resvg",

@@ -12,6 +12,7 @@ mod demo;
 mod http;
 mod hub;
 mod layout;
+mod memwatch;
 mod net;
 mod plugins;
 mod quake;
@@ -53,6 +54,7 @@ async fn main() -> anyhow::Result<()> {
     }
     // eq-server broadcast <broadcast.toml>: 地図のページを ffmpeg で配信し続ける
     if args.first().map(String::as_str) == Some("broadcast") {
+        memwatch::spawn();
         return broadcast::run(&args[1..]).await;
     }
     // eq-server replay-video --from <ms> --to <ms> --out x.mp4 ...: 記録から音入りの動画を描き直す
@@ -77,6 +79,7 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
     let cfg = load_config(&cli)?;
+    memwatch::spawn();
     tracing::info!(static_dir = %cfg.server.static_dir.display(), "eq-server {}", env!("CARGO_PKG_VERSION"));
     let hub = Hub::new(cfg.server.recent_capacity);
 

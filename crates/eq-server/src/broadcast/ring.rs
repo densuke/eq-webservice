@@ -174,10 +174,19 @@ pub fn spawn(dir: PathBuf) -> mpsc::Sender<Vec<u8>> {
     let (tx, mut rx) = mpsc::channel::<Vec<u8>>(QUEUE);
     tokio::spawn(async move {
         let mut index = crate::broadcast::record::list_ring(&dir).map_or(0, |f| next_index(&f));
-        let (mut splitter, mut file, t0) = (Splitter::default(), None, std::time::Instant::now());
+        let (mut splitter, mut file, t0) = (Splitter::default(), None::<tokio::fs::File>, std::time::Instant::now());
         while let Some(chunk) = rx.recv().await {
             for p in splitter.push(&chunk, t0.elapsed()) {
                 if p.new_segment {
+                    // 閉じる前に書き切る。1 分前に閉じたファイルのページキャッシュを捨てる (index は次に開く番号)。
+                    // 閉じた直後の 1 本と書きかけには触らない。sync はしない (dirty_expire の 30 秒で書き戻し済み。
+                    // 書き戻し前のページは fadvise が捨てないだけで害はない)
+                    if let Some(f) = file.as_mut() {
+                        let _ = f.flush().await;
+                    }
+                    super::pagecache::drop_path_in_background(
+                        dir.join(format!("{:02}.ts", (index + RING_FILES - 2) % RING_FILES)),
+                    );
                     file = open(&dir, index).await;
                     index = (index + 1) % RING_FILES;
                 }
