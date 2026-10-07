@@ -12,7 +12,7 @@ use super::icon::Icons;
 use super::model::same_quake;
 use super::notice::Notices;
 use super::shaken::Point;
-use super::{eew, model, yuv, HISTORY};
+use super::{eew, model, quake_band, yuv, HISTORY};
 use crate::broadcast::record::Shown;
 use crate::broadcast::status::Notice;
 use crate::quake::{Event, Hypocenter};
@@ -287,6 +287,7 @@ impl Stepper {
                 eew: shown_eew,
                 history: &groups[..groups.len().min(HISTORY)],
                 warnings: i.warnings,
+                tsunami: quake_band::current_areas(i.events),
                 weather: i.weather,
                 icons: i.icons,
                 flip_s: i.flip_s,

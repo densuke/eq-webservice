@@ -5,6 +5,7 @@ use super::draw::Scene;
 use super::model::QuakeSummary;
 use super::tests::{quake, renderer, scene};
 use super::text::Text;
+use crate::quake::model::{TsunamiArea, TsunamiGrade};
 use crate::quake::Scale;
 
 /// 県 prefs 個 (コード 01 から) に、それぞれ市町村 cities 個の警報を出す
@@ -50,7 +51,7 @@ fn write_band_pngs_when_asked() {
     save("band_none.png", r.render(&scene(None, &[], Some(&calm), None)));
     save("band_1line.png", r.render(&scene(None, &[], Some(&one), None)));
     save("band_2lines.png", r.render(&scene(None, &[], Some(&two), None)));
-    for (i, sec) in [0u64, 8, 16].into_iter().enumerate() {
+    for (i, sec) in (0u64..6).map(|i| i * 8).enumerate() {
         let sc = Scene {
             now_ms: now + sec * 1000,
             ..scene(None, &[], Some(&many), None)
@@ -67,4 +68,67 @@ fn write_band_pngs_when_asked() {
         ..scene(None, &[], Some(&two), None)
     };
     save("band_test.png", r.render(&test));
+}
+
+fn area(name: &str, grade: TsunamiGrade) -> TsunamiArea {
+    TsunamiArea {
+        name: name.into(),
+        grade,
+        immediate: false,
+        first_height: None,
+        max_height: None,
+    }
+}
+
+/// 地震の画面の帯の確認用 PNG。before は帯の材料を渡さない描き (= 帯が空だった main と同じ)、after は材料を渡した描き
+#[test]
+fn write_quake_band_pngs_when_asked() {
+    let Ok(out) = std::env::var("EQ_NATIVE_PNG_DIR") else {
+        return;
+    };
+    let text = std::env::var("EQ_NATIVE_FONT")
+        .ok()
+        .and_then(|p| Text::load(&p, 0).ok())
+        .unwrap_or_else(Text::none);
+    let mut r = renderer(text);
+    let q = noto();
+    let special = warnings("大雨特別警報", 2, 2);
+    let many_special = warnings("暴風特別警報", 12, 4);
+    let minor = warnings("大雨警報", 3, 2);
+    let major = [
+        area("青森県日本海沿岸", TsunamiGrade::MajorWarning),
+        area("石川県能登", TsunamiGrade::MajorWarning),
+    ];
+    let warn = [
+        area("石川県加賀", TsunamiGrade::Warning),
+        area("富山県", TsunamiGrade::Warning),
+        area("新潟県上中下越", TsunamiGrade::Warning),
+    ];
+    let watch = [area("福井県", TsunamiGrade::Watch)];
+    let all: Vec<_> = major.iter().chain(&warn).cloned().collect();
+    let cases: [(&str, &[TsunamiArea], &Warnings, u64); 8] = [
+        ("major", &major, &minor, 0),
+        ("warning", &warn, &minor, 0),
+        ("special", &[], &special, 0),
+        ("none", &watch, &minor, 0),
+        ("all_three_p1", &all, &many_special, 0),
+        ("all_three_p2", &all, &many_special, 8000),
+        ("all_three_p3", &all, &many_special, 16000),
+        ("all_three_p4", &all, &many_special, 24000),
+    ];
+    let now = scene(None, &[], None, None).now_ms / 48000 * 48000;
+    for (name, areas, w, dt) in cases {
+        let mk = |a, w| Scene {
+            tsunami: a,
+            now_ms: now + dt,
+            ..scene(Some(&q), std::slice::from_ref(&q), w, None)
+        };
+        let before = r.render(&mk(&[], None));
+        let after = r.render(&mk(areas, Some(w)));
+        for (dir, pm) in [("before", before), ("after", after)] {
+            let d = std::path::Path::new(&out).join(dir);
+            std::fs::create_dir_all(&d).unwrap();
+            pm.save_png(d.join(format!("quake_{name}.png"))).unwrap();
+        }
+    }
 }

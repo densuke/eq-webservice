@@ -22,7 +22,7 @@ const PAD_X: f32 = 16.0;
 const LINE_H: f32 = 20.0;
 const PAD_Y: f32 = 5.0;
 const WHITE: [u8; 3] = [0xff, 0xff, 0xff];
-const PREFIX: &str = "【気象警報】 ";
+const HEADING: &str = "【気象警報】";
 
 /// 帯の地の色 (web/public/style.css の .warn-banner)
 pub fn banner_color(top: WarningLevel) -> [u8; 3] {
@@ -38,42 +38,82 @@ pub fn banner_height(lines: usize) -> f32 {
     PAD_Y * 2.0 + LINE_H * lines as f32
 }
 
-/// 文を幅 max_w の行に割る (行数の上限は無い)。adv は 1 字の幅
-pub fn layout(segments: &[String], max_w: f32, adv: &mut impl FnMut(char) -> f32) -> Vec<String> {
-    let mut chars: Vec<char> = PREFIX.chars().collect();
-    for (i, s) in segments.iter().enumerate() {
-        if i > 0 {
-            chars.extend(" ／ ".chars());
-        }
-        chars.extend(s.chars());
-    }
-    let mut lines = Vec::new();
-    let mut pos = 0;
-    while pos < chars.len() {
-        while chars.get(pos) == Some(&' ') {
-            pos += 1;
-        }
-        let mut end = pos;
-        let mut w = 0.0;
-        // 1 字は必ず進める (幅より広い字でも止まらない)
-        while end < chars.len() && (end == pos || w + adv(chars[end]) <= max_w) {
-            w += adv(chars[end]);
-            end += 1;
-        }
-        lines.push(chars[pos..end].iter().collect());
-        pos = end;
-    }
-    lines
+/// 帯の 1 種別 (見出しと、その本文)。ページをまたぐときは続きのページの先頭に見出しを再掲する
+#[derive(Debug, Clone, PartialEq)]
+pub struct Section {
+    /// 「【大津波警報】」のような見出し
+    pub heading: String,
+    pub body: String,
 }
 
-/// 行を MAX_LINES 行ずつのページにする。1 ページに収まらないとき (ページが 2 つ以上) は、右端のページ番号の分
-/// (PAGE_W) を空けて割り直す
-pub fn pages(segments: &[String], max_w: f32, adv: &mut impl FnMut(char) -> f32) -> Vec<Vec<String>> {
-    let mut lines = layout(segments, max_w, adv);
-    if lines.len() > MAX_LINES {
-        lines = layout(segments, max_w - PAGE_W, adv);
+impl Section {
+    pub fn new(heading: &str, body: String) -> Self {
+        Self {
+            heading: heading.into(),
+            body,
+        }
     }
-    lines.chunks(MAX_LINES).map(<[String]>::to_vec).collect()
+}
+
+/// 種別ごとに行へ割り、MAX_LINES 行ずつのページにする。adv は 1 字の幅。種別の先頭行には見出しを付け、
+/// 種別がページの途中から次のページへ続くときは、続きの先頭行に「見出し(続き)」を付ける。
+/// 種別は前の種別の続きの行に並べる (収まるなら同じページ)
+fn paginate(sections: &[Section], max_w: f32, adv: &mut impl FnMut(char) -> f32) -> Vec<Vec<String>> {
+    let mut pages: Vec<Vec<String>> = Vec::new();
+    let mut cur: Vec<String> = Vec::new();
+    for s in sections {
+        let chars: Vec<char> = s.body.chars().collect();
+        let mut pos = 0;
+        let mut first = true;
+        while first || pos < chars.len() {
+            let head = if first {
+                format!("{} ", s.heading)
+            } else if cur.is_empty() {
+                format!("{}(続き) ", s.heading)
+            } else {
+                String::new()
+            };
+            while chars.get(pos) == Some(&' ') {
+                pos += 1;
+            }
+            let mut w = head.chars().map(&mut *adv).sum::<f32>();
+            let mut end = pos;
+            // 1 字は必ず進める (幅より広い字でも止まらない)
+            while end < chars.len() && (end == pos || w + adv(chars[end]) <= max_w) {
+                w += adv(chars[end]);
+                end += 1;
+            }
+            // 残りがあるときは、収まる範囲の最後の区切りの直後で折る (区切りが無ければ文字で割る)
+            if end < chars.len() {
+                if let Some(p) = (pos + 1..=end)
+                    .rev()
+                    .find(|&p| matches!(chars[p - 1], '、' | '・' | ' '))
+                {
+                    end = p;
+                }
+            }
+            cur.push(format!("{head}{}", chars[pos..end].iter().collect::<String>()));
+            pos = end;
+            first = false;
+            if cur.len() == MAX_LINES {
+                pages.push(std::mem::take(&mut cur));
+            }
+        }
+    }
+    if !cur.is_empty() {
+        pages.push(cur);
+    }
+    pages
+}
+
+/// 帯のページ。1 ページに収まらないとき (ページが 2 つ以上) は、右端のページ番号の分 (PAGE_W) を空けて割り直す
+pub fn pages(sections: &[Section], max_w: f32, adv: &mut impl FnMut(char) -> f32) -> Vec<Vec<String>> {
+    let p = paginate(sections, max_w, adv);
+    if p.len() > 1 {
+        paginate(sections, max_w - PAGE_W, adv)
+    } else {
+        p
+    }
 }
 
 /// 今出すページ (now_ms は epoch ミリ秒)。PAGE_MS ごとに次へ進み、最後の次は先頭に戻る
@@ -94,7 +134,12 @@ pub fn draw(pm: &mut Pixmap, text: &mut Text, w: Option<&Warnings>, at: Rect, no
         text.draw(pm, msg, at.x + PAD_X, at.y + at.h / 2.0 + PX * 0.35, PX, MUTED);
         return;
     };
-    let all = pages(&lines, at.w - PAD_X * 2.0, &mut |c| {
+    draw_pages(pm, text, at, top, &[Section::new(HEADING, lines.join(" ／ "))], now_ms);
+}
+
+/// 帯の地 (top の色。特別警報は白い縁) を塗り、種別ごとの文 sections を 2 行ずつのページで描く
+pub fn draw_pages(pm: &mut Pixmap, text: &mut Text, at: Rect, top: WarningLevel, sections: &[Section], now_ms: u64) {
+    let all = pages(sections, at.w - PAD_X * 2.0, &mut |c| {
         text.width(c.encode_utf8(&mut [0; 4]), PX)
     });
     let page = page_at(now_ms, all.len());
@@ -135,62 +180,94 @@ mod tests {
             1.0
         }
     }
-    fn segs(v: &[&str]) -> Vec<String> {
-        v.iter().map(|s| s.to_string()).collect()
+    /// 全角 1 字 = 1 の幅で、1 行 max_w 字
+    fn pg(sections: &[(&str, &str)], max_w: f32) -> Vec<Vec<String>> {
+        let ss: Vec<Section> = sections.iter().map(|(h, b)| Section::new(h, b.to_string())).collect();
+        paginate(&ss, max_w, &mut adv)
     }
 
     #[test]
-    fn a_short_text_is_one_line_joined_like_the_page() {
-        let l = layout(
-            &segs(&["レベル３土砂災害警報: 東京都 八丈町", "強風警報: 沖縄県 那覇市"]),
-            100.0,
+    fn a_short_text_is_one_page_with_the_heading() {
+        let p = pg(&[("【気象警報】", "あいうえお")], 20.0);
+        assert_eq!(p, vec![vec!["【気象警報】 あいうえお".to_string()]]);
+    }
+
+    #[test]
+    fn a_long_text_wraps_and_keeps_every_character() {
+        let body = "あいうえおかきくけこさしすせそたちつてと";
+        let p = pg(&[("【気象警報】", body)], 12.0);
+        let rows: Vec<&String> = p.iter().flatten().collect();
+        assert!(rows.len() > 2 && rows.iter().all(|r| r.chars().map(adv).sum::<f32>() <= 12.0));
+        // 見出しの再掲と空白を除くと元の本文になる
+        let joined: String = rows
+            .iter()
+            .map(|r| r.replace("【気象警報】(続き) ", "").replace("【気象警報】 ", ""))
+            .collect();
+        assert_eq!(joined, body);
+    }
+
+    #[test]
+    fn lines_break_after_a_separator_and_only_unbroken_words_are_split_by_character() {
+        // 1 行 10 字: 「あいう・えおか・きくけこ」は区切りの直後で折れる
+        let p = paginate(
+            &[Section::new("【見】", "あいう・えおか・きくけこ・さしす".into())],
+            10.0,
             &mut adv,
         );
-        assert_eq!(
-            l,
-            ["【気象警報】 レベル３土砂災害警報: 東京都 八丈町 ／ 強風警報: 沖縄県 那覇市"]
-        );
-    }
-
-    #[test]
-    fn a_long_text_wraps_to_as_many_lines_as_it_needs() {
-        let l = layout(&segs(&["あいうえおかきくけこ", "さしすせそ"]), 15.0, &mut adv);
-        assert_eq!(l.len(), 2);
-        assert!(l[0].starts_with("【気象警報】"), "{l:?}");
-        assert!(!l[1].starts_with(' ') && l[1].ends_with("さしすせそ"), "{l:?}");
-        // 切り捨てない: 並べ直した全文が元の文と同じ
-        let long = segs(&["あいうえおかきくけこ", "さしすせそたちつてと", "なにぬねのはひふへほ"]);
-        let rows = layout(&long, 15.0, &mut adv);
-        assert!(
-            rows.len() > 2 && rows.iter().all(|r| r.chars().map(adv).sum::<f32>() <= 15.0),
-            "{rows:?}"
-        );
-        assert_eq!(
-            rows.concat().replace(' ', ""),
-            format!("【気象警報】{}", long.join("／"))
-        );
-    }
-
-    #[test]
-    fn two_lines_are_one_page_and_more_are_split_into_pages_of_two_lines() {
-        // 全角 1 字 = 10 の幅
-        let mut adv10 = |c: char| adv(c) * 10.0;
-        let short = pages(&segs(&["あいうえおかきくけこ", "さしすせそ"]), 150.0, &mut adv10);
-        assert_eq!(short.len(), 1);
-        let long: Vec<String> = (0..8)
-            .map(|i| format!("レベル３大雨警報: 県{i} あいうえおかきくけこ"))
+        let rows: Vec<&String> = p.iter().flatten().collect();
+        assert_eq!(rows[0], "【見】 あいう・");
+        let body: String = rows
+            .iter()
+            .map(|r| r.rsplit_once(' ').map_or(r.as_str(), |x| x.1).to_string())
             .collect();
-        let ps = pages(&long, 200.0 + PAGE_W, &mut adv10);
-        assert!(ps.len() >= 2 && ps.iter().all(|p| (1..=2).contains(&p.len())), "{ps:?}");
-        // 2 ページ以上のときは、ページ番号の幅を空けて割る
-        assert!(
-            ps.iter()
-                .flatten()
-                .all(|r| r.chars().map(|c| adv(c) * 10.0).sum::<f32>() <= 200.0),
-            "{ps:?}"
+        assert!(body.contains("さしす"), "{rows:?}");
+        // 区切りの無い長い語は文字で割れ、全文字が残る
+        let long = "あいうえおかきくけこさしすせそ";
+        let p = paginate(&[Section::new("【見】", long.into())], 10.0, &mut adv);
+        let joined: String = p
+            .iter()
+            .flatten()
+            .map(|r| r.replace("【見】(続き) ", "").replace("【見】 ", ""))
+            .collect();
+        assert_eq!(joined, long);
+        // 空白も区切り: 「岐阜県 第1市」は県の後ろで折れる
+        let p = paginate(&[Section::new("【見】", "あいお県 第1市".into())], 10.0, &mut adv);
+        assert_eq!(p[0][0], "【見】 あいお県 ");
+    }
+
+    #[test]
+    fn an_overflowing_section_repeats_its_heading_at_the_top_of_the_next_page() {
+        let w = 10.0;
+        let p = pg(&[("【特別警報】", "あいうえおかきくけこさしすせそたちつてと")], w);
+        assert!(p.len() >= 2, "{p:?}");
+        assert!(p[0][0].starts_with("【特別警報】 "), "{p:?}");
+        assert!(!p[0][1].starts_with("【特別警報】"), "{p:?}");
+        for page in &p[1..] {
+            assert!(page[0].starts_with("【特別警報】(続き) "), "{p:?}");
+        }
+    }
+
+    #[test]
+    fn a_section_that_ends_exactly_at_the_page_end_does_not_make_the_next_one_a_continuation() {
+        let w = 12.0;
+        // 大津波警報は 2 行ちょうど (1 ページ目を満たす)、津波警報は 2 ページ目から始まる
+        let p = pg(
+            &[
+                ("【大津波警報】", "あいうえおかきくけこさしすせそた"),
+                ("【津波警報】", "つてと"),
+            ],
+            w,
         );
-        // 最後以外のページは 2 行ちょうど
-        assert!(ps[..ps.len() - 1].iter().all(|p| p.len() == 2));
+        assert_eq!(p.len(), 2, "{p:?}");
+        assert!(p[0].iter().all(|r| !r.starts_with("【津波警報】")), "{p:?}");
+        assert_eq!(p[1], vec!["【津波警報】 つてと".to_string()]);
+    }
+
+    #[test]
+    fn short_sections_share_a_page() {
+        let p = pg(&[("【大津波警報】", "あい"), ("【津波警報】", "うえ")], 30.0);
+        assert_eq!(p.len(), 1);
+        assert_eq!(p[0].len(), 2);
     }
 
     #[test]

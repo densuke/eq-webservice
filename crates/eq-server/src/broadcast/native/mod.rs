@@ -23,6 +23,7 @@ mod notice;
 mod paint;
 mod panel;
 mod placed;
+mod quake_band;
 mod shaken;
 mod step;
 mod telops;
