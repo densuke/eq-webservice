@@ -55,6 +55,27 @@ impl Section {
     }
 }
 
+/// chars の pos から 1 行ぶんの終わり (その位置は含まない)。used は行頭にすでにある幅 (見出し)。
+/// 1 字は必ず進める (幅より広い字でも止まらない)。残りがあるときは、収まる範囲の最後の区切り (、・空白) の直後で折り、
+/// 区切りが無ければ文字で割る
+pub(super) fn line_end(chars: &[char], pos: usize, used: f32, max_w: f32, adv: &mut impl FnMut(char) -> f32) -> usize {
+    let mut w = used;
+    let mut end = pos;
+    while end < chars.len() && (end == pos || w + adv(chars[end]) <= max_w) {
+        w += adv(chars[end]);
+        end += 1;
+    }
+    if end < chars.len() {
+        if let Some(p) = (pos + 1..=end)
+            .rev()
+            .find(|&p| matches!(chars[p - 1], '、' | '・' | ' '))
+        {
+            end = p;
+        }
+    }
+    end
+}
+
 /// 種別ごとに行へ割り、MAX_LINES 行ずつのページにする。adv は 1 字の幅。種別の先頭行には見出しを付け、
 /// 種別がページの途中から次のページへ続くときは、続きの先頭行に「見出し(続き)」を付ける。
 /// 種別は前の種別の続きの行に並べる (収まるなら同じページ)
@@ -76,22 +97,8 @@ fn paginate(sections: &[Section], max_w: f32, adv: &mut impl FnMut(char) -> f32)
             while chars.get(pos) == Some(&' ') {
                 pos += 1;
             }
-            let mut w = head.chars().map(&mut *adv).sum::<f32>();
-            let mut end = pos;
-            // 1 字は必ず進める (幅より広い字でも止まらない)
-            while end < chars.len() && (end == pos || w + adv(chars[end]) <= max_w) {
-                w += adv(chars[end]);
-                end += 1;
-            }
-            // 残りがあるときは、収まる範囲の最後の区切りの直後で折る (区切りが無ければ文字で割る)
-            if end < chars.len() {
-                if let Some(p) = (pos + 1..=end)
-                    .rev()
-                    .find(|&p| matches!(chars[p - 1], '、' | '・' | ' '))
-                {
-                    end = p;
-                }
-            }
+            let used = head.chars().map(&mut *adv).sum::<f32>();
+            let end = line_end(&chars, pos, used, max_w, adv);
             cur.push(format!("{head}{}", chars[pos..end].iter().collect::<String>()));
             pos = end;
             first = false;

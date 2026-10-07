@@ -11,6 +11,7 @@ use super::paint::{rect, rrect, BG, LINE, MUTED, PANEL, TEXT};
 use super::placed::Placed;
 use super::text::Text;
 use super::viewers;
+use super::{alerts_panel, quake_band};
 use crate::quake::{jst, Scale};
 
 const PAD: f32 = 16.0;
@@ -115,7 +116,11 @@ pub fn draw_dynamic(pm: &mut Pixmap, text: &mut Text, scene: &Scene, p: &Placed)
         }
     }
     if let Some(h) = p.history {
-        draw_history(pm, text, scene.history, h);
+        // 重大な警報があるあいだは、履歴の矩形を警報の枠に置き換える (無ければ今までどおり)
+        match quake_band::quake_band(scene.tsunami, scene.warnings) {
+            Some(b) => alerts_panel::draw(pm, text, &b, h, scene.now_ms),
+            None => draw_history(pm, text, scene.history, h),
+        }
     }
     if let Some(c) = p.clock {
         draw_clock(pm, text, scene.now_ms, scene.connected, scene.fast_forward, c);
