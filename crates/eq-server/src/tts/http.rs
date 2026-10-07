@@ -129,6 +129,7 @@ const ANNOUNCE_SEND_TIMEOUT: Duration = Duration::from_secs(60);
 /// 見張りは期限が来たら本文と枠を手放す (送り出した 64KB のかたまりは本文と別の確保なので、全体は解放される)。
 /// 以後に読まれると、エラーで終わって接続を切らせる。
 fn permit_body(bytes: Vec<u8>, permit: OwnedSemaphorePermit, timeout: Duration) -> Body {
+    use futures_util::StreamExt;
     const CHUNK: usize = 64 * 1024;
     type Held = Arc<std::sync::Mutex<Option<(Bytes, OwnedSemaphorePermit)>>>;
     /// Body が捨てられたら、見張りを止め、本文と枠をその場で手放す (見張りのタスクも同じものを持っているため)
@@ -171,7 +172,9 @@ fn permit_body(bytes: Vec<u8>, permit: OwnedSemaphorePermit, timeout: Duration) 
             drop(g);
             Some((item, (held, dog, ended)))
         },
-    );
+    )
+    // 終端 (None) の後に hyper が再度 poll しても panic しないよう、以後は常に None
+    .fuse();
     Body::from_stream(chunks)
 }
 
@@ -1084,6 +1087,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn announce_body_polled_after_the_end_stays_ended() {
+        use futures_util::StreamExt;
+        let slots = Arc::new(Semaphore::new(1));
+        let mut body = permit_body(
+            vec![0u8; 100_000],
+            slots.clone().try_acquire_owned().unwrap(),
+            Duration::from_secs(60),
+        )
+        .into_data_stream();
+        while body.next().await.is_some() {}
+        // 終端後にもう一度 poll されても panic せず None
+        assert!(body.next().await.is_none());
+        assert!(body.next().await.is_none());
+        assert_eq!(slots.available_permits(), 1);
+    }
+
+    #[tokio::test]
+    async fn announce_body_polled_after_the_timeout_error_stays_ended() {
+        use futures_util::StreamExt;
+        let slots = Arc::new(Semaphore::new(1));
+        let mut body = permit_body(
+            vec![0u8; 200_000],
+            slots.clone().try_acquire_owned().unwrap(),
+            Duration::from_millis(30),
+        )
+        .into_data_stream();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(body.next().await.unwrap().is_err());
+        assert!(body.next().await.is_none());
+        assert!(body.next().await.is_none());
+        assert_eq!(slots.available_permits(), 1);
+    }
+
+    #[tokio::test]
     async fn announce_body_gives_the_slot_back_after_the_timeout_even_if_never_polled() {
         let slots = Arc::new(Semaphore::new(1));
         let body = permit_body(
@@ -1097,6 +1134,77 @@ mod tests {
         assert_eq!(slots.available_permits(), 1);
         // 以後に読まれるとエラーで終わる
         assert!(to_bytes(body, 1 << 20).await.is_err());
+    }
+
+    /// 実ソケット (HTTP/1.1) で、圧縮の層で包み accept-encoding: gzip を付けて、全部受ける・途中で切る、を
+    /// 繰り返しても本文のタスクが panic せず、枠が戻る。層が本文を再 poll する経路 (#195) を通す。
+    /// panic は他のテストの分と区別できるよう、メッセージで数える (前の hook も呼ぶ)
+    #[tokio::test(flavor = "multi_thread")]
+    async fn announce_over_a_real_socket_does_not_panic_on_finish_or_abort() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        static PANICS: AtomicUsize = AtomicUsize::new(0);
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            if info.to_string().contains("Unfold must not be polled") {
+                PANICS.fetch_add(1, Ordering::SeqCst);
+            }
+            prev(info);
+        }));
+        let e = env_with(
+            100_000_000,
+            Fake {
+                samples: Some(300_000),
+                ..Default::default()
+            },
+        );
+        let ev = tsunami_event(&area_names(3), TsunamiGrade::Warning);
+        warm(&e, &ev).await;
+        let slots = Arc::new(Semaphore::new(2));
+        let app = router_with_slots(
+            e.hub.clone(),
+            Some(e.cache.clone()),
+            Some(TOKEN.into()),
+            test_rate(1000),
+            slots.clone(),
+            Duration::from_secs(30),
+        )
+        .layer(crate::http::compression_layer());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
+            .await
+            .unwrap();
+        });
+        let json = announce_json(ev, vec![]).to_string();
+        let req = format!(
+            "POST /api/tts/announce HTTP/1.1\r\nhost: x\r\nconnection: close\r\naccept-encoding: gzip\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{json}",
+            json.len()
+        );
+        let mut head_of_full = String::new();
+        for i in 0..20 {
+            let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
+            s.write_all(req.as_bytes()).await.unwrap();
+            if i % 2 == 0 {
+                let mut all = Vec::new();
+                s.read_to_end(&mut all).await.ok();
+                head_of_full = String::from_utf8_lossy(&all[..200.min(all.len())]).to_lowercase();
+            } else {
+                let mut buf = vec![0u8; 20_000];
+                s.read_exact(&mut buf).await.unwrap();
+                drop(s);
+            }
+        }
+        wait_for_permits(&slots, 2).await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(PANICS.load(Ordering::SeqCst), 0);
+        // audio/wav は圧縮されず、Content-Length が残る
+        assert!(!head_of_full.contains("content-encoding"), "{head_of_full}");
+        assert!(head_of_full.contains("content-length"), "{head_of_full}");
     }
 
     #[tokio::test]

@@ -20,6 +20,7 @@ use axum::{Json, Router};
 use serde::Serialize;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::Semaphore;
+use tower_http::compression::predicate::{DefaultPredicate, NotForContentType, Predicate};
 use tower_http::compression::CompressionLayer;
 use tower_http::services::ServeDir;
 use tower_http::set_header::SetResponseHeaderLayer;
@@ -87,7 +88,13 @@ pub fn router(hub: Arc<Hub>, static_dir: &std::path::Path, extra: Vec<Router>, g
         .layer(header(header::X_CONTENT_TYPE_OPTIONS, "nosniff"))
         .layer(header(header::X_FRAME_OPTIONS, "SAMEORIGIN"))
         .layer(header(header::REFERRER_POLICY, "same-origin"))
-        .layer(CompressionLayer::new())
+        .layer(compression_layer())
+}
+
+/// 既定の圧縮に加え、audio/* は圧縮しない (PCM の deflate は CPU の無駄で、Content-Length が外れて
+/// tts の permit_body の前提も崩れる)
+pub(crate) fn compression_layer() -> CompressionLayer<impl Predicate> {
+    CompressionLayer::new().compress_when(DefaultPredicate::new().and(NotForContentType::const_new("audio/")))
 }
 
 async fn events_handler(State(hub): State<Arc<Hub>>) -> impl IntoResponse {
