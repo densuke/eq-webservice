@@ -5,6 +5,7 @@ pub mod budget;
 pub mod cache;
 pub mod google;
 pub mod http;
+pub mod limits;
 pub mod phrase;
 pub mod prewarm;
 pub mod priors;

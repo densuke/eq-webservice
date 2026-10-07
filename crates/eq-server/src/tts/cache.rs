@@ -120,20 +120,51 @@ impl<S: Synth> Cache<S> {
     }
 }
 
+/// announce_cached が組み立てる出力の上限 (部品の数)。
+/// 正当な最大の報 (大津波警報で全 66 予報区) は約 70 部品。
+pub const MAX_ANNOUNCE_SEGMENTS: usize = 128;
+/// 同じく総サンプル数の上限 (180 秒)。全 66 予報区の大津波警報は、1 部品 約 1.5〜2 秒でも約 2 分に収まる。
+/// 出力は 16 MB 弱 (PCM と WAV で約 2 倍、ブラウザ向けの 22.05kHz 化で更に増える)。
+/// 同時 3 本でも eq-server の MemoryMax (256MB) に収まる大きさ。
+pub const MAX_ANNOUNCE_SAMPLES: usize = 180 * wav::RATE as usize;
+/// 部品の間の無音 (ms)
+const GAP_MS: u32 = 150;
+
+/// 組み立てる出力が上限を超える。
+#[derive(Debug, PartialEq, Eq)]
+pub struct TooLong;
+
 impl<S: Synth> Cache<S> {
-    /// キャッシュ済みの部品だけで組み立てる。合成も予算も使わない。無い部品は飛ばし、1 つも無ければ None
-    pub async fn announce_cached(&self, segs: &[String]) -> Option<Vec<u8>> {
-        let mut parts = Vec::new();
+    /// キャッシュ済みの部品だけで組み立てる。合成も予算も使わない。無い部品は飛ばし、1 つも無ければ Ok(None)。
+    /// 部品の数と総サンプル数が上限を超えるときは、PCM を読み込む前 (ファイルの大きさだけ見て) に Err。
+    pub async fn announce_cached(&self, segs: &[String]) -> Result<Option<Vec<u8>>, TooLong> {
+        if segs.len() > MAX_ANNOUNCE_SEGMENTS {
+            return Err(TooLong);
+        }
+        let mut found = Vec::new();
+        let mut samples = 0usize;
         for seg in segs {
             let path = self.dir.join("seg").join(format!("{}.wav", self.key(seg, &self.voice)));
-            if let Some(pcm) = Self::read_cached(&path).await {
+            // 自分で書いた WAV は 44 バイトのヘッダ + 2 バイト/サンプル
+            if let Ok(meta) = tokio::fs::metadata(&path).await {
+                samples += (meta.len() as usize).saturating_sub(44) / 2;
+                found.push(path);
+            }
+        }
+        let gaps = found.len().saturating_sub(1) * (wav::RATE as usize * GAP_MS as usize / 1000);
+        if samples + gaps > MAX_ANNOUNCE_SAMPLES {
+            return Err(TooLong);
+        }
+        let mut parts = Vec::new();
+        for path in &found {
+            if let Some(pcm) = Self::read_cached(path).await {
                 parts.push(pcm);
             }
         }
         if parts.is_empty() {
-            return None;
+            return Ok(None);
         }
-        Some(wav::encode(&wav::join(&parts, 150)))
+        Ok(Some(wav::encode(&wav::join(&parts, GAP_MS))))
     }
 }
 
@@ -314,7 +345,7 @@ mod tests {
         let fake = Fake::default();
         let cache = make(tmp.path(), 1000, fake.clone());
         let segs = vec!["A".to_string(), "B".to_string()];
-        assert!(cache.announce_cached(&segs).await.is_none());
+        assert_eq!(cache.announce_cached(&segs).await, Ok(None));
         assert_eq!(fake.count(), 0);
     }
 
@@ -326,9 +357,17 @@ mod tests {
         cache.segment("A", None).await.unwrap();
         let before = fake.count();
         let segs = vec!["A".to_string(), "B".to_string()];
-        let bytes = cache.announce_cached(&segs).await.unwrap();
+        let bytes = cache.announce_cached(&segs).await.unwrap().unwrap();
         // A だけ (間は入らない)
         assert_eq!(wav::parse(&bytes).unwrap().len(), 10);
         assert_eq!(fake.count(), before);
+    }
+
+    #[tokio::test]
+    async fn announce_cached_rejects_too_many_segments_without_reading() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = make(tmp.path(), 1000, Fake::default());
+        let segs = vec!["A".to_string(); MAX_ANNOUNCE_SEGMENTS + 1];
+        assert_eq!(cache.announce_cached(&segs).await, Err(TooLong));
     }
 }

@@ -10,9 +10,11 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
+use tokio::sync::Semaphore;
 
-use super::cache::{Cache, TtsError};
+use super::cache::{Cache, TooLong, TtsError};
 use super::google::Synth;
+use super::limits::sanitize;
 use super::priors::priors_of;
 use super::{phrase, wav};
 use crate::hub::Hub;
@@ -24,9 +26,23 @@ struct AppState<S> {
     hub: Arc<Hub>,
     cache: Option<Arc<Cache<S>>>,
     token: Option<String>,
+    /// POST /api/tts/announce の同時実行枠 (満杯なら待たせず 503)
+    announce_slots: Arc<Semaphore>,
 }
 
+/// POST /api/tts/announce の同時実行数。1 本あたり最大で 50MB 弱のメモリを使うので、256MB の MemoryMax に収まる数
+const MAX_ANNOUNCE_CONCURRENCY: usize = 3;
+
 pub fn router<S: Synth>(hub: Arc<Hub>, cache: Option<Arc<Cache<S>>>, token: Option<String>) -> Router {
+    router_with_slots(hub, cache, token, Arc::new(Semaphore::new(MAX_ANNOUNCE_CONCURRENCY)))
+}
+
+fn router_with_slots<S: Synth>(
+    hub: Arc<Hub>,
+    cache: Option<Arc<Cache<S>>>,
+    token: Option<String>,
+    announce_slots: Arc<Semaphore>,
+) -> Router {
     Router::new()
         .route("/api/tts/event/{id}", get(event::<S>))
         .route("/api/tts", post(custom::<S>))
@@ -34,7 +50,12 @@ pub fn router<S: Synth>(hub: Arc<Hub>, cache: Option<Arc<Cache<S>>>, token: Opti
             "/api/tts/announce",
             post(announce::<S>).layer(DefaultBodyLimit::max(1 << 20)),
         )
-        .with_state(Arc::new(AppState { hub, cache, token }))
+        .with_state(Arc::new(AppState {
+            hub,
+            cache,
+            token,
+            announce_slots,
+        }))
 }
 
 /// `?rate=22050` でブラウザ向けの小さい WAV にする。無ければ 44.1kHz (配信の mixer はこちら)
@@ -119,8 +140,19 @@ async fn announce<S: Synth>(State(st): State<Arc<AppState<S>>>, Query(q): Query<
     if req.priors.len() > MAX_PRIORS {
         return StatusCode::BAD_REQUEST.into_response();
     }
+    // 件数・長さの上限と重複の除去 (S-01)。超えていれば 422
+    let AnnounceReq { event, priors } = req;
+    let Some(event) = sanitize(event) else {
+        return StatusCode::UNPROCESSABLE_ENTITY.into_response();
+    };
+    let Some(mut priors) = priors.into_iter().map(sanitize).collect::<Option<Vec<_>>>() else {
+        return StatusCode::UNPROCESSABLE_ENTITY.into_response();
+    };
+    // 重い処理 (差分の計算と PCM の組み立て) の前に枠を取る。満杯なら待たせない。応答を返し終えるまで持つ
+    let Ok(_slot) = st.announce_slots.clone().try_acquire_owned() else {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
     // 位置で順序を決められるよう、対象を末尾に置く
-    let AnnounceReq { event, mut priors } = req;
     priors.push(event.clone());
     let p = priors_of(&event, &priors);
     let segs = phrase::announce_segments(&event, &p);
@@ -128,8 +160,9 @@ async fn announce<S: Synth>(State(st): State<Arc<AppState<S>>>, Query(q): Query<
         return StatusCode::NOT_FOUND.into_response();
     }
     match cache.announce_cached(&segs).await {
-        Some(bytes) => wav_response(q.apply(bytes), Some("no-store")),
-        None => StatusCode::NOT_FOUND.into_response(),
+        Ok(Some(bytes)) => wav_response(q.apply(bytes), Some("no-store")),
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Err(TooLong) => StatusCode::PAYLOAD_TOO_LARGE.into_response(),
     }
 }
 
@@ -222,6 +255,8 @@ mod tests {
     #[derive(Clone, Default)]
     struct Fake {
         texts: Arc<std::sync::Mutex<Vec<String>>>,
+        /// 指定すると、文字数でなくこの長さのサンプルを返す
+        samples: Option<usize>,
     }
     impl Fake {
         fn texts(&self) -> Vec<String> {
@@ -231,7 +266,7 @@ mod tests {
     impl Synth for Fake {
         async fn synth(&self, text: &str, _voice: &str) -> anyhow::Result<Vec<i16>> {
             self.texts.lock().unwrap().push(text.to_string());
-            Ok(vec![100i16; text.chars().count()])
+            Ok(vec![100i16; self.samples.unwrap_or(text.chars().count())])
         }
     }
 
@@ -245,9 +280,12 @@ mod tests {
     }
 
     fn env(limit: usize) -> Env {
+        env_with(limit, Fake::default())
+    }
+
+    fn env_with(limit: usize, fake: Fake) -> Env {
         let dir = tempfile::tempdir().unwrap();
         let budget = Budget::load(dir.path().join("usage.json"), limit);
-        let fake = Fake::default();
         let cache = Arc::new(Cache::new(
             dir.path().to_path_buf(),
             "ja-JP-Neural2-B".into(),
@@ -691,5 +729,147 @@ mod tests {
         let j = announce_json(event("f1", followup_body()), vec![event("p1", prior_body())]);
         let (parts, _) = post_announce(app, j).await;
         assert_eq!(parts.status, StatusCode::NOT_FOUND);
+    }
+
+    // ---- S-01: POST /api/tts/announce の入力・出力・同時実行の上限 ----
+
+    use crate::quake::model::{Tsunami, TsunamiArea, TsunamiGrade};
+
+    fn tsunami_event(names: &[String], grade: TsunamiGrade) -> Event {
+        event(
+            "t1",
+            EventBody::Tsunami(Tsunami {
+                cancelled: false,
+                issued_at: String::new(),
+                areas: names
+                    .iter()
+                    .map(|n| TsunamiArea {
+                        name: n.clone(),
+                        grade,
+                        immediate: false,
+                        first_height: None,
+                        max_height: None,
+                    })
+                    .collect(),
+            }),
+        )
+    }
+
+    fn area_names(n: usize) -> Vec<String> {
+        (0..n).map(|i| format!("予報区{i}")).collect()
+    }
+
+    /// 報が読む部品をすべてキャッシュに置く (合成器は fake)
+    async fn warm(e: &Env, ev: &Event) {
+        for seg in phrase::announce_segments(ev, &[]) {
+            e.cache.segment(&seg, None).await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn announce_tsunami_repeating_one_area_128_times_is_rejected() {
+        // 監査 S-01 の再現: 同じ地域を 128 回含む津波警報 (約 963 倍に増幅していた)
+        let e = env_with(
+            1_000_000,
+            Fake {
+                samples: Some(44_100),
+                ..Default::default()
+            },
+        );
+        let ev = tsunami_event(&vec!["伊勢・三河湾".to_string(); 128], TsunamiGrade::MajorWarning);
+        warm(
+            &e,
+            &tsunami_event(&["伊勢・三河湾".to_string()], TsunamiGrade::MajorWarning),
+        )
+        .await;
+        let (parts, body) = post_announce(app(&e), announce_json(ev, vec![])).await;
+        assert_eq!(parts.status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(body.len() < 100);
+    }
+
+    #[tokio::test]
+    async fn announce_duplicate_area_names_are_read_once() {
+        let e = env(1_000_000);
+        let one = tsunami_event(&["伊勢・三河湾".to_string()], TsunamiGrade::MajorWarning);
+        warm(&e, &one).await;
+        let many = tsunami_event(&vec!["伊勢・三河湾".to_string(); 100], TsunamiGrade::MajorWarning);
+        let (_, a) = post_announce(app(&e), announce_json(one, vec![])).await;
+        let (parts, b) = post_announce(app(&e), announce_json(many, vec![])).await;
+        assert_eq!(parts.status, StatusCode::OK);
+        assert_eq!(a, b);
+    }
+
+    #[tokio::test]
+    async fn announce_legitimate_largest_major_tsunami_warning_passes() {
+        // 大津波警報で全 66 予報区。1 部品 2 秒でも通る
+        let e = env_with(
+            10_000_000,
+            Fake {
+                samples: Some(2 * 44_100),
+                ..Default::default()
+            },
+        );
+        let ev = tsunami_event(&area_names(66), TsunamiGrade::MajorWarning);
+        warm(&e, &ev).await;
+        let (parts, body) = post_announce(app(&e), announce_json(ev, vec![])).await;
+        assert_eq!(parts.status, StatusCode::OK);
+        assert!(wav::parse(&body).unwrap().len() > 66 * 2 * 44_100);
+    }
+
+    #[tokio::test]
+    async fn announce_output_over_the_sample_limit_is_413_before_reading() {
+        let e = env_with(
+            10_000_000,
+            Fake {
+                samples: Some(3 * 44_100),
+                ..Default::default()
+            },
+        );
+        // 上限の件数 (100 区) でも入力の検証は通るが、3 秒 x 100 = 300 秒は出力の上限 (180 秒) を超える
+        let ev = tsunami_event(&area_names(100), TsunamiGrade::MajorWarning);
+        warm(&e, &ev).await;
+        let (parts, _) = post_announce(app(&e), announce_json(ev, vec![])).await;
+        assert_eq!(parts.status, StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[tokio::test]
+    async fn announce_overlong_area_name_is_422() {
+        let e = env(1_000_000);
+        let ev = tsunami_event(&["あ".repeat(65)], TsunamiGrade::Warning);
+        let (parts, _) = post_announce(app(&e), announce_json(ev, vec![])).await;
+        assert_eq!(parts.status, StatusCode::UNPROCESSABLE_ENTITY);
+        let ev = tsunami_event(&["あ".repeat(64)], TsunamiGrade::Warning);
+        let (parts, _) = post_announce(app(&e), announce_json(ev, vec![])).await;
+        assert_ne!(parts.status, StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[tokio::test]
+    async fn announce_prior_over_the_limits_is_422() {
+        let e = env(1_000_000);
+        let prior = tsunami_event(&vec!["x".to_string(); 101], TsunamiGrade::Warning);
+        let (parts, _) = post_announce(app(&e), announce_json(followup_event(), vec![prior])).await;
+        assert_eq!(parts.status, StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    fn followup_event() -> Event {
+        event("f1", followup_body())
+    }
+
+    #[tokio::test]
+    async fn announce_returns_503_when_all_slots_are_taken() {
+        let e = env(1_000_000);
+        e.cache.segment(FOLLOW, None).await.unwrap();
+        e.cache.segment(ISHIKAWA7, None).await.unwrap();
+        let slots = Arc::new(Semaphore::new(2));
+        let app = router_with_slots(e.hub.clone(), Some(e.cache.clone()), Some(TOKEN.into()), slots.clone());
+        let j = announce_json(followup_event(), vec![event("p1", prior_body())]);
+        let held: Vec<_> = (0..2).map(|_| slots.clone().try_acquire_owned().unwrap()).collect();
+        let (parts, _) = post_announce(app.clone(), j.clone()).await;
+        assert_eq!(parts.status, StatusCode::SERVICE_UNAVAILABLE);
+        drop(held);
+        let (parts, body) = post_announce(app.clone(), j.clone()).await;
+        assert_wav(&parts, &body);
+        // 応答を返し終えたら枠も戻る
+        assert_eq!(slots.available_permits(), 2);
     }
 }
