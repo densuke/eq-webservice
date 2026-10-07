@@ -128,11 +128,11 @@ pub fn page_at(now_ms: u64, pages: usize) -> usize {
     (now_ms / PAGE_MS) as usize % pages.max(1)
 }
 
-/// 帯の矩形 at の中に描く。警報以上があれば県名の要約 (長ければ now_ms で選んだページ。list は右に一覧が出ているか)、
+/// 帯の矩形 at の中に描く。警報以上があれば県名の要約 (長ければ now_ms で選んだページ)、
 /// 警報が無ければ落ち着いた色の「ありません」。w が None (まだ取れていない) なら何も描かない
-pub fn draw(pm: &mut Pixmap, text: &mut Text, w: Option<&Warnings>, list: bool, at: Rect, now_ms: u64) {
+pub fn draw(pm: &mut Pixmap, text: &mut Text, w: Option<&Warnings>, at: Rect, now_ms: u64) {
     let Some(w) = w else { return };
-    match band(w, list) {
+    match band(w) {
         Band::Quiet(msg) => {
             text.draw(pm, &msg, at.x + PAD_X, at.y + at.h / 2.0 + PX * 0.35, PX, MUTED);
         }

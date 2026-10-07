@@ -116,8 +116,7 @@ fn short_pref(p: &str) -> &str {
 }
 
 /// 上の帯の要約 (「岩手・宮城・福島 ほか3県 (大雨・洪水・暴風)」)。
-/// list は右の一覧が出ているか (出ていれば「→ 右の一覧」を足す)
-pub fn summary_text(rows: &[PrefRow], list: bool) -> String {
+pub fn summary_text(rows: &[PrefRow]) -> String {
     let names: Vec<&str> = rows.iter().take(SUMMARY_PREFS).map(|r| short_pref(r.pref)).collect();
     let mut s = names.join("・");
     if let Some(n) = rows.len().checked_sub(SUMMARY_PREFS).filter(|n| *n > 0) {
@@ -130,9 +129,6 @@ pub fn summary_text(rows: &[PrefRow], list: bool) -> String {
         }
     }
     s.push_str(&format!(" ({})", kinds.join("・")));
-    if list {
-        s.push_str(" → 右の一覧");
-    }
     s
 }
 
@@ -145,10 +141,10 @@ pub enum Band {
     Alert(WarningLevel, String),
 }
 
-pub fn band(w: &Warnings, list: bool) -> Band {
+pub fn band(w: &Warnings) -> Band {
     let rows = pref_rows(w);
     if let Some(top) = rows.iter().map(|r| r.top).max() {
-        return Band::Alert(top, summary_text(&rows, list));
+        return Band::Alert(top, summary_text(&rows));
     }
     Band::Quiet(match advisory_prefs(w) {
         0 => "気象警報・注意報はありません".to_string(),
@@ -305,40 +301,37 @@ mod tests {
 
     #[test]
     fn the_summary_names_up_to_six_prefectures_then_counts_the_rest() {
-        assert_eq!(summary_text(&rows_of(3)[1..], false), "青森・岩手 (大雨・洪水)");
+        assert_eq!(summary_text(&rows_of(3)[1..]), "青森・岩手 (大雨・洪水)");
         let mut r = rows_of(9);
         r[0].kinds = vec!["暴風".into()];
         assert_eq!(
-            summary_text(&r, true),
-            "北海道・青森・岩手・宮城・秋田・山形 ほか3県 (暴風・大雨・洪水) → 右の一覧"
+            summary_text(&r),
+            "北海道・青森・岩手・宮城・秋田・山形 ほか3県 (暴風・大雨・洪水)"
         );
         // 都は残る
         let tokyo = PrefRow {
             pref: "東京都",
             ..rows_of(1).remove(0)
         };
-        assert!(summary_text(&[tokyo], false).starts_with("東京都 "));
+        assert!(summary_text(&[tokyo]).starts_with("東京都 "));
     }
 
     #[test]
     fn the_band_is_a_summary_a_count_of_advisories_or_nothing() {
         let both = w(&[("0310100", &["レベル３大雨警報"]), ("0410100", &["レベル２大雨注意報"])]);
-        assert_eq!(
-            band(&both, true),
-            Band::Alert(WarningLevel::Warning, "岩手 (大雨) → 右の一覧".into())
-        );
+        assert_eq!(band(&both), Band::Alert(WarningLevel::Warning, "岩手 (大雨)".into()));
         let special = w(&[("0310100", &["大雨特別警報"])]);
-        assert!(matches!(band(&special, false), Band::Alert(WarningLevel::Emergency, _)));
+        assert!(matches!(band(&special), Band::Alert(WarningLevel::Emergency, _)));
         let adv = w(&[
             ("0310100", &["レベル２大雨注意報"]),
             ("0410100", &["レベル２大雨注意報"]),
         ]);
         assert_eq!(
-            band(&adv, true),
+            band(&adv),
             Band::Quiet("気象警報はありません (注意報: 2 都道府県)".into())
         );
         assert_eq!(
-            band(&Warnings::default(), true),
+            band(&Warnings::default()),
             Band::Quiet("気象警報・注意報はありません".into())
         );
     }

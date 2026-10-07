@@ -297,7 +297,7 @@ impl Renderer {
         // 警報の帯は定義の banners の矩形の中に描く。平時は気象警報・注意報、地震の画面は緊急性の高いものだけ
         if let Some(at) = placed.banners {
             if scene.quake.is_none() && scene.eew.is_none() {
-                banner::draw(&mut pm, &mut self.text, scene.warnings, list_shown, at, scene.now_ms);
+                banner::draw(&mut pm, &mut self.text, scene.warnings, at, scene.now_ms);
             } else {
                 quake_band::draw(&mut pm, &mut self.text, scene.tsunami, scene.warnings, at, scene.now_ms);
             }
