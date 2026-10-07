@@ -76,6 +76,15 @@ impl Default for ServerConfig {
 }
 
 impl ServerConfig {
+    /// IP ごとの頻度制限だけを使う守り (同時接続の上限は無し)。接続元 IP の決め方は WebSocket と同じ
+    pub fn rate_guard(&self, per_min: u32) -> anyhow::Result<std::sync::Arc<crate::ws_guard::WsGuard>> {
+        Ok(crate::ws_guard::WsGuard::new(
+            crate::ws_guard::WsLimits::new(usize::MAX, per_min),
+            crate::client_ip::parse_trusted(&self.trusted_proxies)?,
+            Vec::new(),
+        ))
+    }
+
     pub fn ws_guard(&self) -> anyhow::Result<std::sync::Arc<crate::ws_guard::WsGuard>> {
         Ok(crate::ws_guard::WsGuard::new(
             crate::ws_guard::WsLimits::new(self.max_ws_per_ip, self.ws_connects_per_min),
