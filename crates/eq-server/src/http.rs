@@ -104,20 +104,21 @@ async fn ws_handler(
     let text = |name| headers.get(name).and_then(|v| v.to_str().ok());
     // 他サイトのページから、閲覧者のブラウザを使って接続枠を消費させない
     if !guard.origin_ok(text(header::ORIGIN), text(header::HOST)) {
-        tracing::warn!(origin = ?text(header::ORIGIN), "WebSocket origin rejected");
+        tracing::debug!(origin = ?text(header::ORIGIN), "WebSocket origin rejected");
         return StatusCode::FORBIDDEN.into_response();
     }
-    let peer_ip = peer.map_or(std::net::Ipv4Addr::LOCALHOST.into(), |c| (c.0).0.ip());
+    // 相手が分からないときは、信頼プロキシに当たらない番兵にして X-Forwarded-For を信じない
+    let peer_ip = peer.map_or(std::net::Ipv6Addr::UNSPECIFIED.into(), |c| (c.0).0.ip());
     let ip = client_ip(peer_ip, &headers, &guard.trusted_proxies);
     let ip_permit = match guard.acquire(ip) {
         Ok(p) => p,
         Err(why) => {
-            tracing::warn!(%ip, ?why, "WebSocket client limited");
+            tracing::debug!(%ip, ?why, "WebSocket client limited");
             return StatusCode::TOO_MANY_REQUESTS.into_response();
         }
     };
     let Ok(permit) = CLIENTS.try_acquire() else {
-        tracing::warn!("too many WebSocket clients");
+        tracing::debug!("too many WebSocket clients");
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
     ws.max_message_size(MAX_CLIENT_MESSAGE)
@@ -195,7 +196,7 @@ mod tests {
     use tower::ServiceExt;
 
     fn test_guard() -> Arc<WsGuard> {
-        WsGuard::new(crate::ws_guard::WsLimits::new(8, 30), vec![], vec![])
+        WsGuard::new(crate::ws_guard::WsLimits::new(32, 30), vec![], vec![])
     }
 
     async fn get(app: Router, path: &str) -> (axum::http::response::Parts, String) {

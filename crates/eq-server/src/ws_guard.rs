@@ -73,7 +73,26 @@ pub struct WsGuard {
     pub limits: WsLimits,
     pub trusted_proxies: Vec<IpAddr>,
     allowed_origins: Vec<String>,
-    ips: Mutex<HashMap<IpAddr, IpState>>,
+    ips: Mutex<IpTable>,
+}
+
+/// 覚えておく IP の数の上限。超えたら、新しい IP は記録を作らず断る
+const MAX_IPS: usize = 4096;
+/// 古い記録を片付ける間隔
+const PRUNE_EVERY: Duration = Duration::from_secs(10);
+
+#[derive(Default)]
+struct IpTable {
+    map: HashMap<IpAddr, IpState>,
+    last_prune: Option<Instant>,
+}
+
+/// 制限を数える単位。IPv6 は /64 (1 契約で丸ごと持てるので) に丸め、IPv4-mapped は IPv4 として扱う
+pub fn rate_key(ip: IpAddr) -> IpAddr {
+    match ip.to_canonical() {
+        IpAddr::V6(v6) => IpAddr::V6((u128::from(v6) & (u128::MAX << 64)).into()),
+        v4 => v4,
+    }
 }
 
 /// 持っている間、その IP の同時接続を 1 つ使う
@@ -84,8 +103,8 @@ pub struct IpPermit {
 
 impl Drop for IpPermit {
     fn drop(&mut self) {
-        let mut ips = self.guard.ips.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(s) = ips.get_mut(&self.ip) {
+        let mut t = self.guard.ips.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(s) = t.map.get_mut(&self.ip) {
             s.active = s.active.saturating_sub(1);
         }
     }
@@ -97,22 +116,43 @@ impl WsGuard {
             limits,
             trusted_proxies,
             allowed_origins,
-            ips: Mutex::new(HashMap::new()),
+            ips: Mutex::new(IpTable::default()),
         })
     }
 
     pub fn acquire(self: &Arc<Self>, ip: IpAddr) -> Result<IpPermit, Denied> {
-        let now = Instant::now();
-        let mut ips = self.ips.lock().unwrap_or_else(|e| e.into_inner());
-        // 覚えておく IP が増え続けないよう、つながっておらず窓も過ぎた IP は忘れる
-        if ips.len() > 4096 {
-            ips.retain(|_, s| s.active > 0 || s.window_start.is_some_and(|w| now.duration_since(w) < WINDOW));
+        self.acquire_at(ip, Instant::now())
+    }
+
+    fn acquire_at(self: &Arc<Self>, ip: IpAddr, now: Instant) -> Result<IpPermit, Denied> {
+        let ip = rate_key(ip);
+        let mut t = self.ips.lock().unwrap_or_else(|e| e.into_inner());
+        // 古い記録 (つながっておらず窓も過ぎた IP) は一定間隔で片付ける
+        if t.last_prune.is_none_or(|p| now.duration_since(p) >= PRUNE_EVERY) {
+            t.last_prune = Some(now);
+            t.map
+                .retain(|_, s| s.active > 0 || s.window_start.is_some_and(|w| now.duration_since(w) < WINDOW));
         }
-        ips.entry(ip).or_default().admit(now, &self.limits)?;
+        if !t.map.contains_key(&ip) {
+            if t.map.len() >= MAX_IPS {
+                return Err(Denied::TooFrequent);
+            }
+            // 断るときは記録を残さない
+            let mut fresh = IpState::default();
+            fresh.admit(now, &self.limits)?;
+            t.map.insert(ip, fresh);
+        } else if let Some(s) = t.map.get_mut(&ip) {
+            s.admit(now, &self.limits)?;
+        }
         Ok(IpPermit {
             guard: self.clone(),
             ip,
         })
+    }
+
+    #[cfg(test)]
+    fn tracked(&self) -> usize {
+        self.ips.lock().unwrap().map.len()
     }
 
     pub fn origin_ok(&self, origin: Option<&str>, host: Option<&str>) -> bool {
@@ -179,6 +219,45 @@ mod tests {
         assert!(g.acquire(b).is_ok());
         drop(p);
         assert!(g.acquire(a).is_ok());
+    }
+
+    #[test]
+    fn ipv6_counts_per_slash_64_and_mapped_v4_as_v4() {
+        let g = WsGuard::new(limits(1, 100), vec![], vec![]);
+        let a: IpAddr = "2001:db8:1:2::1".parse().unwrap();
+        let same64: IpAddr = "2001:db8:1:2:aaaa:bbbb:cccc:dddd".parse().unwrap();
+        let other64: IpAddr = "2001:db8:1:3::1".parse().unwrap();
+        let _p = g.acquire(a).unwrap();
+        assert!(g.acquire(same64).is_err());
+        assert!(g.acquire(other64).is_ok());
+        let v4: IpAddr = "203.0.113.5".parse().unwrap();
+        let mapped: IpAddr = "::ffff:203.0.113.5".parse().unwrap();
+        let _q = g.acquire(v4).unwrap();
+        assert!(g.acquire(mapped).is_err());
+    }
+
+    #[test]
+    fn rejections_do_not_create_records_and_table_is_capped() {
+        let g = WsGuard::new(limits(0, 100), vec![], vec![]);
+        for i in 0..10u8 {
+            assert!(g.acquire(IpAddr::from([203, 0, 113, i])).is_err());
+        }
+        assert_eq!(g.tracked(), 0);
+
+        let g = WsGuard::new(limits(1, 100), vec![], vec![]);
+        let t = Instant::now();
+        let mut permits = Vec::new();
+        for i in 0..MAX_IPS as u32 {
+            permits.push(g.acquire_at(IpAddr::from(i.to_be_bytes()), t).unwrap());
+        }
+        assert_eq!(g.tracked(), MAX_IPS);
+        // 上限に達したら、新しい IP は記録を作らず断る。既存の IP の制限は効いたまま
+        let new_ip = IpAddr::from([203, 0, 113, 1]);
+        assert!(g.acquire_at(new_ip, t).is_err());
+        assert_eq!(g.tracked(), MAX_IPS);
+        // つながりが切れて窓も過ぎれば、片付いて新しい IP を受けられる
+        permits.clear();
+        assert!(g.acquire_at(new_ip, t + Duration::from_secs(61)).is_ok());
     }
 
     #[test]

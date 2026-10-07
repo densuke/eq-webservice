@@ -69,7 +69,7 @@ impl Default for ServerConfig {
             recent_capacity: 200,
             trusted_proxies: vec!["127.0.0.1".into(), "::1".into()],
             allowed_origins: Vec::new(),
-            max_ws_per_ip: 8,
+            max_ws_per_ip: 32,
             ws_connects_per_min: 30,
         }
     }

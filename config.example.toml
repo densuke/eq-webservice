@@ -12,7 +12,7 @@ recent_capacity = 200
 # (最も右の値を接続元 IP とする)。載っていない相手には無視して、相手の IP をそのまま使う
 trusted_proxies = ["127.0.0.1", "::1"]
 # 1 つの IP からの同時接続数と、1 分あたりの接続回数 (超えると 429)
-max_ws_per_ip = 8
+max_ws_per_ip = 32
 ws_connects_per_min = 30
 # Origin 付き (ブラウザ) の接続で許す origin。自分の Host と同じ origin は常に許可、それ以外は 403
 # allowed_origins = ["https://eq.example.jp"]
