@@ -151,13 +151,18 @@ async fn scan_inner(
     byte_limit: Option<u64>,
 ) -> anyhow::Result<Vec<Event>> {
     let mut heap: BinaryHeap<Held> = BinaryHeap::new();
-    let (mut broken, mut seq, mut read) = (0usize, 0usize, 0u64);
+    let (mut seq, mut read) = (0usize, 0u64);
     for path in archive_store::files_in_range(base, from, to)? {
         let file = match tokio::fs::File::open(&path).await {
             Ok(f) => f,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(e) => return Err(e.into()),
+            Err(e) => {
+                // 1 つ読めなくても、他の日の問い合わせまで巻き込まない
+                tracing::warn!(path = %path.display(), "archive: cannot open, skipped: {e}");
+                continue;
+            }
         };
+        let mut broken = 0usize;
         let mut lines = BufReader::new(file).lines();
         while let Some(line) = lines.next_line().await? {
             read += line.len() as u64 + 1;
@@ -183,9 +188,9 @@ async fn scan_inner(
                 Err(_) => broken += 1,
             }
         }
-    }
-    if broken > 0 {
-        tracing::warn!(path = %base.display(), broken, "archive: skipped broken lines");
+        if broken > 0 {
+            tracing::warn!(path = %path.display(), broken, "archive: skipped broken lines");
+        }
     }
     Ok(heap.into_sorted_vec().into_iter().map(|h| h.ev).collect())
 }
@@ -399,6 +404,15 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(got.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), ["l", "d"]);
+    }
+
+    #[tokio::test]
+    async fn a_directory_named_like_a_daily_file_does_not_break_the_scan() {
+        let dir = dir_with(&[("events-2024-01-01.jsonl", vec![line("a", D0 + 1)])]);
+        std::fs::create_dir(dir.path().join("events-2024-01-02.jsonl")).unwrap();
+        let app = app_in(&dir, 1 << 20);
+        let (st, body) = get(app, &format!("/api/archive?from={D0}&to={}", D0 + 10)).await;
+        assert_eq!((st, ids(&body)), (StatusCode::OK, vec!["a".to_string()]));
     }
 
     #[test]

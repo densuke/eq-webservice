@@ -46,7 +46,11 @@ pub fn load_jsonl(path: &Path) -> Vec<Event> {
     let mut broken = 0;
     let events = files
         .iter()
-        .filter_map(|f| std::fs::read_to_string(f).ok())
+        .filter_map(|f| {
+            std::fs::read_to_string(f)
+                .map_err(|e| tracing::warn!("tts prewarm: {} を読めない: {e}", f.display()))
+                .ok()
+        })
         .flat_map(|text| {
             text.lines()
                 .filter(|l| !l.trim().is_empty())

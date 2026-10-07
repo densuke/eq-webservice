@@ -89,10 +89,15 @@ pub fn files_in_range(base: &Path, from: u64, to: u64) -> std::io::Result<Vec<Pa
     };
     let mut daily = Vec::new();
     for ent in rd {
-        let ent = ent?;
+        let Ok(ent) = ent else { continue };
         let day = ent.file_name().to_str().and_then(|n| day_of_name(n, &pre, &suf));
-        if let Some(day) = day.filter(|d| (first..=last).contains(d)) {
-            daily.push((day, ent.path()));
+        let path = ent.path();
+        // ディレクトリや、たどれない symlink は読む対象にしない
+        if let Some(day) = day
+            .filter(|d| (first..=last).contains(d))
+            .filter(|_| std::fs::metadata(&path).is_ok_and(|m| m.is_file()))
+        {
+            daily.push((day, path));
         }
     }
     daily.sort();
@@ -181,5 +186,19 @@ mod tests {
         assert!(files_in_range(&dir.path().join("no/events.jsonl"), 0, 1)
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn ignores_directories_and_dangling_symlinks_named_like_daily_files() {
+        let dir = tempfile::tempdir().unwrap();
+        touch(dir.path(), &["events-2024-01-01.jsonl"]);
+        std::fs::create_dir(dir.path().join("events-2024-01-02.jsonl")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("/nonexistent/x", dir.path().join("events-2024-01-03.jsonl")).unwrap();
+        let base = dir.path().join("events.jsonl");
+        assert_eq!(
+            names(files_in_range(&base, 0, u64::MAX).unwrap()),
+            ["events-2024-01-01.jsonl"]
+        );
     }
 }
