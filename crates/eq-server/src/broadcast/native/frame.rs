@@ -53,13 +53,18 @@ pub struct Clip {
 
 impl Clip {
     fn new(rect: Rect) -> Option<Clip> {
+        Clip::new_without(rect, None)
+    }
+
+    /// rect の中だけ。hole (別枠など、別の面が描く所) は除く
+    fn new_without(rect: Rect, hole: Option<Rect>) -> Option<Clip> {
         let mut mask = Mask::new(super::draw::W, super::draw::H)?;
-        mask.fill_path(
-            &PathBuilder::from_rect(rect),
-            FillRule::Winding,
-            false,
-            Transform::identity(),
-        );
+        let mut pb = PathBuilder::new();
+        pb.push_rect(rect);
+        if let Some(h) = hole {
+            pb.push_rect(h);
+        }
+        mask.fill_path(&pb.finish()?, FillRule::EvenOdd, false, Transform::identity());
         Some(Clip {
             mask: Arc::new(mask),
             rect,
@@ -85,6 +90,21 @@ impl Frame {
             clip: None,
             inset: None,
         }
+    }
+
+    /// 日本全体の本図を、地図の枠 (main) の中だけに描くようにする (波の円・震度の塗りなどが右の列や上下の帯の上に
+    /// かからない)。別枠の矩形 (枠線の 1px 外まで) は別枠が自分の面で描くので除く
+    pub fn bounded(self, main: Slot, inset: Option<&Frame>) -> Frame {
+        let hole = inset.and_then(|f| f.inset.as_ref()).and_then(|i| {
+            Rect::from_xywh(
+                i.rect.x() - 1.0,
+                i.rect.y() - 1.0,
+                i.rect.width() + 2.0,
+                i.rect.height() + 2.0,
+            )
+        });
+        let clip = Rect::from_xywh(main.x, main.y, main.w, main.h).and_then(|r| Clip::new_without(r, hole));
+        Frame { clip, ..self }
     }
 
     /// 寄った本図の枠 (地図の枠)
@@ -301,6 +321,22 @@ mod tests {
         assert_eq!((x, y, h, title), (10.0, 46.0, 220.0, "南西諸島"));
         assert!((w - 225.9).abs() < 0.1, "{w}"); // 9 x cos(37) x 100 : 700 の縦横比
         assert!(y + h < 720.0 - 10.0 - 147.0 - 6.0 - 78.0); // 左下の凡例より上
+    }
+
+    /// 日本全体の本図は地図の枠の中だけに描き、別枠の矩形 (枠線の外 1px まで) は別枠の面が描く (#191)
+    #[test]
+    fn the_home_map_is_bounded_to_the_map_rect_without_the_inset() {
+        let main = View::fit_home(MAP_RECT);
+        let ins = Frame::inset(&main, &OKINAWA, INSET).unwrap();
+        let home = Frame::main(main).bounded(MAIN, Some(&ins));
+        let m = home.mask().unwrap();
+        let on = |x: u32, y: u32| m.data()[(y * crate::broadcast::native::draw::W + x) as usize] > 0;
+        assert!(on(450, 300) && on(899, 719) && on(300, 40)); // 地図の枠の中
+        assert!(!on(901, 300) && !on(450, 35)); // 右の列・上部バー
+        assert!(!on(100, 150) && !on(9, 150)); // 別枠の中と、その枠線
+        assert!(on(300, 150)); // 別枠の右
+                               // 別枠は自分の枠の中だけ。bounded でない (従来の) 本図は枠が無い
+        assert!(ins.mask().is_some() && Frame::main(main).mask().is_none());
     }
 
     #[test]

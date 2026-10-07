@@ -817,3 +817,83 @@ fn sub_map_cost() {
         }
     }
 }
+
+// ---- 波の円は地図の枠 (main) からはみ出さない (#191) ----
+
+/// 震源から遠く、半径が main より大きい円 (P 波と S 波)
+const BIG_WAVES: [eew::Wave; 1] = [eew::Wave {
+    lat: 44.0,
+    lon: 145.0,
+    p_km: Some(1500.0),
+    s_km: Some(1700.0),
+}];
+
+/// 大きな円を描く前と後の画面
+fn wave_screens(zoom: bool, sub_map: bool) -> (tiny_skia::Pixmap, tiny_skia::Pixmap) {
+    let e = eew::latest_eews(&chiba_events()).remove(0);
+    let icons = Icons::new();
+    let scene = eew_scene(&e, &icons, SHOWN_AT);
+    let mut cfg = config_sub(zoom, sub_map);
+    cfg.font = std::env::var("EQ_NATIVE_FONT").unwrap_or(cfg.font);
+    let mut r = load_renderer(&cfg).unwrap();
+    let (x, y) = geo::project(140.8, 35.7);
+    if zoom {
+        r.set_view(Some(camera::fit_box(
+            camera::MapBox::around(x, y, 150.0),
+            r.map_aspect(),
+        )));
+    }
+    if sub_map {
+        let aspect = r.sub_aspect().unwrap();
+        r.set_sub_view(Some(camera::fit_box(camera::MapBox::around(x, y, 150.0), aspect)));
+    }
+    let off = r.render(&scene);
+    let mut on = off.clone();
+    r.draw_waves(&mut on, &BIG_WAVES);
+    (off, on)
+}
+
+/// 波を描いた画面と描かない画面を比べ、変わった画素の (main の外, main の中) の数
+fn wave_diff(zoom: bool, sub_map: bool) -> (usize, usize) {
+    let (off, on) = wave_screens(zoom, sub_map);
+    let main = Placed::builtin().unwrap().main;
+    let (mut outside, mut inside) = (0, 0);
+    for (i, (a, b)) in off.pixels().iter().zip(on.pixels()).enumerate() {
+        match (a == b, in_rect(i, main)) {
+            (false, false) => outside += 1,
+            (false, true) => inside += 1,
+            _ => {}
+        }
+    }
+    (outside, inside)
+}
+
+#[test]
+fn big_wave_rings_do_not_paint_outside_the_map_rect() {
+    for (zoom, sub) in [(false, false), (true, false), (false, true), (true, true)] {
+        let (outside, inside) = wave_diff(zoom, sub);
+        assert_eq!(outside, 0, "zoom={zoom} sub={sub}: main の外 (右の列・帯・上部バー)");
+        assert!(
+            inside > 0,
+            "zoom={zoom} sub={sub}: 円が main の中に出ていない (前提が崩れた)"
+        );
+    }
+}
+
+/// 大きな円の画面を PNG に書く (EQ_NATIVE_PNG_DIR があるときだけ。フォントは EQ_NATIVE_FONT)
+#[test]
+fn write_big_wave_pngs_when_asked() {
+    let Ok(out) = std::env::var("EQ_NATIVE_PNG_DIR") else {
+        return;
+    };
+    for (name, zoom, sub) in [
+        ("home", false, false),
+        ("zoom", true, false),
+        ("home_sub", false, true),
+        ("zoom_sub", true, true),
+    ] {
+        let (_, on) = wave_screens(zoom, sub);
+        on.save_png(std::path::Path::new(&out).join(format!("big_wave_{name}.png")))
+            .unwrap();
+    }
+}

@@ -116,14 +116,15 @@ impl Renderer {
         text: Text,
         placed: Placed,
     ) -> Renderer {
+        let insets: Vec<Frame> = placed
+            .inset
+            .and_then(|at| Frame::inset(&view, &OKINAWA, at))
+            .into_iter()
+            .collect();
         let mut r = Renderer {
             text,
-            insets: placed
-                .inset
-                .and_then(|at| Frame::inset(&view, &OKINAWA, at))
-                .into_iter()
-                .collect(),
-            main: Frame::main(view),
+            main: Frame::main(view).bounded(placed.main, insets.first()),
+            insets,
             zoomed: None,
             clip: None,
             zones: Zones::default(),
