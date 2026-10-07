@@ -24,13 +24,6 @@ const MAX_RANGE_MS: u64 = 3_600_000;
 pub const MAX_EVENTS: usize = 500;
 /// 同時に読む数。毎回全部読むので、大量に開かれても e2 (メモリ 1GB) を圧迫しないように
 const MAX_READERS: usize = 2;
-/// 範囲の終わりをこれ以上過ぎた時刻の行が来たら、そこで読むのをやめる (ミリ秒)。
-/// HTTP の問い合わせ (走査の上限がある経路) だけの最適化で、他の呼び出しは最後まで読む。
-/// 前提: jsonl は追記のみで、ほぼ時刻順 (received_at_ms は受信時に付き、書き込みは直後)。
-/// 受信から書き込みまでの前後のずれはこの余裕に収まる。ただし次は取りこぼしうる。
-/// 時計が大きく戻った場合の行。p2pquake の再接続時の津波予報の取り込み (source/p2pquake.rs の stamp_issued) は
-/// received_at_ms を発表時刻にして publish するので、60 秒を超える切断のあとには古い時刻の行が追記される
-const STOP_SLACK_MS: u64 = 60_000;
 /// 1 回の走査の上限。超えたら打ち切る (HTTP は 503。web は null として扱い、ブラウザが持つ分で代用する)
 #[derive(Clone, Copy)]
 struct Limits {
@@ -173,7 +166,6 @@ async fn scan_inner(
             continue;
         }
         match serde_json::from_str::<Event>(&line) {
-            Ok(ev) if byte_limit.is_some() && ev.received_at_ms > to.saturating_add(STOP_SLACK_MS) => break,
             Ok(ev) if (from..=to).contains(&ev.received_at_ms) => {
                 seq += 1;
                 heap.push(Held {
@@ -280,11 +272,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stops_scanning_once_lines_are_far_past_the_range() {
-        // 追記のみで時刻順という前提の確認。範囲を大きく過ぎた行より後ろは読まない
-        let far = 200 + STOP_SLACK_MS + 1;
-        let (_d, app) = app_with(&[line("a", 100), line("far", far), line("late", 150)]);
-        assert_eq!(ids(&get(app, "/api/archive?from=0&to=200").await.1), ["a"]);
+    async fn returns_in_range_lines_even_when_time_goes_backwards() {
+        // 受信時刻が戻る行 (p2pquake 再接続時の津波予報は発表時刻が received_at_ms) も、範囲内なら返す
+        let (_d, app) = app_with(&[line("a", 100), line("far", 60_201), line("late", 150)]);
+        assert_eq!(ids(&get(app, "/api/archive?from=0&to=200").await.1), ["a", "late"]);
     }
 
     #[tokio::test]
