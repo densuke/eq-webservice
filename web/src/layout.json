@@ -243,7 +243,7 @@
     },
     {
       "name": "broadcast-quake",
-      "note": "配信の地震の画面の並び。broadcast と main・topbar は同じで、右の列の詳細の下にサブの地図を置き、お知らせは置かない。?layout=broadcast-quake で web でも見られる",
+      "note": "配信の地震の画面の並び。broadcast と main・topbar・出典は同じで、右の列は上から 詳細 / サブの地図 (列の約 44%) / 履歴 (残りの高さ。52px の行が入る件数だけ描く) / 出典。お知らせは置かない。サブの地図を使わない設定 (sub_map = false) の配信は、この定義を使わず broadcast の矩形で描く。?layout=broadcast-quake で web でも見られる",
       "manual": true,
       "when": {"minWidth": 801, "minHeight": 481},
       "root": {

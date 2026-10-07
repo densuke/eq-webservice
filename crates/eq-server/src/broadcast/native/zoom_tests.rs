@@ -2,6 +2,7 @@
 //! 2026-10-01 21:27 の千葉県北東部の地震 (緊急地震速報の予想) を使う。
 
 use super::draw::Scene;
+use super::layout_resolve::Rect;
 use super::*;
 use crate::quake::{Eew, EewArea, EventBody, Hypocenter, PrefScale, Scale};
 
@@ -486,13 +487,31 @@ fn eew_scene<'a>(e: &'a eew::EewSummary, icons: &'a Icons, now_ms: u64) -> Scene
     }
 }
 
+fn in_rect(i: usize, r: Rect) -> bool {
+    let (x, y) = ((i % draw::W as usize) as f32, (i / draw::W as usize) as f32);
+    (r.x..r.right()).contains(&x) && (r.y..r.bottom()).contains(&y)
+}
+
 fn in_sub_rect(i: usize) -> bool {
-    let (x, y) = ((i % draw::W as usize) as f64, (i / draw::W as usize) as f64);
-    // 画素ごとに呼ばれるので、定義の読み込みは 1 度だけにする
-    static SUB: std::sync::LazyLock<super::layout_resolve::Rect> =
-        std::sync::LazyLock::new(|| Placed::builtin().unwrap().sub.unwrap());
-    let sub = *SUB;
-    (sub.x as f64..sub.right() as f64).contains(&x) && (sub.y as f64..sub.bottom() as f64).contains(&y)
+    // 画素ごとに呼ばれるので、定義の読み込みは 1 度だけにする (毎回読むと debug で数十分かかっていた)
+    static SUB: std::sync::LazyLock<Rect> = std::sync::LazyLock::new(|| Placed::builtin().unwrap().sub.unwrap());
+    in_rect(i, *SUB)
+}
+
+/// 地震の画面で右の列が変わる範囲 (詳細からサブの地図・履歴まで。出典の上まで)
+fn in_quake_column(i: usize) -> bool {
+    // in_sub_rect と同じく画素ごとに呼ばれるので 1 度だけ求める
+    static COL: std::sync::LazyLock<Rect> = std::sync::LazyLock::new(|| {
+        let p = Placed::builtin().unwrap().for_screen(true);
+        let (d, h) = (p.detail.unwrap(), p.history.unwrap());
+        Rect {
+            x: d.x,
+            y: d.y,
+            w: d.w,
+            h: h.bottom() - d.y,
+        }
+    });
+    in_rect(i, *COL)
 }
 
 #[test]
@@ -510,13 +529,47 @@ fn the_sub_map_paints_only_inside_its_rect() {
     let (mut outside, mut inside) = (0, 0);
     for (i, (a, b)) in off.pixels().iter().zip(on.pixels()).enumerate() {
         match (a == b, in_sub_rect(i)) {
-            (false, false) => outside += 1,
+            (false, _) if !in_quake_column(i) => outside += 1,
+            (false, false) => {}
             (false, true) => inside += 1,
             _ => {}
         }
     }
     assert_eq!(outside, 0);
     assert!(inside > 0);
+}
+
+/// 震央が矩形の上端・下端のすぐ内側にあっても、印 (×) は矩形の外 (詳細・履歴) に出ない
+#[test]
+fn the_epicenter_cross_is_cut_at_the_sub_map_rect() {
+    let e = eew::latest_eews(&chiba_events()).remove(0);
+    let icons = Icons::new();
+    let scene = eew_scene(&e, &icons, SHOWN_AT);
+    let (x, y) = geo::project(140.8, 35.7);
+    let render = |top: f64| {
+        let mut r = load_renderer(&config_sub(false, true)).unwrap();
+        let fit = camera::fit_box(camera::MapBox::around(x, y, 150.0), r.sub_aspect().unwrap());
+        r.set_sub_view(Some(camera::Fit {
+            y: y - top * fit.h,
+            ..fit
+        }));
+        r.render(&scene)
+    };
+    // 震央が枠の外 (映らない) ときの絵。矩形の外は、印が切られていれば同じになる
+    let away = render(10.0);
+    for top in [0.01, 0.99] {
+        let near_edge = render(top);
+        let diff = |f: &dyn Fn(usize) -> bool| {
+            away.pixels()
+                .iter()
+                .zip(near_edge.pixels())
+                .enumerate()
+                .filter(|&(i, (a, b))| a != b && f(i))
+                .count()
+        };
+        assert_eq!(diff(&|i| !in_sub_rect(i)), 0, "top={top}");
+        assert!(diff(&in_sub_rect) > 0, "top={top}");
+    }
 }
 
 #[test]
@@ -595,11 +648,8 @@ fn the_sub_map_does_not_draw_when_calm() {
 }
 
 #[test]
-fn the_sub_map_leaves_the_detail_alone_during_a_quake() {
-    // 詳細は右パネルの y 36〜181 (区切り線まで)。サブの地図 (y 190〜) はその下
-    let detail = Placed::builtin().unwrap().detail.unwrap();
-    let in_detail =
-        |i: usize| i % draw::W as usize >= detail.x as usize && i / (draw::W as usize) < detail.bottom() as usize + 2;
+fn the_sub_map_changes_only_the_right_column_during_a_quake() {
+    // 詳細・サブの地図・履歴の列 (出典の上まで) の外 (地図・上部バー・出典) は、サブの地図の有無で変わらない
     for (name, ev, now) in quake_scenes() {
         let (off, _) = still_of(&ev, now, false);
         let (on, _) = still_of(&ev, now, true);
@@ -611,7 +661,7 @@ fn the_sub_map_leaves_the_detail_alone_during_a_quake() {
                 .filter(|&(i, (a, b))| a != b && f(i))
                 .count()
         };
-        assert_eq!(diff(&in_detail), 0, "{name}");
+        assert_eq!(diff(&|i| !in_quake_column(i)), 0, "{name}");
         assert!(diff(&in_sub_rect) > 0, "{name}");
     }
 }

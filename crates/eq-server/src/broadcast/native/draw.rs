@@ -31,8 +31,8 @@ pub const W: u32 = 1280;
 pub const H: u32 = 720;
 
 // 部品の枠 (地図・サブの地図・右パネルなど) は定数ではなく、レイアウトの定義から割り付けた placed::Placed が持つ。
-// サブの地図 (試験: BroadcastConfig::sub_map) は地震の画面だけに描く。今の定義 (broadcast-quake) は右パネルの詳細の下
-// (y 190〜490) に置き、履歴 (y 204〜476) はその下に隠れる
+// サブの地図 (試験: BroadcastConfig::sub_map) は地震の画面だけに描く。有効なら右の列は broadcast-quake の矩形で、
+// 詳細 → サブの地図 → 履歴 → 出典の順に並ぶ (無効なら broadcast と同じ詳細・履歴・出典)
 
 /// 描くときに渡す、そのときの状態
 pub struct Scene<'a> {
@@ -211,7 +211,10 @@ impl Renderer {
     /// 文字や塗りは重いので、波が動く間も 1 秒ごとにここで描き、コマごとには draw_waves だけを重ねる
     pub fn render(&mut self, scene: &Scene) -> Pixmap {
         let mut pm = self.base.clone();
-        let placed = self.placed;
+        // サブの地図を描く地震の画面は、右の列を broadcast-quake の矩形で描く (描かないときは平時の矩形のまま)
+        let placed = self
+            .placed
+            .for_screen(self.sub.is_some() && (scene.quake.is_some() || scene.eew.is_some()));
         let main = placed.main;
         if let Some(z) = &self.zoomed {
             // 日本全体の地図 (と別枠) を海で隠し、寄った地図を描き直す
@@ -440,7 +443,8 @@ fn draw_shake(
         }
     }
     if let Some((x, y)) = shake.hypocenter.and_then(|h| frame.marker(h.longitude?, h.latitude?)) {
-        epicenter(pm, x, y);
+        // サブの地図 (cards でない面) は、印も矩形で切る (縁の近くの震央でも詳細・履歴にはみ出さない)
+        epicenter(pm, x, y, if cards { None } else { frame.mask() });
         if let (Some(tag), true) = (&shake.tag, cards && text.enabled()) {
             let w = text.width(tag, 13.0) + 14.0;
             // 印の右に置く。別枠の右端をはみ出すときは左に置く

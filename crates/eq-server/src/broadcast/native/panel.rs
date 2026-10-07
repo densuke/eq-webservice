@@ -40,6 +40,9 @@ const WARN_LEGEND: [(&str, [u8; 3]); 4] = [
     ("特別警報", [0xff, 0xff, 0xff]),
 ];
 
+const HISTORY_HEAD: f32 = 36.0;
+const HISTORY_ROW: f32 = 52.0;
+
 /// 震度の凡例 (左下。1 が下。矩形は定義の legend)。寄った地図は海から描き直すので、その上に描き直す
 pub fn draw_legend(pm: &mut Pixmap, text: &mut Text, area: Rect) {
     let Rect { x, y: y0, w, h } = area;
@@ -253,12 +256,13 @@ fn draw_eew_detail(pm: &mut Pixmap, text: &mut Text, e: &EewSummary, d: Rect) {
     rect(pm, d.x + 1.0, d.bottom(), d.w - 1.0, 1.0, LINE, 1.0);
 }
 
-/// 右パネルの中: 直近の地震 (最大 5 件)
-fn draw_history(pm: &mut Pixmap, text: &mut Text, history: &[QuakeSummary], area: Rect) {
+/// 右パネルの中: 直近の地震。見出しの下に 52px の行が入る件数だけ描く (平時の 312px の矩形では 5 件)
+pub(super) fn draw_history(pm: &mut Pixmap, text: &mut Text, history: &[QuakeSummary], area: Rect) {
     let x = area.x + PAD;
     text.draw(pm, "履歴", x, area.y + 24.0, 13.0, TEXT);
-    for (i, q) in history.iter().take(5).enumerate() {
-        let y = area.y + 36.0 + i as f32 * 52.0;
+    let rows = ((area.h - HISTORY_HEAD) / HISTORY_ROW).max(0.0) as usize;
+    for (i, q) in history.iter().take(rows).enumerate() {
+        let y = area.y + HISTORY_HEAD + i as f32 * HISTORY_ROW;
         badge(pm, text, q.max_scale, x, y + 4.0, 38.0);
         let place = q.hypocenter.as_ref().map_or("", |h| &h.name);
         text.draw_fit(

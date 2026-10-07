@@ -1029,3 +1029,41 @@ fn the_stepper_shows_the_notice_in_calm() {
     };
     assert_ne!(s.step(&with).unwrap().i420, plain.i420);
 }
+
+/// 履歴は見出しの下に 52px の行が入る件数だけ描き、矩形の下へはみ出さない (平時の 312px では 5 件、地震の画面の 140px では 2 件)
+#[test]
+fn the_history_draws_as_many_rows_as_fit_in_its_rect() {
+    use super::layout_resolve::Rect;
+    let many: Vec<QuakeSummary> = (0..8).map(|_| quake(Scale::S7, &[], None)).collect();
+    let s7 = scale_color(Scale::S7);
+    for (h, rows) in [(312.0_f32, 5), (140.0, 2), (36.0, 0), (20.0, 0)] {
+        let mut pm = Pixmap::new(draw::W, draw::H).unwrap();
+        let area = Rect {
+            x: 900.0,
+            y: 100.0,
+            w: 380.0,
+            h,
+        };
+        panel::draw_history(&mut pm, &mut Text::none(), &many, area);
+        let painted: Vec<u32> = (0..draw::H)
+            .filter(|&y| (900..1280).any(|x| rgb(&pm, (x, y)) == s7))
+            .collect();
+        let count = (0..rows)
+            .filter(|i| painted.contains(&(100 + 36 + i * 52 + 20)))
+            .count();
+        assert_eq!(count, rows as usize, "h={h}");
+        // 次の行の札も、矩形の下も塗られない
+        assert!(!painted.contains(&(100 + 36 + rows * 52 + 20)), "h={h}");
+        assert!(painted.iter().all(|&y| (y as f32) < 100.0 + h.max(1.0)), "h={h}");
+    }
+}
+
+/// サブの地図を描かない (sub_map = false) 設定の地震の画面は、今までどおり平時の矩形で履歴を 5 件描く
+#[test]
+fn the_quake_screen_without_the_sub_map_keeps_the_calm_history() {
+    let q = quake(Scale::S7, &[("石川県", Scale::S7)], Some((37.5, 137.2)));
+    let history: Vec<QuakeSummary> = (0..6).map(|_| quake(Scale::S7, &[], None)).collect();
+    let pm = renderer(Text::none()).render(&scene(Some(&q), &history, None, None));
+    // 履歴の 5 行目 (矩形 y180 + 見出し 36 + 4 行 + 札の中ほど)
+    assert_eq!(rgb(&pm, (936, 180 + 36 + 4 * 52 + 20)), scale_color(Scale::S7));
+}

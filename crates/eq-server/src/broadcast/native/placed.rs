@@ -1,9 +1,11 @@
 //! 描画が使う、部品ごとの矩形 (layout_resolve で割り付けたもの)。
 //! 描画は「矩形の原点 + 部品の中の相対オフセット」で描く。定義に置かれていない部品 (None) は描かない。
 //!
-//! 地震の画面でも、map-sub 以外の部品は平時の定義 (broadcast) の矩形を使う (今の描画は地震の画面でも
-//! 履歴などを同じ場所に描き、サブの地図がその上を隠すため)。地震の画面の定義 (broadcast-quake) から使うのは
-//! map-sub の矩形だけ。他の部品を地震の画面の矩形で描くのは、出力が変わる段 (Task 4) で行う。
+//! 地震の画面 (サブの地図を描くとき) は、右の列の詳細・履歴・サブの地図を地震の画面の定義 (broadcast-quake) の
+//! 矩形で描く (for_screen)。main・topbar・出典・時計・凡例・寄り図は平時と同じ矩形のまま (base が共通なので、
+//! 定義の側でも同じにしておく。出典は動かない地の側に描かれる)。
+
+use std::collections::BTreeMap;
 
 use anyhow::{Context, Result};
 
@@ -25,6 +27,24 @@ pub struct Placed {
     pub clock: Option<Rect>,
     /// サブの地図 (地震の画面の定義から)
     pub sub: Option<Rect>,
+    /// 地震の画面の定義での詳細・履歴の矩形 (for_screen で detail・history と入れ替える)
+    quake_detail: Option<Rect>,
+    quake_history: Option<Rect>,
+}
+
+/// 地震の画面の右の列 (詳細・サブの地図・履歴・出典) が互いに重なる定義は誤り (重ねて描くと配信が崩れる)
+fn check_quake_column(q: &BTreeMap<String, Rect>) -> Result<()> {
+    let col: Vec<(&str, Rect)> = ["detail", "map-sub", "history", "credit"]
+        .into_iter()
+        .filter_map(|n| Some((n, *q.get(n)?)))
+        .collect();
+    for (i, (a, ra)) in col.iter().enumerate() {
+        for (b, rb) in &col[i + 1..] {
+            let overlap = ra.x < rb.right() && rb.x < ra.right() && ra.y < rb.bottom() && rb.y < ra.bottom();
+            anyhow::ensure!(!overlap, "地震の画面の部品 {a} と {b} の矩形が重なっている");
+        }
+    }
+    Ok(())
 }
 
 impl Placed {
@@ -33,6 +53,7 @@ impl Placed {
         let (w, h) = (W as f32, H as f32);
         let c = resolve(calm, w, h)?;
         let q = resolve(quake, w, h)?;
+        check_quake_column(&q)?;
         // お知らせの箱が最大の高さで収まらない矩形には描かない (今までのコンパイル時の検査の代わり)
         let notice = c.get("notice").copied().filter(|r| {
             let fits = r.h >= notice::BOX_MAX_H;
@@ -56,6 +77,8 @@ impl Placed {
             legend: c.get("legend").copied(),
             clock: c.get("clock").copied(),
             sub: q.get("map-sub").copied(),
+            quake_detail: q.get("detail").copied(),
+            quake_history: q.get("history").copied(),
         };
         placed.check_on_screen()?;
         Ok(placed)
@@ -76,6 +99,8 @@ impl Placed {
             ("legend", self.legend),
             ("clock", self.clock),
             ("map-sub", self.sub),
+            ("detail (地震)", self.quake_detail),
+            ("history (地震)", self.quake_history),
         ];
         for (name, r) in named {
             let Some(r) = r else { continue };
@@ -91,6 +116,19 @@ impl Placed {
             );
         }
         Ok(())
+    }
+
+    /// 地震の画面 (サブの地図が出る) なら、右の列を地震の画面の矩形にした Placed。平時はそのまま
+    pub fn for_screen(&self, quake: bool) -> Placed {
+        if quake {
+            Placed {
+                detail: self.quake_detail,
+                history: self.quake_history,
+                ..*self
+            }
+        } else {
+            *self
+        }
     }
 
     /// 組み込みの定義 (broadcast・broadcast-quake)。再現動画とテストが使う

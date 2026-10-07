@@ -79,16 +79,51 @@ fn the_quake_layout_has_the_sub_map_rect_and_the_same_frame() {
 }
 
 #[test]
-fn the_drawing_uses_the_calm_rects_and_only_the_sub_map_from_the_quake_layout() {
+fn the_drawing_uses_the_quake_rects_only_on_the_quake_screen() {
     use super::placed::Placed;
     let p = Placed::builtin().unwrap();
     let calm = resolve(&shipped("broadcast"), W as f32, H as f32).unwrap();
     let q = resolve(&shipped("broadcast-quake"), W as f32, H as f32).unwrap();
-    assert_eq!(p.detail, Some(calm["detail"])); // 地震の画面の 154 ではなく平時の 144
-    assert_eq!(p.history, Some(calm["history"]));
+    let c = p.for_screen(false);
+    assert_eq!((c.detail, c.history), (Some(calm["detail"]), Some(calm["history"])));
+    let s = p.for_screen(true);
+    assert_eq!((s.detail, s.history), (Some(q["detail"]), Some(q["history"])));
+    // 詳細・サブの地図・履歴は上から順に、重ならず右の列の中に収まる (出典の上まで)
+    let (d, m, h) = (s.detail.unwrap(), s.sub.unwrap(), s.history.unwrap());
+    assert!(d.bottom() <= m.y && m.bottom() <= h.y && h.bottom() <= q["credit"].y);
+    assert_eq!(
+        (s.main, s.topbar, s.credit, s.clock),
+        (c.main, c.topbar, c.credit, c.clock)
+    );
     assert_eq!(p.sub, Some(q["map-sub"]));
     assert_eq!(p.map_aspect(), 900.0 / 684.0);
     assert_eq!(p.sub_aspect(), Some(380.0 / 300.0));
+}
+
+/// 右の列の割合 (PR に載せる比較の元の数値。docs/ui-spec/layout-system.js の jquake・jdq の概算と並べる)。
+/// 定義の微調整で落ちないよう、値は出すだけで確かめない
+#[test]
+fn the_column_ratios_of_the_broadcast_layouts() {
+    let calm = resolve(&shipped("broadcast"), W as f32, H as f32).unwrap();
+    let q = resolve(&shipped("broadcast-quake"), W as f32, H as f32).unwrap();
+    println!("平時: 地図 {:.1}%", calm["main"].w / W as f32 * 100.0);
+    let col = q["detail"].h + q["map-sub"].h + q["history"].h + q["credit"].h;
+    for k in ["detail", "map-sub", "history", "credit"] {
+        println!("地震の画面: {k} {:.1}% (列 {col}px)", q[k].h / col * 100.0);
+    }
+}
+
+#[test]
+fn a_quake_layout_whose_right_column_rects_overlap_is_refused() {
+    use super::placed::Placed;
+    let ok = shipped("broadcast-quake");
+    assert!(Placed::new(&ok, &ok).is_ok());
+    // 幅 400px の地図の隅に、詳細 (左上) と履歴 (上の中央) を置くと互いに重なる
+    let d = def(
+        r#"{"dir":"row","children":[{"slot":"main","size":"400px","overlays":{"top-left":{"flow":"column","items":["detail"]},"top":{"flow":"column","items":["history"]}}}]}"#,
+    );
+    let e = Placed::new(&d, &d).unwrap_err().to_string();
+    assert!(e.contains("重なっている"), "{e}");
 }
 
 #[test]
