@@ -36,6 +36,8 @@ body {
 .topbar h1 { font-size: 15px; margin: 0; font-weight: 600; white-space: nowrap; }
 .topbar > * { flex: none; }
 .version { font-size: 12px; font-weight: 400; color: var(--muted); }
+.viewers { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.viewers[hidden] { display: none; }
 .wave-info { color: var(--s-wave); font-variant-numeric: tabular-nums; }
 #sound { margin-left: auto; }
 /* テロップ: 平常時に出典や注意書きを切り替えて表示する */

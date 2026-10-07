@@ -222,6 +222,31 @@ interval_sec = 20   # 切り替える間隔 (秒)
 - 一覧は一巡するたびに読み直すので、ファイルはサーバを止めずにいつでも差し替えられます
 - 地震の表示 (緊急地震速報・地震情報・津波予報・揺れの報告) の間とデモ中は隠します
 
+### 同時視聴者数 (YouTube ライブ)
+
+`config.toml` の `[viewers]` を有効にすると、サーバが YouTube Data API の `videos.list` (`liveStreamingDetails.concurrentViewers`) から同時視聴者数を取り、
+`GET /api/viewers` で返します。web はヘッダーの隅に「同接 N 人」を出します (1 分ごとに取得。値が無いときは出しません)。
+
+```toml
+[viewers]
+enabled = true
+interval_sec = 60          # 取得の間隔 (秒。10〜300)
+token_file = "/home/eq/.config/pd2/youtube-upload-token.json"   # 認証: token_file か api_key のどちらか 1 つ
+# api_key = "..."
+channel_id = "UC..."       # 動画: channel_id (今の live を探す) か video_id (固定) のどちらか 1 つ
+# video_id = "qs2MfxEgBA0"
+```
+
+- 応答は `{"viewers": N | null, "video_id": "...", "updated_ms": ...}`。無効・ライブでない・視聴者数が非表示・取得に失敗したときは `viewers` が null
+- `token_file` は OAuth の資格情報 JSON (client_id・client_secret・refresh_token・token_uri)。refresh_token でアクセストークンを取り直し、読むだけで書き戻しません
+- `channel_id` のときの動画の探し方: OAuth は `liveBroadcasts?broadcastStatus=active&broadcastType=all` (常設の配信も拾う。1 回 1 単位)、API キーは `search` (1 回 100 単位)。見つけた動画 ID は覚えて、ライブでなくなったときだけ探し直します
+  (API キーの探し直しは 30 分以上あけます)
+- 割り当て (1 日 10,000 単位) の使い方: `videos.list` が 1 回 1 単位 (1 分ごとで 1 日 1,440 単位)。
+  API キーで `channel_id` のときは、さらに `search` が最大で 30 分ごと (1 日 48 回 = 4,800 単位) で、合計 6,240 単位。`video_id` を固定すれば 1,440 単位だけです
+- `token_file` (OAuth) は、pd2 のアップロードと同じプロジェクトの割り当てを共有します。アップロードの分を見込んでください
+- `interval_sec` は 10〜300 秒に収めます (超えたら警告して 300 秒。web は 5 分より古い値を出しません)
+- API キーとトークンはヘッダで送り、ログにも出しません。配信 (native) への表示は別の段で足します (Issue #178)
+
 ### 画面の並び (レイアウトの定義)
 
 画面の並び (地図・右パネル・地図の上の重ね物を、どこにどの大きさで置くか) は JSON の定義ファイルで決まります。

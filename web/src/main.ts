@@ -27,6 +27,7 @@ import { notifyVoice, mixerAudio } from "./broadcast.ts";
 import { enqueueAnnounce, enqueueVoice, isPriorityTsunami, tsunamiHistory, voiceRoute, voiceUrl } from "./voice.ts";
 import { loadBgmConfig, updateBgm } from "./bgm.ts";
 import { loadBanners, updateBanner } from "./banner.ts";
+import { startViewers } from "./viewers.ts";
 import { loadCityWeather, renderCityWeather } from "./weather-layer.ts";
 import { numTag, renderBanner, renderDetail, renderEewPanel, renderList, renderMode, renderTsunamiBanner, updatePointsOpen } from "./view.ts";
 import { latestEew, summarizeQuake } from "./groups.ts";
@@ -429,6 +430,7 @@ Promise.all([
       onStatus: setStatus,
     });
     updateHome();
+    startViewers();
     app.conn.start();
     tick();
     // ?demo=場面の名前 で開いたらデモを再生する (見守りモニタの動作確認用)

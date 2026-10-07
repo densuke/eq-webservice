@@ -30,6 +30,9 @@ pub struct Config {
     /// 音声アナウンス (Google TTS)
     #[serde(default)]
     pub tts: crate::tts::TtsConfig,
+    /// YouTube ライブの同時視聴者数 (既定は無効)
+    #[serde(default)]
+    pub viewers: crate::youtube_viewers::ViewersConfig,
 }
 
 /// 平常時に画面上部で切り替えて表示する文
