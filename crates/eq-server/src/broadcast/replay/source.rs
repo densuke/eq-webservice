@@ -102,6 +102,8 @@ pub async fn from_archive(base: &str, from: u64, to: u64) -> anyhow::Result<Vec<
     Ok(events)
 }
 
+/// 記録のファイルから読む。sink の jsonl の形なら、旧ファイルに加えて隣の日付ファイルも読む (archive_store。
+/// replay-worker が動画を作る係に sink の path をそのまま渡すため)。ファイルがなくても日付ファイルだけで読める
 pub async fn from_file(path: &Path, from: u64, to: u64) -> anyhow::Result<Vec<Event>> {
     if is_sink_format(path)? {
         return archive::read_range_upto(path, from, to, FILE_MAX_EVENTS).await;
@@ -112,7 +114,11 @@ pub async fn from_file(path: &Path, from: u64, to: u64) -> anyhow::Result<Vec<Ev
 
 /// 最初の報の行に received_at_ms があれば、sink の jsonl
 fn is_sink_format(path: &Path) -> anyhow::Result<bool> {
-    let file = std::fs::File::open(path).with_context(|| format!("opening {}", path.display()))?;
+    let file = match std::fs::File::open(path) {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(true),
+        Err(e) => return Err(e).with_context(|| format!("opening {}", path.display())),
+    };
     for line in std::io::BufReader::new(file).lines() {
         let line = line?;
         let line = line.trim();
@@ -175,6 +181,15 @@ mod tests {
         std::fs::write(&p, lines.join("\n") + "\n").unwrap();
         let ids: Vec<String> = from_file(&p, 0, 200).await.unwrap().into_iter().map(|e| e.id).collect();
         assert_eq!(ids, ["a", "late"]);
+    }
+
+    #[tokio::test]
+    async fn from_file_reads_daily_files_next_to_a_missing_legacy_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let line = serde_json::to_string(&ev("d", 150)).unwrap();
+        std::fs::write(dir.path().join("events-1970-01-01.jsonl"), line + "\n").unwrap();
+        let got = from_file(&dir.path().join("events.jsonl"), 0, 200).await.unwrap();
+        assert_eq!(got.into_iter().map(|e| e.id).collect::<Vec<_>>(), ["d"]);
     }
 
     #[test]

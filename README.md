@@ -107,7 +107,7 @@ HTTP の口:
 - `/` … 地図ページ
 - `/ws` … ブラウザ向け WebSocket（接続時に `hello` で直近の情報とサーバ時刻、その後は `event` を送る）
 - `/api/events` … 直近の情報（JSON）
-- `/api/archive?from=<ms>&to=<ms>` … 過去の情報（JSON。`received_at_ms` の範囲は 1 時間まで、最大 500 件）。jsonl プラグインを有効にした場合だけ、その記録から返す
+- `/api/archive?from=<ms>&to=<ms>` … 過去の情報（JSON。`received_at_ms` の範囲は 1 時間まで、最大 500 件）。jsonl プラグインを有効にした場合だけ、その記録から返す (記録は日付ごとのファイルに分かれ、範囲の日付のファイルだけ読む)
 - `/feed.xml` … RSS（rss プラグインを有効にした場合）
 - `/healthz` … 死活監視
 
@@ -461,6 +461,12 @@ ls ~/work/eq-replay/queue ~/work/eq-replay/done
 
 各プラグインは別々のタスクで動くので、Discord が遅くても他の配信先や画面の更新は止まりません。
 詳しくは [config.example.toml](config.example.toml) を見てください。
+
+`jsonl` は、`path` (例 `data/events.jsonl`) の隣の `data/events-YYYY-MM-DD.jsonl` に日付ごとに追記します (日付は書いた時刻の UTC)。
+`/api/archive` は、範囲の日付から翌日までのファイルだけを読みます (走査の上限 64MiB・5 秒は、読むファイルの合計に掛かります)。
+分割前の `path` そのもののファイルは、移行も削除もせず、あれば常に読みます (もう増えません。上限の 64MiB には数えます)。
+読む範囲の記録がすべて日付ファイルに入る日が来たら (旧ファイルの最後の行から十分に時間が経ったら)、手で消して構いません。
+1 日を超える切断のあとに取り込まれた過去時刻の行は、取りこぼすことがあります。古い日付ファイルは自動では消しません。
 
 新しいプラグインを作るときは `crates/eq-server/src/plugins/` に `Sink` トレイトの実装を追加し、
 `plugins::build()` に `type` 名を登録します。Rust 以外で書きたい場合は `webhook` プラグインで

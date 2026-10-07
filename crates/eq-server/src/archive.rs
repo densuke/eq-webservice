@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::archive_store;
 use crate::quake::Event;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
@@ -125,7 +126,7 @@ impl Ord for Held {
     }
 }
 
-/// jsonl を 1 行ずつ読み、範囲に入る情報を時刻順に返す (最大 max 件)。壊れた行は飛ばす。
+/// jsonl (旧ファイル + 日付ファイル。path は設定の jsonl のもの) を 1 行ずつ読み、範囲に入る情報を時刻順に返す (最大 max 件)。壊れた行は飛ばす。
 /// HTTP の応答は MAX_EVENTS で絞るが、動画を作る係は 1 つの範囲を丸ごと読む。走査の上限は付けない
 pub async fn read_range_upto(path: &Path, from: u64, to: u64, max: usize) -> anyhow::Result<Vec<Event>> {
     scan(path, from, to, max, None).await
@@ -140,49 +141,51 @@ async fn scan(path: &Path, from: u64, to: u64, max: usize, limits: Option<Limits
 }
 
 /// 残すのは範囲内でいちばん古い max 件 (並べ替えて切り詰めるのと同じ結果)。保持は max 件までで済む。
-/// ponytail: ファイルを頭から読む。ローテーションや索引は入れていない。上限を超える大きさになったら考える
+/// 読むのは archive_store が選んだファイルだけ。走査量の上限は、その合計 (旧ファイル込み) に掛ける。
+/// 時刻が戻る行も範囲内なら返す (早期打ち切りはしない)
 async fn scan_inner(
-    path: &Path,
+    base: &Path,
     from: u64,
     to: u64,
     max: usize,
     byte_limit: Option<u64>,
 ) -> anyhow::Result<Vec<Event>> {
-    let file = match tokio::fs::File::open(path).await {
-        Ok(f) => f,
-        // まだ 1 件も書かれていない
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
-        Err(e) => return Err(e.into()),
-    };
-    let mut lines = BufReader::new(file).lines();
     let mut heap: BinaryHeap<Held> = BinaryHeap::new();
     let (mut broken, mut seq, mut read) = (0usize, 0usize, 0u64);
-    while let Some(line) = lines.next_line().await? {
-        read += line.len() as u64 + 1;
-        if byte_limit.is_some_and(|b| read > b) {
-            return Err(OverBudget.into());
-        }
-        if line.trim().is_empty() {
-            continue;
-        }
-        match serde_json::from_str::<Event>(&line) {
-            Ok(ev) if (from..=to).contains(&ev.received_at_ms) => {
-                seq += 1;
-                heap.push(Held {
-                    at: ev.received_at_ms,
-                    seq,
-                    ev,
-                });
-                if heap.len() > max {
-                    heap.pop();
-                }
+    for path in archive_store::files_in_range(base, from, to)? {
+        let file = match tokio::fs::File::open(&path).await {
+            Ok(f) => f,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(e.into()),
+        };
+        let mut lines = BufReader::new(file).lines();
+        while let Some(line) = lines.next_line().await? {
+            read += line.len() as u64 + 1;
+            if byte_limit.is_some_and(|b| read > b) {
+                return Err(OverBudget.into());
             }
-            Ok(_) => {}
-            Err(_) => broken += 1,
+            if line.trim().is_empty() {
+                continue;
+            }
+            match serde_json::from_str::<Event>(&line) {
+                Ok(ev) if (from..=to).contains(&ev.received_at_ms) => {
+                    seq += 1;
+                    heap.push(Held {
+                        at: ev.received_at_ms,
+                        seq,
+                        ev,
+                    });
+                    if heap.len() > max {
+                        heap.pop();
+                    }
+                }
+                Ok(_) => {}
+                Err(_) => broken += 1,
+            }
         }
     }
     if broken > 0 {
-        tracing::warn!(path = %path.display(), broken, "archive: skipped broken lines");
+        tracing::warn!(path = %base.display(), broken, "archive: skipped broken lines");
     }
     Ok(heap.into_sorted_vec().into_iter().map(|h| h.ev).collect())
 }
@@ -303,6 +306,99 @@ mod tests {
             get(app, "/api/archive?from=0&to=1").await,
             (StatusCode::OK, "[]".into())
         );
+    }
+
+    const DAY: u64 = 86_400_000;
+    /// 2024-01-01T00:00:00Z
+    const D0: u64 = 19_723 * DAY;
+
+    fn dir_with(files: &[(&str, Vec<String>)]) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        for (name, lines) in files {
+            std::fs::write(dir.path().join(name), lines.join("\n") + "\n").unwrap();
+        }
+        dir
+    }
+
+    fn bulk(prefix: &str, n: u64, at: u64) -> Vec<String> {
+        (0..n).map(|i| line(&format!("{prefix}{i}"), at + i)).collect()
+    }
+
+    fn app_in(dir: &tempfile::TempDir, bytes: u64) -> Router {
+        router_with(
+            dir.path().join("events.jsonl"),
+            Limits {
+                bytes,
+                time: Duration::from_secs(5),
+            },
+        )
+    }
+
+    #[tokio::test]
+    async fn reads_only_the_files_of_the_range_so_a_big_total_does_not_matter() {
+        // 古い日付側 (day1、day4) が大きく、合計は上限を超える。最近 (day9) も古い (day1) も、その日のファイルだけで足りる
+        let dir = dir_with(&[
+            ("events-2024-01-01.jsonl", bulk("o", 20, D0 + 1000)),
+            ("events-2024-01-04.jsonl", bulk("m", 20, D0 + 3 * DAY)),
+            ("events-2024-01-09.jsonl", vec![line("new", D0 + 8 * DAY + 5)]),
+        ]);
+        let app = app_in(&dir, 3000);
+        let q = |from: u64| format!("/api/archive?from={from}&to={}", from + 60_000);
+        assert_eq!(ids(&get(app.clone(), &q(D0 + 8 * DAY)).await.1), ["new"]);
+        assert_eq!(get(app, &q(D0 + 1000)).await.0, 200);
+    }
+
+    #[tokio::test]
+    async fn gives_503_when_the_files_of_one_range_exceed_the_budget_together() {
+        // 旧ファイルも数える。どれか 1 つなら上限未満でも、合計が超えたら不完全な 200 にしない
+        let dir = dir_with(&[
+            ("events.jsonl", bulk("l", 20, D0)),
+            ("events-2024-01-01.jsonl", bulk("d", 20, D0 + 100)),
+        ]);
+        let app = app_in(&dir, 3000);
+        assert_eq!(
+            get(app, &format!("/api/archive?from={D0}&to={}", D0 + 1000)).await.0,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+    }
+
+    #[tokio::test]
+    async fn returns_a_late_written_line_from_the_next_days_file() {
+        // 前日の時刻の行 (津波の取り込み) が、翌日のファイルに書かれた。時刻も戻っている
+        let dir = dir_with(&[
+            (
+                "events-2024-01-01.jsonl",
+                vec![line("a", D0 + 100), line("far", D0 + 60_201)],
+            ),
+            ("events-2024-01-02.jsonl", vec![line("late", D0 + 150)]),
+        ]);
+        let app = app_in(&dir, 1 << 20);
+        let (st, body) = get(app, &format!("/api/archive?from={D0}&to={}", D0 + 200)).await;
+        assert_eq!((st, ids(&body)), (StatusCode::OK, vec!["a".to_string(), "late".into()]));
+    }
+
+    #[tokio::test]
+    async fn range_across_utc_midnight_reads_both_days_and_the_legacy_file() {
+        let dir = dir_with(&[
+            ("events.jsonl", vec![line("old", D0 + DAY - 3)]),
+            ("events-2024-01-01.jsonl", vec![line("before", D0 + DAY - 1)]),
+            ("events-2024-01-02.jsonl", vec![line("after", D0 + DAY)]),
+        ]);
+        let app = app_in(&dir, 1 << 20);
+        let (_, body) = get(app, &format!("/api/archive?from={}&to={}", D0 + DAY - 5, D0 + DAY + 5)).await;
+        assert_eq!(ids(&body), ["old", "before", "after"]);
+    }
+
+    #[tokio::test]
+    async fn read_range_upto_reads_the_daily_files_too() {
+        let dir = dir_with(&[
+            ("events.jsonl", vec![line("l", 10)]),
+            ("events-1970-01-01.jsonl", vec![line("d", 20)]),
+        ]);
+        let got = read_range_upto(&dir.path().join("events.jsonl"), 0, 100, 10)
+            .await
+            .unwrap();
+        assert_eq!(got.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), ["l", "d"]);
     }
 
     #[test]

@@ -1,4 +1,5 @@
 mod archive;
+mod archive_store;
 mod banner;
 mod bgm;
 mod bgm_send;
