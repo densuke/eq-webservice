@@ -60,6 +60,11 @@ pub fn draw_frame(pm: &mut Pixmap, text: &mut Text, p: &Placed) {
         rect(pm, bar.x, bar.y, bar.w, bar.h, PANEL, 1.0);
         rect(pm, bar.x, bar.bottom() - 1.0, bar.w, 1.0, LINE, 1.0);
     }
+    if let Some(b) = p.banners {
+        // 警報の帯の矩形の地 (平時の警報の帯と「ありません」は dynamic で重ねる。地震の画面は空のまま)
+        rect(pm, b.x, b.y, b.w, b.h, PANEL, 1.0);
+        rect(pm, b.x, b.bottom() - 1.0, b.w, 1.0, LINE, 1.0);
+    }
     let side = p.side();
     rect(pm, side.x, side.y, side.w, side.h, PANEL, 1.0);
     rect(pm, side.x, side.y, 1.0, side.h, LINE, 1.0);

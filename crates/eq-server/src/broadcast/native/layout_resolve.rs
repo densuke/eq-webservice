@@ -52,6 +52,8 @@ fn natural(slot: &str) -> Option<(f32, f32)> {
     Some(match slot {
         "main" => (0.0, 0.0),
         "topbar" => (1280.0, 36.0),
+        // 気象警報の帯 (2 行ぶん)。警報が無くても場所を取る
+        "banners" => (1280.0, super::banner::banner_height(2)),
         "detail" => (380.0, 144.0),
         "history" => (380.0, 312.0),
         "notice" => (380.0, 138.0),

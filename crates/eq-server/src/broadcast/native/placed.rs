@@ -2,7 +2,7 @@
 //! 描画は「矩形の原点 + 部品の中の相対オフセット」で描く。定義に置かれていない部品 (None) は描かない。
 //!
 //! 地震の画面 (サブの地図を描くとき) は、右の列の詳細・履歴・サブの地図を地震の画面の定義 (broadcast-quake) の
-//! 矩形で描く (for_screen)。main・topbar・出典・時計・凡例・寄り図は平時と同じ矩形のまま (base が共通なので、
+//! 矩形で描く (for_screen)。main・topbar・banners・出典・時計・凡例・寄り図は平時と同じ矩形のまま (base が共通なので、
 //! 定義の側でも同じにしておく。出典は動かない地の側に描かれる)。
 
 use std::collections::BTreeMap;
@@ -18,6 +18,8 @@ use super::notice;
 pub struct Placed {
     pub main: Rect,
     pub topbar: Option<Rect>,
+    /// 気象警報の帯 (定義に置かれていなければ描かない)
+    pub banners: Option<Rect>,
     pub detail: Option<Rect>,
     pub history: Option<Rect>,
     pub notice: Option<Rect>,
@@ -69,6 +71,7 @@ impl Placed {
         let placed = Placed {
             main: *c.get("main").context("部品 main の矩形が無い")?,
             topbar: c.get("topbar").copied(),
+            banners: c.get("banners").copied(),
             detail: c.get("detail").copied(),
             history: c.get("history").copied(),
             notice,
@@ -91,6 +94,7 @@ impl Placed {
         let named = [
             ("main", Some(self.main)),
             ("topbar", self.topbar),
+            ("banners", self.banners),
             ("detail", self.detail),
             ("history", self.history),
             ("notice", self.notice),
