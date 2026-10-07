@@ -3,10 +3,10 @@
 //! 読むのは設定された jsonl だけで、利用者の入力はファイルのパスに使わない。
 
 use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::BinaryHeap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::time::Duration;
 
 use crate::quake::Event;
 use axum::extract::{Query, State};
@@ -25,14 +25,12 @@ pub const MAX_EVENTS: usize = 500;
 /// 同時に読む数。毎回全部読むので、大量に開かれても e2 (メモリ 1GB) を圧迫しないように
 const MAX_READERS: usize = 2;
 /// 範囲の終わりをこれ以上過ぎた時刻の行が来たら、そこで読むのをやめる (ミリ秒)。
+/// HTTP の問い合わせ (走査の上限がある経路) だけの最適化で、他の呼び出しは最後まで読む。
 /// 前提: jsonl は追記のみで、ほぼ時刻順 (received_at_ms は受信時に付き、書き込みは直後)。
-/// 受信から書き込みまでの前後のずれはこの余裕に収まる。時計が大きく戻った場合の行は取りこぼしうる
+/// 受信から書き込みまでの前後のずれはこの余裕に収まる。ただし次は取りこぼしうる。
+/// 時計が大きく戻った場合の行。p2pquake の再接続時の津波予報の取り込み (source/p2pquake.rs の stamp_issued) は
+/// received_at_ms を発表時刻にして publish するので、60 秒を超える切断のあとには古い時刻の行が追記される
 const STOP_SLACK_MS: u64 = 60_000;
-/// 同じ問い合わせの結果を使い回す時間
-const CACHE_TTL: Duration = Duration::from_secs(15);
-/// 覚えておく問い合わせの数 (超えたら期限切れを捨て、それでも多ければ全部捨てる)
-const CACHE_MAX: usize = 64;
-
 /// 1 回の走査の上限。超えたら打ち切る (HTTP は 503。web は null として扱い、ブラウザが持つ分で代用する)
 #[derive(Clone, Copy)]
 struct Limits {
@@ -56,15 +54,11 @@ impl std::fmt::Display for OverBudget {
 }
 impl std::error::Error for OverBudget {}
 
-type CacheKey = (u64, u64);
-type Cached = (Instant, Arc<Vec<Event>>);
-
 #[derive(Clone)]
 struct Archive {
     path: PathBuf,
     readers: Arc<Semaphore>,
     limits: Limits,
-    cache: Arc<Mutex<HashMap<CacheKey, Cached>>>,
 }
 
 #[derive(Deserialize)]
@@ -91,48 +85,19 @@ fn router_with(path: PathBuf, limits: Limits) -> Router {
         path,
         readers: Arc::new(Semaphore::new(MAX_READERS)),
         limits,
-        cache: Arc::default(),
     };
     Router::new().route("/api/archive", get(handler).with_state(state))
-}
-
-impl Archive {
-    fn cached(&self, key: CacheKey) -> Option<Arc<Vec<Event>>> {
-        let c = self.cache.lock().unwrap();
-        c.get(&key)
-            .filter(|(at, _)| at.elapsed() < CACHE_TTL)
-            .map(|(_, v)| v.clone())
-    }
-
-    fn remember(&self, key: CacheKey, events: Arc<Vec<Event>>) {
-        let mut c = self.cache.lock().unwrap();
-        if c.len() >= CACHE_MAX {
-            c.retain(|_, (at, _)| at.elapsed() < CACHE_TTL);
-        }
-        if c.len() >= CACHE_MAX {
-            c.clear();
-        }
-        c.insert(key, (Instant::now(), events));
-    }
 }
 
 async fn handler(State(a): State<Archive>, Query(r): Query<Range>) -> Response {
     if r.to < r.from || r.to - r.from > MAX_RANGE_MS {
         return (StatusCode::BAD_REQUEST, "range must be 0..=1 hour").into_response();
     }
-    let key = (r.from, r.to);
-    if let Some(hit) = a.cached(key) {
-        return Json(&*hit).into_response();
-    }
     let Ok(_permit) = a.readers.try_acquire() else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
     match scan(&a.path, r.from, r.to, MAX_EVENTS, Some(a.limits)).await {
-        Ok(events) => {
-            let events = Arc::new(events);
-            a.remember(key, events.clone());
-            Json(&*events).into_response()
-        }
+        Ok(events) => Json(events).into_response(),
         Err(e) if e.is::<OverBudget>() => {
             tracing::warn!("archive: {e}");
             StatusCode::SERVICE_UNAVAILABLE.into_response()
@@ -174,7 +139,7 @@ pub async fn read_range_upto(path: &Path, from: u64, to: u64, max: usize) -> any
 }
 
 async fn scan(path: &Path, from: u64, to: u64, max: usize, limits: Option<Limits>) -> anyhow::Result<Vec<Event>> {
-    let run = scan_inner(path, from, to, max, limits.map(|l| l.bytes));
+    let run = scan_inner(path, from, to, max, limits.map(|l| l.bytes)); // 上限がある = HTTP
     match limits {
         None => run.await,
         Some(l) => tokio::time::timeout(l.time, run).await.map_err(|_| OverBudget)?,
@@ -208,7 +173,7 @@ async fn scan_inner(
             continue;
         }
         match serde_json::from_str::<Event>(&line) {
-            Ok(ev) if ev.received_at_ms > to.saturating_add(STOP_SLACK_MS) => break,
+            Ok(ev) if byte_limit.is_some() && ev.received_at_ms > to.saturating_add(STOP_SLACK_MS) => break,
             Ok(ev) if (from..=to).contains(&ev.received_at_ms) => {
                 seq += 1;
                 heap.push(Held {
@@ -338,19 +303,6 @@ mod tests {
             get(app, "/api/archive?from=0&to=10").await.0,
             StatusCode::SERVICE_UNAVAILABLE
         );
-    }
-
-    #[tokio::test]
-    async fn caches_the_same_query_for_a_while() {
-        let dir = tempfile::tempdir().unwrap();
-        let p = dir.path().join("events.jsonl");
-        std::fs::write(&p, line("a", 1) + "\n").unwrap();
-        let app = router(p.clone());
-        assert_eq!(ids(&get(app.clone(), "/api/archive?from=0&to=10").await.1), ["a"]);
-        std::fs::write(&p, [line("a", 1), line("b", 2)].join("\n") + "\n").unwrap();
-        assert_eq!(ids(&get(app.clone(), "/api/archive?from=0&to=10").await.1), ["a"]);
-        // 別の問い合わせは読み直す
-        assert_eq!(ids(&get(app, "/api/archive?from=0&to=11").await.1), ["a", "b"]);
     }
 
     #[tokio::test]
