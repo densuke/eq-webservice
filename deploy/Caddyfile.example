@@ -1,6 +1,12 @@
 # Caddy 設定例。eq-server は 127.0.0.1:8080 (EQ_PORT / --port で変更可) で待ち受ける想定。
 
 # 専用のホスト名で公開する場合
+# Caddy の reverse_proxy は、つないできた相手の IP を X-Forwarded-For に付ける (既定では、利用者が
+# 書いてきた同ヘッダーは信用せず作り直す)。eq-server は、直接の相手 (= この Caddy。127.0.0.1 / ::1)
+# が config.toml の [server] trusted_proxies に載っているときだけ、その最も右の値を接続元 IP として
+# WebSocket の接続数・頻度の制限に使う。Caddy を別のマシン・アドレスに置くなら trusted_proxies に足す。
+# Host はそのまま eq-server に渡る (WebSocket の Origin の検証は Host と照らす。書き換えるなら
+# [server] allowed_origins に足す)
 eq.example.jp {
 	encode zstd gzip
 	reverse_proxy 127.0.0.1:8080

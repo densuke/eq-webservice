@@ -500,6 +500,21 @@ example.jp {
 Caddy の `reverse_proxy` は WebSocket をそのまま通します。サーバは 30 秒ごとに ping を送るので、
 アイドル状態での切断は起きにくいはずです。
 
+### WebSocket (`/ws`) の接続制限
+
+公開しても 1 人に接続枠を占有されないよう、次の制限があります (`[server]`)。
+
+| 設定 | 既定 | 内容 |
+| --- | --- | --- |
+| `trusted_proxies` | `["127.0.0.1", "::1"]` | `X-Forwarded-For` を信じる直接の相手。ここに載る相手のときだけ、同ヘッダーの最も右の値を接続元 IP とし、それ以外は直接の相手の IP を使います |
+| `max_ws_per_ip` | `8` | 1 つの IP からの同時接続数 (超えると 429)。サーバ全体では別に 500 が上限です |
+| `ws_connects_per_min` | `30` | 1 つの IP が 1 分間につなげる回数 (超えると 429) |
+| `allowed_origins` | `[]` | Origin 付き (ブラウザ) の接続で許す origin。自分の Host と同じ origin は常に許可、それ以外は 403。Origin の無い接続は通します |
+
+Origin は偽装できるので、主な防御は IP ごとの制限です。さらに、クライアントが ping に応えないまま 90 秒たつ、
+または 1 回の送信が 10 秒で終わらないときは切断します。リバースプロキシの Host を書き換える場合は、
+その Host の origin を `allowed_origins` に足してください。
+
 ## CI
 
 GitHub Actions（`.github/workflows/ci.yml`）で次をビルド・テストします。

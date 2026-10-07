@@ -5,6 +5,7 @@ mod bgm_send;
 mod broadcast;
 mod city_weather;
 mod cli;
+mod client_ip;
 mod config;
 mod demo;
 mod http;
@@ -17,6 +18,7 @@ mod source;
 mod telop;
 mod tts;
 mod weather;
+mod ws_guard;
 mod youtube;
 mod youtube_viewers;
 
@@ -137,7 +139,8 @@ async fn main() -> anyhow::Result<()> {
         .await
         .with_context(|| format!("binding {}", cfg.server.listen))?;
     tracing::info!("listening on http://{}", listener.local_addr()?);
-    let app = http::router(hub.clone(), &cfg.server.static_dir, routes);
+    let ws_guard = cfg.server.ws_guard()?;
+    let app = http::router(hub.clone(), &cfg.server.static_dir, routes, ws_guard);
 
     let source_hub = hub.clone();
     tokio::spawn(source::run(cfg.source, source_hub, move |seeded| {
@@ -151,9 +154,12 @@ async fn main() -> anyhow::Result<()> {
         }
     }));
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
     Ok(())
 }
 

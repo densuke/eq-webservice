@@ -51,6 +51,14 @@ pub struct ServerConfig {
     pub static_dir: PathBuf,
     /// ブラウザ接続時にまとめて送る直近イベント数
     pub recent_capacity: usize,
+    /// X-Forwarded-For を信じる直接の相手 (リバースプロキシ) の IP
+    pub trusted_proxies: Vec<String>,
+    /// WebSocket に Origin 付きでつないでよい origin (自分の Host と同じ origin は常に許可)
+    pub allowed_origins: Vec<String>,
+    /// 1 つの IP から同時につなげる WebSocket の数
+    pub max_ws_per_ip: usize,
+    /// 1 つの IP が 1 分間につなげる WebSocket の回数
+    pub ws_connects_per_min: u32,
 }
 
 impl Default for ServerConfig {
@@ -59,7 +67,21 @@ impl Default for ServerConfig {
             listen: "127.0.0.1:8080".into(),
             static_dir: "web/dist".into(),
             recent_capacity: 200,
+            trusted_proxies: vec!["127.0.0.1".into(), "::1".into()],
+            allowed_origins: Vec::new(),
+            max_ws_per_ip: 8,
+            ws_connects_per_min: 30,
         }
+    }
+}
+
+impl ServerConfig {
+    pub fn ws_guard(&self) -> anyhow::Result<std::sync::Arc<crate::ws_guard::WsGuard>> {
+        Ok(crate::ws_guard::WsGuard::new(
+            crate::ws_guard::WsLimits::new(self.max_ws_per_ip, self.ws_connects_per_min),
+            crate::client_ip::parse_trusted(&self.trusted_proxies)?,
+            self.allowed_origins.clone(),
+        ))
     }
 }
 
