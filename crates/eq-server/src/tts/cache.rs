@@ -25,7 +25,12 @@ pub struct Cache<S> {
     budget: Budget,
     /// 同じ部品の同時合成を 1 回にまとめる鍵
     inflight: std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// 異なる部品をまたいだ、合成の同時実行数の上限 (S-04)
+    synth_slots: tokio::sync::Semaphore,
 }
+
+/// 合成 (Google への呼び出し) の同時実行数。EEW の数秒を守るため少なすぎず、予算の予約が効く範囲に留める
+pub const SYNTH_CONCURRENCY: usize = 4;
 
 impl<S: Synth> Cache<S> {
     /// 設定の既定の声
@@ -40,6 +45,7 @@ impl<S: Synth> Cache<S> {
             synth,
             budget,
             inflight: Default::default(),
+            synth_slots: tokio::sync::Semaphore::new(SYNTH_CONCURRENCY),
         }
     }
 
@@ -73,16 +79,24 @@ impl<S: Synth> Cache<S> {
     }
 
     async fn synth_and_store(&self, text: &str, voice: &str, path: &std::path::Path) -> Result<Vec<i16>, TtsError> {
-        // 待っている間に別の人が作り終えているかもしれない
+        // 合成の同時実行数の枠。待っている間に別の人が作り終えているかもしれないので、取ってから確かめる
+        let _slot = self
+            .synth_slots
+            .acquire()
+            .await
+            .map_err(|e| TtsError::Failed(e.into()))?;
         if let Some(pcm) = Self::read_cached(path).await {
             return Ok(pcm);
         }
+        // 使用済み + 予約中の文字数で確かめて予約する。失敗・時間切れ・キャンセルでは Drop で返る。
+        // 呼び出し側の時間切れでは合成を止めない (announce) ので、続く合成は予約も持ち続ける
         let chars = text.chars().count();
-        self.budget
-            .check(chars, SystemTime::now())
+        let reservation = self
+            .budget
+            .reserve(chars, SystemTime::now())
             .map_err(|_| TtsError::Budget)?;
         let pcm = self.synth.synth(text, voice).await.map_err(TtsError::Failed)?;
-        if let Err(e) = self.budget.record(chars, SystemTime::now()) {
+        if let Err(e) = reservation.commit(SystemTime::now()) {
             tracing::warn!("TTS の使用量を記録できない: {e:#}");
         }
         if let Err(e) = write_atomic(path, &wav::encode(&pcm)).await {
@@ -194,6 +208,9 @@ mod tests {
         calls: Arc<AtomicUsize>,
         fail: Arc<HashSet<String>>,
         sleep: Arc<HashMap<String, Duration>>,
+        /// 同時に合成中の数と、その最大
+        running: Arc<AtomicUsize>,
+        max_running: Arc<AtomicUsize>,
     }
 
     impl Fake {
@@ -204,8 +221,11 @@ mod tests {
             }
         }
         fn sleeping(text: &str, d: Duration) -> Fake {
+            Fake::sleeping_all(&[text], d)
+        }
+        fn sleeping_all(texts: &[&str], d: Duration) -> Fake {
             Fake {
-                sleep: Arc::new(HashMap::from([(text.to_string(), d)])),
+                sleep: Arc::new(texts.iter().map(|t| (t.to_string(), d)).collect()),
                 ..Default::default()
             }
         }
@@ -217,9 +237,12 @@ mod tests {
     impl Synth for Fake {
         async fn synth(&self, text: &str, _voice: &str) -> anyhow::Result<Vec<i16>> {
             self.calls.fetch_add(1, Ordering::SeqCst);
+            let now = self.running.fetch_add(1, Ordering::SeqCst) + 1;
+            self.max_running.fetch_max(now, Ordering::SeqCst);
             if let Some(d) = self.sleep.get(text) {
                 tokio::time::sleep(*d).await;
             }
+            self.running.fetch_sub(1, Ordering::SeqCst);
             if self.fail.contains(text) {
                 anyhow::bail!("合成失敗 (テスト)");
             }
@@ -369,5 +392,78 @@ mod tests {
         let cache = make(tmp.path(), 1000, Fake::default());
         let segs = vec!["A".to_string(); MAX_ANNOUNCE_SEGMENTS + 1];
         assert_eq!(cache.announce_cached(&segs).await, Err(TooLong));
+    }
+
+    // ---- S-04: 予算の予約と、合成の同時実行数 ----
+
+    #[tokio::test]
+    async fn 上限3文字に異なる3文字を同時に2本頼むと1本だけ通る() {
+        // 監査 S-04 の再現。以前は両方通って 6 文字使えていた
+        let tmp = tempfile::tempdir().unwrap();
+        let fake = Fake::sleeping_all(&["あいう", "えおか"], Duration::from_millis(100));
+        let cache = make(tmp.path(), 3, fake.clone());
+        let (a, b) = tokio::join!(cache.segment("あいう", None), cache.segment("えおか", None));
+        assert_eq!([a.is_ok(), b.is_ok()].iter().filter(|x| **x).count(), 1);
+        assert!(matches!(a.as_ref().err().or(b.as_ref().err()), Some(TtsError::Budget)));
+        assert_eq!(fake.count(), 1);
+        let used = Budget::load(tmp.path().join("usage.json"), 3).used(SystemTime::now());
+        assert_eq!(used, 3);
+    }
+
+    #[tokio::test]
+    async fn 合成に失敗した予約は返る() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = make(tmp.path(), 3, Fake::failing(&["あいう"]));
+        assert!(matches!(cache.segment("あいう", None).await, Err(TtsError::Failed(_))));
+        cache.segment("えおか", None).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn キャンセルされた合成の予約は返る() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = make(tmp.path(), 3, Fake::sleeping("あいう", Duration::from_secs(5)));
+        let r = tokio::time::timeout(Duration::from_millis(50), cache.segment("あいう", None)).await;
+        assert!(r.is_err());
+        cache.segment("えおか", None).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn 時間切れの後も続く合成は予約を持ち続け終われば返す() {
+        let tmp = tempfile::tempdir().unwrap();
+        let fake = Fake {
+            sleep: Arc::new(HashMap::from([("あいう".to_string(), Duration::from_millis(300))])),
+            fail: Arc::new(HashSet::from(["あいう".to_string()])),
+            ..Default::default()
+        };
+        let cache = make(tmp.path(), 3, fake);
+        let r = cache.announce(&["あいう".to_string()], Duration::from_millis(50)).await;
+        assert!(matches!(r, Err(TtsError::Failed(_))));
+        // 裏の合成がまだ動いている間は枠が空かない
+        assert!(matches!(cache.segment("えおか", None).await, Err(TtsError::Budget)));
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        // 失敗で終わったので返っている
+        cache.segment("えおか", None).await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn 異なる部品をまたいだ合成の同時実行数に上限がある() {
+        let tmp = tempfile::tempdir().unwrap();
+        let texts: Vec<String> = (0..12).map(|i| format!("部品{i}")).collect();
+        let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
+        let fake = Fake::sleeping_all(&refs, Duration::from_millis(50));
+        let cache = make(tmp.path(), 10_000, fake.clone());
+        let tasks: Vec<_> = texts
+            .into_iter()
+            .map(|t| {
+                let c = cache.clone();
+                tokio::spawn(async move { c.segment(&t, None).await })
+            })
+            .collect();
+        for t in tasks {
+            t.await.unwrap().unwrap();
+        }
+        assert_eq!(fake.count(), 12);
+        let max = fake.max_running.load(Ordering::SeqCst);
+        assert!((2..=SYNTH_CONCURRENCY).contains(&max), "max_running={max}");
     }
 }
