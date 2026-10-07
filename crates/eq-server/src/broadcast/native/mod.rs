@@ -629,4 +629,6 @@ mod sound_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod wave_layer_tests;
+#[cfg(test)]
 mod zoom_tests;

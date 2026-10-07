@@ -177,7 +177,13 @@ pub struct Stepper {
     /// 震源へ寄るカメラ (コマの時刻で進める。寄りが無効なら動かない)
     camera: Camera,
     last_key: Option<(StillKey, u64)>,
-    still: Option<(StillKey, Pixmap)>,
+    still: Option<(StillKey, Still)>,
+}
+
+/// 1 秒ごとに描く絵。波が出ているあいだは、波を挟めるよう下と上に分けて描く
+enum Still {
+    Flat(Pixmap),
+    Layered(draw::Layers),
 }
 
 impl Stepper {
@@ -244,8 +250,11 @@ impl Stepper {
     }
 
     #[cfg(test)]
-    pub fn still_pixmap(&self) -> Option<&Pixmap> {
-        self.still.as_ref().map(|(_, pm)| pm)
+    pub fn still_pixmap(&self) -> Option<Pixmap> {
+        match self.still.as_ref().map(|(_, s)| s)? {
+            Still::Flat(pm) => Some(pm.clone()),
+            Still::Layered(l) => Some(self.renderer.waved(l, &[])),
+        }
     }
 
     /// 前のコマから変わっていなければ None
@@ -281,7 +290,9 @@ impl Stepper {
             return None;
         }
         self.last_key = Some(key);
-        if self.still.as_ref().is_none_or(|(k, _)| *k != still_key) {
+        let layered = !waves.is_empty();
+        let fresh = |s: &Still| matches!(s, Still::Layered(_)) == layered;
+        if self.still.as_ref().is_none_or(|(k, s)| *k != still_key || !fresh(s)) {
             let scene = Scene {
                 quake,
                 eew: shown_eew,
@@ -302,17 +313,21 @@ impl Stepper {
                 viewers: i.viewers,
                 notices: i.notices,
             };
-            self.still = Some((still_key, self.renderer.render(&scene)));
+            let still = if layered {
+                Still::Layered(self.renderer.render_layers(&scene))
+            } else {
+                Still::Flat(self.renderer.render(&scene))
+            };
+            self.still = Some((still_key, still));
         }
-        let (_, base) = self.still.as_ref()?;
+        let (_, still) = self.still.as_ref()?;
         let with_waves;
-        let pm = if waves.is_empty() {
-            base
-        } else {
-            let mut pm = base.clone();
-            self.renderer.draw_waves(&mut pm, &waves);
-            with_waves = pm;
-            &with_waves
+        let pm = match still {
+            Still::Flat(pm) => pm,
+            Still::Layered(l) => {
+                with_waves = self.renderer.waved(l, &waves);
+                &with_waves
+            }
         };
         Some(Output {
             i420: yuv::rgba_to_i420(pm.data(), draw::W as usize, draw::H as usize),

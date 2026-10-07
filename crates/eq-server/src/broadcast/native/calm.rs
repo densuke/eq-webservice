@@ -10,7 +10,7 @@ use super::data::{
     city_side, city_side_tomorrow, rain_color, range_label, temp_label, top_level, warning_fill, weather_caption,
     weather_char, City, Side, Tomorrow, WarningLevel, Warnings, WeatherView,
 };
-use super::draw::{Scene, INSET_LINE};
+use super::draw::{Scene, Target, INSET_LINE};
 use super::frame::{BoxRect, Frame};
 use super::geo::Shape;
 use super::icon;
@@ -41,7 +41,7 @@ pub fn main_bounds(test: bool, main: Rect) -> BoxRect {
 }
 
 pub fn draw(
-    pm: &mut Pixmap,
+    t: &mut Target,
     text: &mut Text,
     areas: &HashMap<String, Shape>,
     frame: &Frame,
@@ -55,11 +55,13 @@ pub fn draw(
                 continue;
             };
             let (c, a) = warning_fill(level);
-            frame.fill(pm, &shape.path, c, a);
-            frame.stroke(pm, &shape.path, [0, 0, 0], 0.35, 0.5);
+            frame.fill(t.low(), &shape.path, c, a);
+            frame.stroke(t.low(), &shape.path, [0, 0, 0], 0.35, 0.5);
         }
     }
     let Some(w) = scene.weather else { return };
+    // 雨の点と天気の札は波の円より上
+    let pm = t.top();
     // 雨の強い地点ほど上に
     let mut rain: Vec<_> = w.rain.iter().filter(|r| frame.contains(r[1], r[0])).collect();
     rain.sort_by(|a, b| a[2].total_cmp(&b[2]));
