@@ -57,7 +57,8 @@ title = "地震情報"
 link = "https://example.com/"
 max_items = 50
 
-# 受信した全イベントを JSON Lines で蓄積
+# 受信した全イベントを JSON Lines で蓄積。書き込みは path の隣の日付ごとのファイル
+# (data/events-YYYY-MM-DD.jsonl、書いた時刻の UTC の日付)。path 自体 (分割前のファイル) があれば、読むときだけ使う
 [[sinks]]
 type = "jsonl"
 path = "data/events.jsonl"
