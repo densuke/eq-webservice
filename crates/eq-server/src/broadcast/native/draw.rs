@@ -12,7 +12,7 @@ use super::cards::CardCache;
 use super::data::{CityWeather, Warnings};
 use super::eew::{forecast_tag, EewSummary, Wave};
 use super::frame::{BoxRect, Clip, Frame, OKINAWA};
-use super::geo::{Shape, View};
+use super::geo::{Coast, Shape, View};
 use super::hindsight::Hindsight;
 use super::icon::Icons;
 use super::layout_resolve::Rect;
@@ -25,6 +25,7 @@ use super::quake_band;
 use super::shaken::{Stations, Zones};
 use super::test_mark;
 use super::text::Text;
+use super::tsunami_coast;
 use crate::broadcast::status::Notice;
 use crate::quake::model::TsunamiArea;
 use crate::quake::{Hypocenter, Scale};
@@ -90,6 +91,8 @@ pub struct Renderer {
     /// 周辺国の陸地 (都道府県より下に描く。無ければ空)
     neighbors: Vec<Shape>,
     prefs: Vec<Shape>,
+    /// 津波予報区の海岸線 (無ければ空)
+    coast: Vec<Coast>,
     areas: HashMap<String, Shape>,
     base: Pixmap,
     /// 天気の札の置き場所 (警報を避けた位置) を面ごとに覚える
@@ -127,6 +130,7 @@ impl Renderer {
             sub: None,
             neighbors,
             prefs,
+            coast: Vec::new(),
             areas: areas.into_iter().map(|s| (s.key.clone(), s)).collect(),
             base: Pixmap::new(W, H).expect("size"),
             cards: CardCache::default(),
@@ -135,6 +139,11 @@ impl Renderer {
         };
         r.base = r.draw_base();
         r
+    }
+
+    /// 津波予報区の海岸線を入れる
+    pub fn set_coast(&mut self, coast: Vec<Coast>) {
+        self.coast = coast;
     }
 
     /// 地震情報細分区域 (範囲の計算にだけ使い、塗りは描かない) と観測点の表を入れる。寄りとサブの地図が使う
@@ -245,13 +254,23 @@ impl Renderer {
                     calm::draw(&mut pm, &mut self.text, &self.areas, f, scene, &env, &mut self.cards)
                 }
             }
+            tsunami_coast::draw(&mut pm, f, &self.coast, scene.tsunami);
             if let Some(h) = scene.hindsight {
                 draw_hindsight(&mut pm, &mut self.text, f, h);
             }
         }
         panel::draw_dynamic(&mut pm, &mut self.text, scene, &placed);
         if let (Some(f), Some(at), true) = (&self.sub, placed.sub, scene.quake.is_some() || scene.eew.is_some()) {
-            draw_sub_map(&mut pm, &mut self.text, &self.neighbors, &self.prefs, f, scene, at);
+            draw_sub_map(
+                &mut pm,
+                &mut self.text,
+                &self.neighbors,
+                &self.prefs,
+                &self.coast,
+                f,
+                scene,
+                at,
+            );
         }
         // お知らせは平時だけ (右パネルの下半分。地震の画面では出さない)
         if let (None, None, Some(n), Some(area)) = (scene.quake, scene.eew, scene.notices, placed.notice) {
@@ -323,11 +342,13 @@ fn draw_land(pm: &mut Pixmap, f: &Frame, neighbors: &[Shape], prefs: &[Shape]) {
 
 /// サブの地図 (試験): 矩形 at (定義の map-sub) を海で塗り、陸と、地震の揺れ (県の塗り・震央) を描いて、1px の枠を付ける。
 /// 震度の札・緊急地震速報の札 (tag) は出さない (枠の外にはみ出しうる)。区域の塗りと観測点の点は無い
+#[allow(clippy::too_many_arguments)]
 fn draw_sub_map(
     pm: &mut Pixmap,
     text: &mut Text,
     neighbors: &[Shape],
     prefs: &[Shape],
+    coast: &[Coast],
     f: &Frame,
     scene: &Scene,
     at: Rect,
@@ -338,6 +359,7 @@ fn draw_sub_map(
     if let Some(s) = Shake::of(scene) {
         draw_shake(pm, text, prefs, f, &s, false, x + w);
     }
+    tsunami_coast::draw(pm, f, coast, scene.tsunami);
     for (rx, ry, rw, rh) in [
         (x, y, w, 1.0),
         (x, y + h - 1.0, w, 1.0),

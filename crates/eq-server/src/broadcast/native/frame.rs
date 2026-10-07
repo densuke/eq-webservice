@@ -3,7 +3,9 @@
 
 use std::sync::Arc;
 
-use tiny_skia::{FillRule, Mask, Path, PathBuilder, PathSegment, Pixmap, Point, Rect, Stroke, Transform};
+use tiny_skia::{
+    FillRule, LineCap, LineJoin, Mask, Path, PathBuilder, PathSegment, Pixmap, Point, Rect, Stroke, Transform,
+};
 
 use super::geo::{project, View};
 use super::layout_resolve::Rect as Slot;
@@ -242,11 +244,25 @@ impl Frame {
 
     /// 線の太さ width は画面での太さ (別枠・寄った本図でも同じ太さに見える)
     pub fn stroke(&self, pm: &mut Pixmap, path: &Path, c: [u8; 3], a: f32, width: f32) {
+        self.stroke_with(pm, path, c, a, Stroke::default(), width);
+    }
+
+    /// 端と折れ目を丸めた線 (海岸線)
+    pub fn stroke_round(&self, pm: &mut Pixmap, path: &Path, c: [u8; 3], a: f32, width: f32) {
+        let s = Stroke {
+            line_cap: LineCap::Round,
+            line_join: LineJoin::Round,
+            ..Stroke::default()
+        };
+        self.stroke_with(pm, path, c, a, s, width);
+    }
+
+    fn stroke_with(&self, pm: &mut Pixmap, path: &Path, c: [u8; 3], a: f32, style: Stroke, width: f32) {
         if self.sees(path) {
             let mask = self.clip.as_ref().map(|c| &*c.mask);
             let s = Stroke {
                 width: width / self.ts.sx,
-                ..Stroke::default()
+                ..style
             };
             pm.stroke_path(path, &paint(c, a), &s, self.ts, mask);
         }
