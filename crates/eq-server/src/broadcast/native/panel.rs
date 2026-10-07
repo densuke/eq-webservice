@@ -10,6 +10,7 @@ use super::model::{hypo_text, scale_color, scale_text_color, tsunami_text, Quake
 use super::paint::{rect, rrect, BG, LINE, MUTED, PANEL, TEXT};
 use super::placed::Placed;
 use super::text::Text;
+use super::viewers;
 use crate::quake::{jst, Scale};
 
 const PAD: f32 = 16.0;
@@ -130,18 +131,22 @@ fn draw_top_right(pm: &mut Pixmap, text: &mut Text, scene: &Scene, bar: Rect) {
         right -= text.width(scene.label, 12.0) + 16.0;
     }
     let bgm = (!scene.bgm_title.is_empty()).then(|| format!("BGM: {}", scene.bgm_title));
-    let bgm_w = bgm.as_ref().map(|s| text.width(s, 12.0));
-    let Some(notice) = &scene.status else {
-        if let Some(s) = &bgm {
-            text.draw_right(pm, s, right, base, 12.0, MUTED);
+    let viewers = scene.viewers.map(viewers::label);
+    let width = |s: &Option<String>, text: &mut Text| s.as_ref().map(|s| text.width(s, 12.0));
+    let at = viewers::arrange(
+        right,
+        width(&bgm, text),
+        width(&viewers, text),
+        scene.status.as_ref().map(|n| chip::width(text, n)),
+    );
+    for (s, x) in [(&bgm, at.bgm), (&viewers, at.viewers)] {
+        if let (Some(s), Some(x)) = (s, x) {
+            text.draw_right(pm, s, x, base, 12.0, MUTED);
         }
-        return;
-    };
-    let (show_bgm, chip_right) = chip::layout(right, bgm_w, chip::width(text, notice));
-    if let (true, Some(s)) = (show_bgm, &bgm) {
-        text.draw_right(pm, s, right, base, 12.0, MUTED);
     }
-    chip::draw(pm, text, notice, chip_right, bar.y);
+    if let (Some(n), Some(x)) = (&scene.status, at.chip) {
+        chip::draw(pm, text, n, x, bar.y);
+    }
 }
 
 /// 注意報などの凡例。震度の凡例 (legend) の上に 6px あけて置く

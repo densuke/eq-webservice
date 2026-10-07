@@ -40,6 +40,8 @@ pub struct Input<'a> {
     pub fast_forward: bool,
     /// 状態の札 (ライブだけが入れる。再現動画は None)
     pub status: Option<Notice>,
+    /// 上部バーに出す同接 (取れて新しいときだけ。ライブだけが入れる。再現動画は None)
+    pub viewers: Option<u64>,
     /// 平時の右パネルの下に出すお知らせ (ライブだけが入れる。再現動画は None)
     pub notices: Option<&'a Notices>,
 }
@@ -91,7 +93,16 @@ pub struct Output {
 /// 寄った表示範囲の同一判定 (日本全体は None)
 type ViewKey = Option<(u64, u64, u64)>;
 
-type StillKey = (u64, Option<(u64, i32)>, Option<u64>, u64, bool, ViewKey, Option<Notice>);
+type StillKey = (
+    u64,
+    Option<(u64, i32)>,
+    Option<u64>,
+    u64,
+    bool,
+    ViewKey,
+    Option<Notice>,
+    Option<u64>,
+);
 
 /// 地震の画面の地震から、寄りの目標の材料を作る。平時は None (日本全体)
 fn aim_of(
@@ -263,6 +274,7 @@ impl Stepper {
             i.fast_forward,
             view,
             i.status,
+            i.viewers,
         );
         let key = (still_key, if waves.is_empty() { 0 } else { now / i.check_ms });
         if self.last_key == Some(key) {
@@ -286,6 +298,7 @@ impl Stepper {
                 hindsight: pending,
                 fast_forward: i.fast_forward,
                 status: i.status,
+                viewers: i.viewers,
                 notices: i.notices,
             };
             self.still = Some((still_key, self.renderer.render(&scene)));
