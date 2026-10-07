@@ -1119,7 +1119,7 @@ mod tests {
             Some(TOKEN.into()),
             test_rate(1000),
             slots.clone(),
-            Duration::from_millis(400),
+            Duration::from_secs(1),
         );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -1143,16 +1143,15 @@ mod tests {
             s.write_all(req.as_bytes()).await.unwrap();
             stalled.push(s); // 読まない
         }
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        assert_eq!(slots.available_permits(), 0, "送信が詰まっている間は枠が埋まる");
+        // 遅い環境では要求の処理が始まるのが遅れるので、固定の待ちでなく条件が成り立つまで (最大 5 秒) 待つ
+        wait_for_permits(&slots, 0).await;
         let (parts, _) = post_announce(
             app.clone(),
             announce_json(tsunami_event(&area_names(3), TsunamiGrade::Warning), vec![]),
         )
         .await;
         assert_eq!(parts.status, StatusCode::SERVICE_UNAVAILABLE);
-        tokio::time::sleep(Duration::from_millis(600)).await;
-        assert_eq!(slots.available_permits(), 2, "期限後に枠が戻る");
+        wait_for_permits(&slots, 2).await; // 期限後に枠が戻る
         let (parts, body) = post_announce(
             app.clone(),
             announce_json(tsunami_event(&area_names(3), TsunamiGrade::Warning), vec![]),
@@ -1163,6 +1162,17 @@ mod tests {
     }
 
     // ---- S-02 の接続元 IP ごとの頻度制限 ----
+
+    /// 枠の空きが want になるまで短い間隔で待つ (最大 5 秒)。ならなければ失敗
+    async fn wait_for_permits(slots: &Semaphore, want: usize) {
+        for _ in 0..500 {
+            if slots.available_permits() == want {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("枠の空きが {want} にならない (今 {})", slots.available_permits());
+    }
 
     async fn announce_from(app: Router, peer: &str, xff: Option<&str>) -> StatusCode {
         let mut b = Request::post("/api/tts/announce").header(header::CONTENT_TYPE, "application/json");
