@@ -7,7 +7,7 @@ use tiny_skia::Pixmap;
 
 use super::banner::{banner_color, line_end, page_at};
 use super::layout_resolve::Rect;
-use super::paint::{rect, PANEL, TEXT};
+use super::paint::{rect, TEXT};
 use super::quake_band::{QuakeBand, Tone};
 use super::text::Text;
 
@@ -81,8 +81,13 @@ pub fn draw(pm: &mut Pixmap, text: &mut Text, band: &QuakeBand, at: Rect, now_ms
         text.width(c.encode_utf8(&mut [0; 4]), ROW_PX)
     });
     let page = page_at(now_ms, pages.len());
-    rect(pm, at.x, at.y, at.w, at.h, PANEL, 1.0);
-    rect(pm, at.x, at.y, at.w, TITLE_H, banner_color(band.top.level()), 1.0);
+    // 右パネルの左の縁 (1px) は残す。地の色 (PANEL) は動かない部分がすでに塗っている
+    let (x, w) = (at.x + 1.0, at.w - 1.0);
+    rect(pm, x, at.y, w, TITLE_H, banner_color(band.top.level()), 1.0);
+    if band.top == Tone::Special {
+        rect(pm, x, at.y, w, 1.0, WHITE, 1.0);
+        rect(pm, x, at.y + TITLE_H - 1.0, w, 1.0, WHITE, 1.0);
+    }
     text.draw(
         pm,
         TITLE,
@@ -100,7 +105,7 @@ pub fn draw(pm: &mut Pixmap, text: &mut Text, band: &QuakeBand, at: Rect, now_ms
         let base = y + ROW_H / 2.0 + ROW_PX * 0.35;
         match row {
             Row::Head(tone, s) => {
-                rect(pm, at.x, y, at.w, ROW_H, banner_color(tone.level()), 1.0);
+                rect(pm, x, y, w, ROW_H, banner_color(tone.level()), 1.0);
                 text.draw(pm, s, at.x + PAD, base, ROW_PX, WHITE);
             }
             Row::Body(s) => {
