@@ -103,9 +103,9 @@ pub fn spawn() {
             tick.tick().await;
             let Some(r) = read(&dir) else { continue };
             if r.is_high() {
-                tracing::warn!("{} (anon が上限の {WARN_PERCENT}% 超)", r.line());
+                tracing::warn!(target: "memwatch", "{} (anon が上限の {WARN_PERCENT}% 超)", r.line());
             } else {
-                tracing::info!("{}", r.line());
+                tracing::info!(target: "memwatch", "{}", r.line());
             }
         }
     });

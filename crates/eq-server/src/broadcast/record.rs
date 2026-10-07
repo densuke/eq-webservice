@@ -213,9 +213,6 @@ async fn cut(cfg: &RecordConfig, ffmpeg: &str, w: Window) -> anyhow::Result<()> 
         anyhow::bail!("ffmpeg (concat) が失敗しました: {status}");
     }
     tracing::info!(file = %out.display(), segments = segments.len(), "record: 切り出しました");
-    // 読んだ ring と書いた archive のページキャッシュは、もう要らないので捨てる (memory.current を食う)
-    let dropped: Vec<PathBuf> = segments.iter().cloned().chain([out.clone()]).collect();
-    let _ = tokio::task::spawn_blocking(move || dropped.iter().for_each(|p| super::pagecache::drop_path(p))).await;
     let names: Vec<String> = std::fs::read_dir(&archive)?
         .filter_map(|e| Some(e.ok()?.file_name().to_string_lossy().into_owned()))
         .collect();

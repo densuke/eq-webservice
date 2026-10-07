@@ -53,8 +53,10 @@ eq-server と `eq-server broadcast` は、自分の cgroup (systemd のユニッ
 本当の余裕は `anon` で見ます。anon が `MemoryMax` の 80% を超えると WARN になります。`events_max` は上限に当たった回数です。
 最大値がいつ出たかは `journalctl -u eq-server | grep 'memory:'` (配信は `journalctl --user -u eq-broadcast`) で追えます。
 
-ユニットの例には、コメントアウトした `MemoryHigh` があります (`MemoryMax` の少し下)。ページキャッシュでの上限張り付きを
-避けて早めに回収させたいときに、コメントを外して再起動します (値は上のログの anon の最大より上に決める)。
+eq-server のユニットの例には、任意のコメントアウトした `MemoryHigh` があります (`MemoryMax` の少し下)。
+配信には `MemoryHigh` を最初は設定しません (anon の平常が 104〜142MB で、下回ると throttling で配信が壊れるため)。
+ring のページキャッシュを捨てる版に差し替えたあと、ログの `file_mb` が 20〜40 に下がるか、`events_max` の増分が 0 になるかを見ます。
+それでも上限に当たるなら、配信に `MemoryMax` の 9 割 (320M なら 288M) の `MemoryHigh` を足します。
 
 ```sh
 sudo systemctl edit eq-server        # [Service] に MemoryHigh=200M を書く (system のユニット)

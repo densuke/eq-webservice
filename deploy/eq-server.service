@@ -23,7 +23,7 @@ RestartSec=5
 MemoryMax=256M
 # 上限 (MemoryMax) に当たるのは主にページキャッシュ (Issue #196: n2 の配信は anon 142MB・file 188MB で 335MB に張り付いた)。
 # MemoryMax の少し下に MemoryHigh を置くと、そこから先は強制せずに回収を急がせ、上限での回収待ちを避けられる (落とさない)。
-# 値は memwatch のログ (anon_mb・file_mb) を見て、anon の最大より上に決める。使うときは下の行のコメントを外す
+# 任意。値は memwatch のログ (anon_mb・file_mb) を見て、anon の最大より上に決める。使うときは下の行のコメントを外す
 #MemoryHigh=200M
 
 NoNewPrivileges=true
