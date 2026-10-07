@@ -36,6 +36,8 @@ pub struct QuakeBand {
     pub top: Tone,
     /// 種類ごとの見出しと本文 (「【大津波警報】」「宮城県・岩手県」)。重い順
     pub sections: Vec<Section>,
+    /// sections と同じ順の、各種別の種類 (枠の見出しの色に使う)
+    pub tones: Vec<Tone>,
 }
 
 /// いま発表中の津波予報区 (届いた津波の報のうち発行が最新のもの。解除なら空)。web/src/tsunami.ts と同じ規則
@@ -83,6 +85,7 @@ pub fn quake_band(areas: &[TsunamiArea], w: Option<&Warnings>) -> Option<QuakeBa
     let top = parts.first()?.0;
     Some(QuakeBand {
         top,
+        tones: parts.iter().map(|p| p.0).collect(),
         sections: parts.into_iter().map(|p| p.1).collect(),
     })
 }

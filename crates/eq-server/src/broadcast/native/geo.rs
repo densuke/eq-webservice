@@ -198,6 +198,57 @@ pub fn parse(json: &str, key: &str, view: &View) -> anyhow::Result<Vec<Shape>> {
     Ok(out)
 }
 
+/// 津波予報区の海岸線 (GeoJSON の MultiLineString)。name と、開いた線の path (本図の座標)
+pub struct Coast {
+    pub name: String,
+    pub path: Path,
+}
+
+#[derive(Deserialize)]
+struct LineDoc {
+    features: Vec<LineFeature>,
+}
+
+#[derive(Deserialize)]
+struct LineFeature {
+    properties: HashMap<String, serde_json::Value>,
+    geometry: LineGeometry,
+}
+
+#[derive(Deserialize)]
+struct LineGeometry {
+    coordinates: Vec<Vec<[f64; 2]>>,
+}
+
+pub fn parse_coast(json: &str, view: &View) -> anyhow::Result<Vec<Coast>> {
+    let doc: LineDoc = serde_json::from_str(json).context("parsing coast geojson")?;
+    let mut out = Vec::with_capacity(doc.features.len());
+    for f in doc.features {
+        let mut pb = PathBuilder::new();
+        for line in &f.geometry.coordinates {
+            let mut pts = line.iter().map(|p| view.px(p[0], p[1]));
+            let Some((x, y)) = pts.next() else { continue };
+            pb.move_to(x, y);
+            for (x, y) in pts {
+                pb.line_to(x, y);
+            }
+        }
+        let name = f.properties.get("name").and_then(|v| v.as_str()).unwrap_or_default();
+        if let Some(path) = pb.finish() {
+            out.push(Coast {
+                name: name.to_string(),
+                path,
+            });
+        }
+    }
+    Ok(out)
+}
+
+pub fn load_coast(file: &std::path::Path, view: &View) -> anyhow::Result<Vec<Coast>> {
+    let text = std::fs::read_to_string(file).with_context(|| format!("reading {}", file.display()))?;
+    parse_coast(&text, view).with_context(|| file.display().to_string())
+}
+
 pub fn load(file: &std::path::Path, key: &str, view: &View) -> anyhow::Result<Vec<Shape>> {
     let text = std::fs::read_to_string(file).with_context(|| format!("reading {}", file.display()))?;
     parse(&text, key, view).with_context(|| file.display().to_string())

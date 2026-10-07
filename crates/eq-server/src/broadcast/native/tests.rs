@@ -38,7 +38,10 @@ fn renderer_with(text: Text, placed: Placed) -> Renderer {
     let prefs = geo::load(&dir.join("japan.geojson"), "name", &view).unwrap();
     let areas = geo::load(&dir.join("warning-areas.geojson"), "code", &view).unwrap();
     let neighbors = geo::load(&dir.join("neighbors.geojson"), "name", &view).unwrap();
-    Renderer::new(view, neighbors, prefs, areas, text, placed)
+    let coast = geo::load_coast(&dir.join("tsunami.geojson"), &view).unwrap();
+    let mut r = Renderer::new(view, neighbors, prefs, areas, text, placed);
+    r.set_coast(coast);
+    r
 }
 
 fn center_of(pref: &str) -> (u32, u32) {

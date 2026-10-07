@@ -3,6 +3,9 @@
 //! watch で渡す (I420 に変換済み。fps に合わせて同じ画面を繰り返し送るのは、呼ぶ側の時計)。
 //! 平時と地震の画面の切り替えに合わせて、mixer に BGM を流す・止める知らせを出す。
 
+mod alerts_panel;
+#[cfg(test)]
+mod alerts_tests;
 mod banner;
 mod calm;
 mod camera;
@@ -29,6 +32,7 @@ mod step;
 mod telops;
 mod test_mark;
 mod text;
+mod tsunami_coast;
 mod viewers;
 mod yuv;
 
@@ -271,7 +275,13 @@ fn load_renderer_with(cfg: &BroadcastConfig, placed: Placed) -> anyhow::Result<R
         tracing::warn!("broadcast: font {} を読めないので、文字は描きません: {e:#}", cfg.font);
         text::Text::none()
     });
+    // 津波予報区の海岸線は、無くても続ける (津波の線を塗らないだけ)
+    let coast = geo::load_coast(&dir.join("tsunami.geojson"), &view).unwrap_or_else(|e| {
+        tracing::warn!("broadcast: 津波予報区の海岸線を読めないので、塗りません: {e:#}");
+        Vec::new()
+    });
     let mut renderer = Renderer::new(view, neighbors, prefs, areas, text, placed);
+    renderer.set_coast(coast);
     if cfg.zoom || cfg.sub_map {
         // 地震情報細分区域は寄りの範囲の計算だけに使う。読めなければ、県の本土の範囲で寄る
         let zones = geo::load(&dir.join("areas.geojson"), "name", &view).unwrap_or_else(|e| {
