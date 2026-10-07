@@ -2,8 +2,11 @@
 //! `received_at_ms` がその範囲にある情報を時刻順に返す (履歴の再生に使う)。
 //! 読むのは設定された jsonl だけで、利用者の入力はファイルのパスに使わない。
 
+use std::cmp::Ordering;
+use std::collections::BinaryHeap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::quake::Event;
 use axum::extract::{Query, State};
@@ -21,11 +24,34 @@ const MAX_RANGE_MS: u64 = 3_600_000;
 pub const MAX_EVENTS: usize = 500;
 /// 同時に読む数。毎回全部読むので、大量に開かれても e2 (メモリ 1GB) を圧迫しないように
 const MAX_READERS: usize = 2;
+/// 1 回の走査の上限。超えたら打ち切る (HTTP は 503。web は null として扱い、ブラウザが持つ分で代用する)
+#[derive(Clone, Copy)]
+struct Limits {
+    bytes: u64,
+    time: Duration,
+}
+
+const HTTP_LIMITS: Limits = Limits {
+    bytes: 64 << 20,
+    time: Duration::from_secs(5),
+};
+
+/// 走査量か時間の上限を超えた
+#[derive(Debug)]
+struct OverBudget;
+
+impl std::fmt::Display for OverBudget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("archive scan exceeded its budget")
+    }
+}
+impl std::error::Error for OverBudget {}
 
 #[derive(Clone)]
 struct Archive {
     path: PathBuf,
     readers: Arc<Semaphore>,
+    limits: Limits,
 }
 
 #[derive(Deserialize)]
@@ -44,9 +70,14 @@ pub fn jsonl_path(sinks: &[toml::Table]) -> Option<PathBuf> {
 }
 
 pub fn router(path: PathBuf) -> Router {
+    router_with(path, HTTP_LIMITS)
+}
+
+fn router_with(path: PathBuf, limits: Limits) -> Router {
     let state = Archive {
         path,
         readers: Arc::new(Semaphore::new(MAX_READERS)),
+        limits,
     };
     Router::new().route("/api/archive", get(handler).with_state(state))
 }
@@ -58,8 +89,12 @@ async fn handler(State(a): State<Archive>, Query(r): Query<Range>) -> Response {
     let Ok(_permit) = a.readers.try_acquire() else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
-    match read_range(&a.path, r.from, r.to).await {
+    match scan(&a.path, r.from, r.to, MAX_EVENTS, Some(a.limits)).await {
         Ok(events) => Json(events).into_response(),
+        Err(e) if e.is::<OverBudget>() => {
+            tracing::warn!("archive: {e}");
+            StatusCode::SERVICE_UNAVAILABLE.into_response()
+        }
         Err(e) => {
             tracing::warn!("archive read failed: {e:#}");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -67,14 +102,52 @@ async fn handler(State(a): State<Archive>, Query(r): Query<Range>) -> Response {
     }
 }
 
-/// jsonl を 1 行ずつ読み、範囲に入る情報を時刻順に返す (最大 MAX_EVENTS 件)。壊れた行は飛ばす。
-/// ponytail: 毎回ファイルを頭から全部読む。数十 MB を超えたら、索引や日付ごとのファイルを考える
-pub async fn read_range(path: &Path, from: u64, to: u64) -> anyhow::Result<Vec<Event>> {
-    read_range_upto(path, from, to, MAX_EVENTS).await
+/// 時刻 (同じなら読んだ順) で比べる。BinaryHeap に入れて、残す中でいちばん新しいものをすぐ捨てるため
+struct Held {
+    at: u64,
+    seq: usize,
+    ev: Event,
+}
+impl PartialEq for Held {
+    fn eq(&self, o: &Self) -> bool {
+        (self.at, self.seq) == (o.at, o.seq)
+    }
+}
+impl Eq for Held {}
+impl PartialOrd for Held {
+    fn partial_cmp(&self, o: &Self) -> Option<Ordering> {
+        Some(self.cmp(o))
+    }
+}
+impl Ord for Held {
+    fn cmp(&self, o: &Self) -> Ordering {
+        (self.at, self.seq).cmp(&(o.at, o.seq))
+    }
 }
 
-/// read_range の件数の上限を指定できるもの (HTTP の応答は MAX_EVENTS で絞るが、動画を作る係は 1 つの範囲を丸ごと読む)
+/// jsonl を 1 行ずつ読み、範囲に入る情報を時刻順に返す (最大 max 件)。壊れた行は飛ばす。
+/// HTTP の応答は MAX_EVENTS で絞るが、動画を作る係は 1 つの範囲を丸ごと読む。走査の上限は付けない
 pub async fn read_range_upto(path: &Path, from: u64, to: u64, max: usize) -> anyhow::Result<Vec<Event>> {
+    scan(path, from, to, max, None).await
+}
+
+async fn scan(path: &Path, from: u64, to: u64, max: usize, limits: Option<Limits>) -> anyhow::Result<Vec<Event>> {
+    let run = scan_inner(path, from, to, max, limits.map(|l| l.bytes)); // 上限がある = HTTP
+    match limits {
+        None => run.await,
+        Some(l) => tokio::time::timeout(l.time, run).await.map_err(|_| OverBudget)?,
+    }
+}
+
+/// 残すのは範囲内でいちばん古い max 件 (並べ替えて切り詰めるのと同じ結果)。保持は max 件までで済む。
+/// ponytail: ファイルを頭から読む。ローテーションや索引は入れていない。上限を超える大きさになったら考える
+async fn scan_inner(
+    path: &Path,
+    from: u64,
+    to: u64,
+    max: usize,
+    byte_limit: Option<u64>,
+) -> anyhow::Result<Vec<Event>> {
     let file = match tokio::fs::File::open(path).await {
         Ok(f) => f,
         // まだ 1 件も書かれていない
@@ -82,14 +155,28 @@ pub async fn read_range_upto(path: &Path, from: u64, to: u64, max: usize) -> any
         Err(e) => return Err(e.into()),
     };
     let mut lines = BufReader::new(file).lines();
-    let mut out = Vec::new();
-    let mut broken = 0usize;
+    let mut heap: BinaryHeap<Held> = BinaryHeap::new();
+    let (mut broken, mut seq, mut read) = (0usize, 0usize, 0u64);
     while let Some(line) = lines.next_line().await? {
+        read += line.len() as u64 + 1;
+        if byte_limit.is_some_and(|b| read > b) {
+            return Err(OverBudget.into());
+        }
         if line.trim().is_empty() {
             continue;
         }
         match serde_json::from_str::<Event>(&line) {
-            Ok(ev) if (from..=to).contains(&ev.received_at_ms) => out.push(ev),
+            Ok(ev) if (from..=to).contains(&ev.received_at_ms) => {
+                seq += 1;
+                heap.push(Held {
+                    at: ev.received_at_ms,
+                    seq,
+                    ev,
+                });
+                if heap.len() > max {
+                    heap.pop();
+                }
+            }
             Ok(_) => {}
             Err(_) => broken += 1,
         }
@@ -97,9 +184,7 @@ pub async fn read_range_upto(path: &Path, from: u64, to: u64, max: usize) -> any
     if broken > 0 {
         tracing::warn!(path = %path.display(), broken, "archive: skipped broken lines");
     }
-    out.sort_by_key(|e| e.received_at_ms);
-    out.truncate(max);
-    Ok(out)
+    Ok(heap.into_sorted_vec().into_iter().map(|h| h.ev).collect())
 }
 
 #[cfg(test)]
@@ -171,6 +256,44 @@ mod tests {
         let (_d, app) = app_with(&lines);
         let (_, body) = get(app, "/api/archive?from=0&to=1000").await;
         assert_eq!(ids(&body).len(), MAX_EVENTS);
+    }
+
+    #[tokio::test]
+    async fn keeps_the_oldest_events_even_when_the_file_is_newest_first() {
+        let lines: Vec<String> = (0..MAX_EVENTS as u64 + 50)
+            .rev()
+            .map(|i| line(&format!("i{i}"), i))
+            .collect();
+        let (_d, app) = app_with(&lines);
+        let got = ids(&get(app, "/api/archive?from=0&to=1000").await.1);
+        assert_eq!(got.len(), MAX_EVENTS);
+        assert_eq!(got.first().unwrap(), "i0");
+        assert_eq!(got.last().unwrap(), &format!("i{}", MAX_EVENTS - 1));
+    }
+
+    #[tokio::test]
+    async fn returns_in_range_lines_even_when_time_goes_backwards() {
+        // 受信時刻が戻る行 (p2pquake 再接続時の津波予報は発表時刻が received_at_ms) も、範囲内なら返す
+        let (_d, app) = app_with(&[line("a", 100), line("far", 60_201), line("late", 150)]);
+        assert_eq!(ids(&get(app, "/api/archive?from=0&to=200").await.1), ["a", "late"]);
+    }
+
+    #[tokio::test]
+    async fn gives_503_when_the_scan_budget_is_exceeded() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("events.jsonl");
+        std::fs::write(&p, [line("a", 1), line("b", 2)].join("\n") + "\n").unwrap();
+        let app = router_with(
+            p,
+            Limits {
+                bytes: 10,
+                time: Duration::from_secs(5),
+            },
+        );
+        assert_eq!(
+            get(app, "/api/archive?from=0&to=10").await.0,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
     }
 
     #[tokio::test]

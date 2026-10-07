@@ -54,7 +54,29 @@ const INTERVAL: Duration = Duration::from_secs(300);
 const FEED_NAMESPACE: &str = "http://www.w3.org/2005/Atom";
 const MUNICIPAL: &str = "気象警報・注意報（市町村等）";
 
-/// 配信 (Atom) から最新の集約通報の URL を探す
+/// 気象庁のデータ配信のホスト (気象 XML の取得先に許す。フィードが書き換わっても外へ取りに行かないため)
+const JMA_DATA_HOSTS: &[&str] = &["www.data.jma.go.jp"];
+
+/// 気象 XML の取得先として使ってよいか: https で、気象庁のデータ配信のホスト
+pub fn is_jma_data_url(url: &str) -> bool {
+    reqwest::Url::parse(url)
+        .is_ok_and(|u| u.scheme() == "https" && u.host_str().is_some_and(|h| JMA_DATA_HOSTS.contains(&h)))
+}
+
+/// 許可したホストへのリダイレクトだけ追う (最大 5 回)。それ以外はエラー
+fn redirect_policy() -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(|a| {
+        if a.previous().len() >= 5 {
+            a.error("too many redirects")
+        } else if is_jma_data_url(a.url().as_str()) {
+            a.follow()
+        } else {
+            a.error("redirect to a host outside the JMA data hosts")
+        }
+    })
+}
+
+/// 配信 (Atom) から最新の集約通報の URL を探す (許可したホストの https のものだけ)
 pub fn latest_report_url(feed: &str) -> anyhow::Result<Option<String>> {
     let doc = roxmltree::Document::parse(feed).context("parsing feed")?;
     let entries = doc.descendants().filter(|n| n.has_tag_name((FEED_NAMESPACE, "entry")));
@@ -71,7 +93,7 @@ pub fn latest_report_url(feed: &str) -> anyhow::Result<Option<String>> {
             .find(|c| c.has_tag_name((FEED_NAMESPACE, "link")))
             .and_then(|c| c.attribute("href"))
             .unwrap_or("");
-        if !href.contains("_VPWS50_") {
+        if !href.contains("_VPWS50_") || !is_jma_data_url(href) {
             continue;
         }
         let updated = text("updated").to_string();
@@ -133,7 +155,7 @@ pub fn parse_report(xml: &str) -> anyhow::Result<Warnings> {
 /// 定期的に取得して shared を更新する
 pub fn spawn(cfg: WeatherConfig, shared: Shared) {
     tokio::spawn(async move {
-        let client = match crate::net::client(Duration::from_secs(60)) {
+        let client = match crate::net::client_with_redirect(Duration::from_secs(60), redirect_policy()) {
             Ok(c) => c,
             Err(e) => return tracing::warn!("weather: {e:#}"),
         };
@@ -186,20 +208,55 @@ mod tests {
         let feed = r#"<?xml version="1.0" encoding="utf-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
   <entry><title>府県天気概況</title><updated>2026-09-29T01:39:53Z</updated>
-    <link type="application/xml" href="https://example/20260929013953_0_VPFG50_230000.xml"/></entry>
+    <link type="application/xml" href="https://www.data.jma.go.jp/developer/xml/data/20260929013953_0_VPFG50_230000.xml"/></entry>
   <entry><title>気象警報・注意報（Ｒ０６）（集約通報）</title><updated>2026-09-29T01:20:56Z</updated>
-    <link type="application/xml" href="https://example/20260929012059_0_VPWS50_010000.xml"/></entry>
+    <link type="application/xml" href="https://www.data.jma.go.jp/developer/xml/data/20260929012059_0_VPWS50_010000.xml"/></entry>
   <entry><title>気象警報・注意報（Ｒ０６）（集約通報）</title><updated>2026-09-29T01:30:57Z</updated>
-    <link type="application/xml" href="https://example/20260929013059_0_VPWS50_010000.xml"/></entry>
+    <link type="application/xml" href="https://www.data.jma.go.jp/developer/xml/data/20260929013059_0_VPWS50_010000.xml"/></entry>
 </feed>"#;
         assert_eq!(
             latest_report_url(feed).unwrap().as_deref(),
-            Some("https://example/20260929013059_0_VPWS50_010000.xml")
+            Some("https://www.data.jma.go.jp/developer/xml/data/20260929013059_0_VPWS50_010000.xml")
         );
         assert_eq!(
             latest_report_url(r#"<feed xmlns="http://www.w3.org/2005/Atom"/>"#).unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn drops_report_links_outside_the_jma_data_host() {
+        let entry =
+            |updated: &str, href: &str| format!(r#"<entry><updated>{updated}</updated><link href="{href}"/></entry>"#);
+        let feed = |entries: String| format!(r#"<feed xmlns="http://www.w3.org/2005/Atom">{entries}</feed>"#);
+        let ok = "https://www.data.jma.go.jp/developer/xml/data/a_VPWS50_1.xml";
+        // 新しくても許可外 (別ホスト・http) の href は使わず、許可内の古い報を選ぶ
+        let f = feed(
+            entry("2026-09-29T01:00:00Z", ok)
+                + &entry("2026-09-29T02:00:00Z", "https://evil.example/b_VPWS50_1.xml")
+                + &entry("2026-09-29T03:00:00Z", "http://www.data.jma.go.jp/c_VPWS50_1.xml"),
+        );
+        assert_eq!(latest_report_url(&f).unwrap().as_deref(), Some(ok));
+        let only_bad = feed(entry("2026-09-29T02:00:00Z", "https://evil.example/b_VPWS50_1.xml"));
+        assert_eq!(latest_report_url(&only_bad).unwrap(), None);
+    }
+
+    #[test]
+    fn only_https_jma_data_hosts_are_allowed() {
+        assert!(is_jma_data_url(
+            "https://www.data.jma.go.jp/developer/xml/data/x_VPWS50_1.xml"
+        ));
+        for u in [
+            "http://www.data.jma.go.jp/x.xml",
+            "https://evil.example/www.data.jma.go.jp/x.xml",
+            "https://www.data.jma.go.jp.evil.example/x.xml",
+            "https://user@evil.example/",
+            "https://127.0.0.1/x.xml",
+            "not a url",
+            "",
+        ] {
+            assert!(!is_jma_data_url(u), "{u}");
+        }
     }
 
     #[test]

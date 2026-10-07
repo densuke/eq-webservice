@@ -163,6 +163,20 @@ mod tests {
         e.received_at_ms = at;
         e
     }
+    #[tokio::test]
+    async fn from_file_reads_to_the_end_even_when_the_file_is_not_in_time_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("events.jsonl");
+        // 範囲 (0..=200) をずっと過ぎた行のあとに、範囲内の古い時刻の行が来る
+        let lines: Vec<String> = [("a", 100), ("far", 10_000_000), ("late", 150)]
+            .iter()
+            .map(|(id, at)| serde_json::to_string(&ev(id, *at)).unwrap())
+            .collect();
+        std::fs::write(&p, lines.join("\n") + "\n").unwrap();
+        let ids: Vec<String> = from_file(&p, 0, 200).await.unwrap().into_iter().map(|e| e.id).collect();
+        assert_eq!(ids, ["a", "late"]);
+    }
+
     #[test]
     fn chunks_cover_the_range_hour_by_hour_without_gaps_or_overlaps() {
         const H: u64 = 3_600_000;

@@ -11,11 +11,24 @@ pub const MAX_BODY: usize = 8 << 20;
 /// 上流の WebSocket の 1 メッセージの上限 (地震情報は大きくても数十 KB)
 pub const MAX_WS_MESSAGE: usize = 1 << 20;
 
-pub fn client(timeout: Duration) -> anyhow::Result<reqwest::Client> {
-    Ok(reqwest::Client::builder()
+fn builder(timeout: Duration) -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
         .timeout(timeout)
         .user_agent(concat!("eq-webservice/", env!("CARGO_PKG_VERSION")))
-        .build()?)
+}
+
+pub fn client(timeout: Duration) -> anyhow::Result<reqwest::Client> {
+    Ok(builder(timeout).build()?)
+}
+
+/// リダイレクトを追わないクライアント (独自ヘッダーに秘密を載せる送信用。reqwest は Authorization 以外は転送先へ付けたままにする)
+pub fn client_no_redirect(timeout: Duration) -> anyhow::Result<reqwest::Client> {
+    client_with_redirect(timeout, reqwest::redirect::Policy::none())
+}
+
+/// リダイレクトの方針を指定するクライアント
+pub fn client_with_redirect(timeout: Duration, policy: reqwest::redirect::Policy) -> anyhow::Result<reqwest::Client> {
+    Ok(builder(timeout).redirect(policy).build()?)
 }
 
 /// 送って本文を読む。MAX_BODY を超えたら読むのをやめてエラーにする
