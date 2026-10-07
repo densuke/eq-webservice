@@ -1136,18 +1136,20 @@ mod tests {
         assert!(to_bytes(body, 1 << 20).await.is_err());
     }
 
-    /// 実ソケット (HTTP/1.1・Content-Length 付き) で、全部受ける・途中で切る、の両方を繰り返しても
-    /// 本文のタスクが panic せず、枠が戻る。panic はこのテスト専用の hook で数える
+    /// 実ソケット (HTTP/1.1) で、圧縮の層で包み accept-encoding: gzip を付けて、全部受ける・途中で切る、を
+    /// 繰り返しても本文のタスクが panic せず、枠が戻る。層が本文を再 poll する経路 (#195) を通す。
+    /// panic は他のテストの分と区別できるよう、メッセージで数える (前の hook も呼ぶ)
     #[tokio::test(flavor = "multi_thread")]
     async fn announce_over_a_real_socket_does_not_panic_on_finish_or_abort() {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         static PANICS: AtomicUsize = AtomicUsize::new(0);
         let prev = std::panic::take_hook();
-        std::panic::set_hook(Box::new(|info| {
+        std::panic::set_hook(Box::new(move |info| {
             if info.to_string().contains("Unfold must not be polled") {
                 PANICS.fetch_add(1, Ordering::SeqCst);
             }
+            prev(info);
         }));
         let e = env_with(
             100_000_000,
@@ -1166,7 +1168,8 @@ mod tests {
             test_rate(1000),
             slots.clone(),
             Duration::from_secs(30),
-        );
+        )
+        .layer(crate::http::compression_layer());
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
@@ -1179,25 +1182,29 @@ mod tests {
         });
         let json = announce_json(ev, vec![]).to_string();
         let req = format!(
-            "POST /api/tts/announce HTTP/1.1\r\nhost: x\r\nconnection: close\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{json}",
+            "POST /api/tts/announce HTTP/1.1\r\nhost: x\r\nconnection: close\r\naccept-encoding: gzip\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{json}",
             json.len()
         );
+        let mut head_of_full = String::new();
         for i in 0..20 {
             let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
             s.write_all(req.as_bytes()).await.unwrap();
             if i % 2 == 0 {
                 let mut all = Vec::new();
-                s.read_to_end(&mut all).await.ok(); // 偶数回は最後まで受ける (keep-alive でなく close 待ち)
+                s.read_to_end(&mut all).await.ok();
+                head_of_full = String::from_utf8_lossy(&all[..200.min(all.len())]).to_lowercase();
             } else {
                 let mut buf = vec![0u8; 20_000];
-                s.read_exact(&mut buf).await.unwrap(); // 奇数回は途中で切る
+                s.read_exact(&mut buf).await.unwrap();
                 drop(s);
             }
         }
         wait_for_permits(&slots, 2).await;
         tokio::time::sleep(Duration::from_millis(200)).await;
-        std::panic::set_hook(prev);
         assert_eq!(PANICS.load(Ordering::SeqCst), 0);
+        // audio/wav は圧縮されず、Content-Length が残る
+        assert!(!head_of_full.contains("content-encoding"), "{head_of_full}");
+        assert!(head_of_full.contains("content-length"), "{head_of_full}");
     }
 
     #[tokio::test]
