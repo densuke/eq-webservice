@@ -45,24 +45,22 @@ journalctl -u eq-server -f
 ポートはユニットファイルの `Environment=EQ_PORT=8080` で変えられます。
 Discord の Webhook URL などは `/etc/default/eq-server` に `DISCORD_WEBHOOK_URL=...` と書きます。
 
-### メモリの記録と MALLOC_ARENA_MAX
+### メモリの記録
 
 eq-server と `eq-server broadcast` は、自分の cgroup (systemd のユニット) のメモリを 1 分ごとにログへ出します
-(`memory: current_mb=... peak_mb=... max_mb=...`)。`MemoryMax` の 80% を超えると WARN になります。
+(`memory: current_mb=... anon_mb=... file_mb=... peak_mb=... max_mb=... events_max=... oom_kill=...`)。
+`current` にはページキャッシュ (`file`) も数えられ、`MemoryMax` に張り付いてもカーネルが回収するので落ちるとは限りません。
+本当の余裕は `anon` で見ます。anon が `MemoryMax` の 80% を超えると WARN になります。`events_max` は上限に当たった回数です。
 最大値がいつ出たかは `journalctl -u eq-server | grep 'memory:'` (配信は `journalctl --user -u eq-broadcast`) で追えます。
 
-ユニットには glibc の断片化を抑える `Environment=MALLOC_ARENA_MAX=2` が入っています。既存の配置に足すときは、
-ユニットファイルを差し替えるか drop-in を作り、再起動します (配信は `PartOf` なので eq-server の再起動に連動)。
+ユニットの例には、コメントアウトした `MemoryHigh` があります (`MemoryMax` の少し下)。ページキャッシュでの上限張り付きを
+避けて早めに回収させたいときに、コメントを外して再起動します (値は上のログの anon の最大より上に決める)。
 
 ```sh
-# system のユニット (eq-server)
-sudo systemctl edit eq-server        # [Service] に Environment=MALLOC_ARENA_MAX=2 を書く
+sudo systemctl edit eq-server        # [Service] に MemoryHigh=200M を書く (system のユニット)
 sudo systemctl restart eq-server
-# user のユニット (eq-broadcast)
-systemctl --user edit eq-broadcast   # 同じ内容
+systemctl --user edit eq-broadcast   # 配信 (user のユニット。eq-server の再起動にも連動)
 systemctl --user restart eq-broadcast
-# 効いているか
-tr '\0' '\n' < /proc/$(systemctl show -p MainPID --value eq-server)/environ | grep MALLOC_ARENA_MAX
 ```
 
 ## 4. Caddy から転送

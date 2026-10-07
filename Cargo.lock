@@ -334,6 +334,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "futures-util",
+ "libc",
  "openh264",
  "reqwest",
  "resvg",

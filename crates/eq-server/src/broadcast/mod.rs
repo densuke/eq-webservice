@@ -12,6 +12,7 @@ mod encoder;
 mod ffmpeg;
 mod mixer;
 pub(crate) mod native;
+mod pagecache;
 mod psi;
 mod record;
 mod replay;

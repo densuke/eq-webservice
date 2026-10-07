@@ -23,43 +23,65 @@ fn parse_bytes(s: &str) -> Option<u64> {
     s.trim().parse().ok()
 }
 
-#[derive(Debug, PartialEq, Eq)]
+/// "key value" の行から key の値を取る (memory.stat・memory.events)
+fn field(text: &str, key: &str) -> Option<u64> {
+    text.lines()
+        .find_map(|l| l.strip_prefix(key)?.strip_prefix(' ')?.trim().parse().ok())
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
 struct Reading {
+    /// memory.current: ページキャッシュ (file) を含む。上限に張り付いても、カーネルが回収するので落ちるとは限らない
     current: u64,
     peak: Option<u64>,
     max: Option<u64>,
+    /// memory.stat の anon (プロセスが持つメモリ。回収できないので OOM の本当の材料) と file (ページキャッシュ)
+    anon: Option<u64>,
+    file: Option<u64>,
+    /// memory.events の max (上限に当たって回収した回数) と oom_kill
+    events_max: Option<u64>,
+    oom_kill: Option<u64>,
 }
 
 impl Reading {
-    /// 現在値が上限の 80% を超えているか (上限なしなら false)
+    /// anon (読めなければ current) が上限の 80% を超えているか (上限なしなら false)。
+    /// ページキャッシュは回収されるので、警告の材料にしない
     fn is_high(&self) -> bool {
+        let used = self.anon.unwrap_or(self.current);
         self.max
-            .is_some_and(|m| m > 0 && self.current as u128 * 100 > m as u128 * WARN_PERCENT as u128)
+            .is_some_and(|m| m > 0 && used as u128 * 100 > m as u128 * WARN_PERCENT as u128)
     }
 
     fn line(&self) -> String {
         let mb = |b: u64| b / (1024 * 1024);
         let opt = |v: Option<u64>| v.map_or("-".to_string(), |b| mb(b).to_string());
+        let n = |v: Option<u64>| v.map_or("-".to_string(), |b| b.to_string());
         format!(
-            "memory: current_mb={} peak_mb={} max_mb={}",
+            "memory: current_mb={} anon_mb={} file_mb={} peak_mb={} max_mb={} events_max={} oom_kill={}",
             mb(self.current),
+            opt(self.anon),
+            opt(self.file),
             opt(self.peak),
-            opt(self.max)
+            opt(self.max),
+            n(self.events_max),
+            n(self.oom_kill)
         )
     }
 }
 
-/// cgroup のディレクトリから読む。memory.current が読めなければ None (peak は古いカーネルに無い)
+/// cgroup のディレクトリから読む。memory.current が読めなければ None (ほかは古いカーネルに無いことがある)
 fn read(dir: &Path) -> Option<Reading> {
-    let get = |name: &str| {
-        std::fs::read_to_string(dir.join(name))
-            .ok()
-            .and_then(|s| parse_bytes(&s))
-    };
+    let text = |name: &str| std::fs::read_to_string(dir.join(name)).ok();
+    let get = |name: &str| text(name).and_then(|s| parse_bytes(&s));
+    let (stat, events) = (text("memory.stat"), text("memory.events"));
     Some(Reading {
         current: get("memory.current")?,
         peak: get("memory.peak"),
         max: get("memory.max"),
+        anon: stat.as_deref().and_then(|s| field(s, "anon")),
+        file: stat.as_deref().and_then(|s| field(s, "file")),
+        events_max: events.as_deref().and_then(|s| field(s, "max")),
+        oom_kill: events.as_deref().and_then(|s| field(s, "oom_kill")),
     })
 }
 
@@ -81,7 +103,7 @@ pub fn spawn() {
             tick.tick().await;
             let Some(r) = read(&dir) else { continue };
             if r.is_high() {
-                tracing::warn!("{} (上限の {WARN_PERCENT}% 超)", r.line());
+                tracing::warn!("{} (anon が上限の {WARN_PERCENT}% 超)", r.line());
             } else {
                 tracing::info!("{}", r.line());
             }
@@ -114,38 +136,62 @@ mod tests {
     }
 
     #[test]
-    fn warns_only_above_80_percent_of_max() {
-        let r = |current, max| {
+    fn warns_on_anon_not_on_page_cache() {
+        let r = |current, anon, max| {
             Reading {
                 current,
-                peak: None,
+                anon,
                 max,
+                ..Default::default()
             }
             .is_high()
         };
-        assert!(!r(204 * MB, Some(256 * MB)));
-        assert!(r(206 * MB, Some(256 * MB)));
+        assert!(!r(204 * MB, None, Some(256 * MB)));
+        assert!(r(206 * MB, None, Some(256 * MB)));
+        // ページキャッシュで current が上限に張り付いても、anon が低ければ警告しない
+        assert!(!r(335 * MB, Some(142 * MB), Some(335 * MB)));
+        assert!(r(335 * MB, Some(280 * MB), Some(335 * MB)));
         // ちょうど 80% は警告しない
-        assert!(!r(80, Some(100)));
-        assert!(r(81, Some(100)));
-        assert!(!r(u64::MAX, None));
-        assert!(!r(1, Some(0)));
+        assert!(!r(80, None, Some(100)));
+        assert!(r(81, None, Some(100)));
+        assert!(!r(u64::MAX, None, None));
+        assert!(!r(1, None, Some(0)));
+    }
+
+    #[test]
+    fn picks_fields_by_exact_key() {
+        let stat = "anon 100\nfile 200\nfile_mapped 5\nanon_thp 7\n";
+        assert_eq!(field(stat, "anon"), Some(100));
+        assert_eq!(field(stat, "file"), Some(200));
+        assert_eq!(field(stat, "shmem"), None);
+        let ev = "low 0\nhigh 0\nmax 58\noom 0\noom_kill 0\n";
+        assert_eq!(field(ev, "max"), Some(58));
+        assert_eq!(field(ev, "oom_kill"), Some(0));
     }
 
     #[test]
     fn the_line_shows_megabytes_and_dashes_for_missing_values() {
         let full = Reading {
-            current: 130 * MB,
-            peak: Some(301 * MB),
-            max: Some(320 * MB),
+            current: 335 * MB,
+            peak: Some(335 * MB),
+            max: Some(335 * MB),
+            anon: Some(142 * MB),
+            file: Some(188 * MB),
+            events_max: Some(58),
+            oom_kill: Some(0),
         };
-        assert_eq!(full.line(), "memory: current_mb=130 peak_mb=301 max_mb=320");
+        assert_eq!(
+            full.line(),
+            "memory: current_mb=335 anon_mb=142 file_mb=188 peak_mb=335 max_mb=335 events_max=58 oom_kill=0"
+        );
         let bare = Reading {
             current: 5 * MB,
-            peak: None,
-            max: None,
+            ..Default::default()
         };
-        assert_eq!(bare.line(), "memory: current_mb=5 peak_mb=- max_mb=-");
+        assert_eq!(
+            bare.line(),
+            "memory: current_mb=5 anon_mb=- file_mb=- peak_mb=- max_mb=- events_max=- oom_kill=-"
+        );
     }
 
     #[test]
@@ -158,11 +204,16 @@ mod tests {
             read(d.path()),
             Some(Reading {
                 current: MB,
-                peak: None,
-                max: None
+                ..Default::default()
             })
         );
         std::fs::write(d.path().join("memory.peak"), "2097152\n").unwrap();
-        assert_eq!(read(d.path()).unwrap().peak, Some(2 * MB));
+        std::fs::write(d.path().join("memory.stat"), "anon 3\nfile 4\n").unwrap();
+        std::fs::write(d.path().join("memory.events"), "max 5\noom_kill 6\n").unwrap();
+        let r = read(d.path()).unwrap();
+        assert_eq!(
+            (r.peak, r.anon, r.file, r.events_max, r.oom_kill),
+            (Some(2 * MB), Some(3), Some(4), Some(5), Some(6))
+        );
     }
 }

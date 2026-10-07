@@ -178,6 +178,10 @@ pub fn spawn(dir: PathBuf) -> mpsc::Sender<Vec<u8>> {
         while let Some(chunk) = rx.recv().await {
             for p in splitter.push(&chunk, t0.elapsed()) {
                 if p.new_segment {
+                    // 書き終えたファイルのページキャッシュは捨てる (読み返すのは切り出しのときだけ。memory.current を食う)
+                    if let Some(done) = file.take() {
+                        super::pagecache::drop_cache_in_background(done);
+                    }
                     file = open(&dir, index).await;
                     index = (index + 1) % RING_FILES;
                 }
