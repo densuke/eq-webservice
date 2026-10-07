@@ -117,6 +117,7 @@ pub(super) fn scene<'a>(
         eew: None,
         history,
         warnings,
+        tsunami: &[],
         weather,
         now_ms: NOW,
         connected: true,

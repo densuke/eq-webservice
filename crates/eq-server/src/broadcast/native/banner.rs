@@ -39,8 +39,8 @@ pub fn banner_height(lines: usize) -> f32 {
 }
 
 /// 文を幅 max_w の行に割る (行数の上限は無い)。adv は 1 字の幅
-pub fn layout(segments: &[String], max_w: f32, adv: &mut impl FnMut(char) -> f32) -> Vec<String> {
-    let mut chars: Vec<char> = PREFIX.chars().collect();
+pub fn layout(prefix: &str, segments: &[String], max_w: f32, adv: &mut impl FnMut(char) -> f32) -> Vec<String> {
+    let mut chars: Vec<char> = prefix.chars().collect();
     for (i, s) in segments.iter().enumerate() {
         if i > 0 {
             chars.extend(" ／ ".chars());
@@ -68,10 +68,10 @@ pub fn layout(segments: &[String], max_w: f32, adv: &mut impl FnMut(char) -> f32
 
 /// 行を MAX_LINES 行ずつのページにする。1 ページに収まらないとき (ページが 2 つ以上) は、右端のページ番号の分
 /// (PAGE_W) を空けて割り直す
-pub fn pages(segments: &[String], max_w: f32, adv: &mut impl FnMut(char) -> f32) -> Vec<Vec<String>> {
-    let mut lines = layout(segments, max_w, adv);
+pub fn pages(prefix: &str, segments: &[String], max_w: f32, adv: &mut impl FnMut(char) -> f32) -> Vec<Vec<String>> {
+    let mut lines = layout(prefix, segments, max_w, adv);
     if lines.len() > MAX_LINES {
-        lines = layout(segments, max_w - PAGE_W, adv);
+        lines = layout(prefix, segments, max_w - PAGE_W, adv);
     }
     lines.chunks(MAX_LINES).map(<[String]>::to_vec).collect()
 }
@@ -94,7 +94,20 @@ pub fn draw(pm: &mut Pixmap, text: &mut Text, w: Option<&Warnings>, at: Rect, no
         text.draw(pm, msg, at.x + PAD_X, at.y + at.h / 2.0 + PX * 0.35, PX, MUTED);
         return;
     };
-    let all = pages(&lines, at.w - PAD_X * 2.0, &mut |c| {
+    draw_pages(pm, text, at, top, PREFIX, &lines, now_ms);
+}
+
+/// 帯の地 (top の色。特別警報は白い縁) を塗り、先頭に prefix を付けた文 segments を 2 行ずつのページで描く
+pub fn draw_pages(
+    pm: &mut Pixmap,
+    text: &mut Text,
+    at: Rect,
+    top: WarningLevel,
+    prefix: &str,
+    segments: &[String],
+    now_ms: u64,
+) {
+    let all = pages(prefix, segments, at.w - PAD_X * 2.0, &mut |c| {
         text.width(c.encode_utf8(&mut [0; 4]), PX)
     });
     let page = page_at(now_ms, all.len());
@@ -142,6 +155,7 @@ mod tests {
     #[test]
     fn a_short_text_is_one_line_joined_like_the_page() {
         let l = layout(
+            PREFIX,
             &segs(&["レベル３土砂災害警報: 東京都 八丈町", "強風警報: 沖縄県 那覇市"]),
             100.0,
             &mut adv,
@@ -154,13 +168,13 @@ mod tests {
 
     #[test]
     fn a_long_text_wraps_to_as_many_lines_as_it_needs() {
-        let l = layout(&segs(&["あいうえおかきくけこ", "さしすせそ"]), 15.0, &mut adv);
+        let l = layout(PREFIX, &segs(&["あいうえおかきくけこ", "さしすせそ"]), 15.0, &mut adv);
         assert_eq!(l.len(), 2);
         assert!(l[0].starts_with("【気象警報】"), "{l:?}");
         assert!(!l[1].starts_with(' ') && l[1].ends_with("さしすせそ"), "{l:?}");
         // 切り捨てない: 並べ直した全文が元の文と同じ
         let long = segs(&["あいうえおかきくけこ", "さしすせそたちつてと", "なにぬねのはひふへほ"]);
-        let rows = layout(&long, 15.0, &mut adv);
+        let rows = layout(PREFIX, &long, 15.0, &mut adv);
         assert!(
             rows.len() > 2 && rows.iter().all(|r| r.chars().map(adv).sum::<f32>() <= 15.0),
             "{rows:?}"
@@ -175,12 +189,17 @@ mod tests {
     fn two_lines_are_one_page_and_more_are_split_into_pages_of_two_lines() {
         // 全角 1 字 = 10 の幅
         let mut adv10 = |c: char| adv(c) * 10.0;
-        let short = pages(&segs(&["あいうえおかきくけこ", "さしすせそ"]), 150.0, &mut adv10);
+        let short = pages(
+            PREFIX,
+            &segs(&["あいうえおかきくけこ", "さしすせそ"]),
+            150.0,
+            &mut adv10,
+        );
         assert_eq!(short.len(), 1);
         let long: Vec<String> = (0..8)
             .map(|i| format!("レベル３大雨警報: 県{i} あいうえおかきくけこ"))
             .collect();
-        let ps = pages(&long, 200.0 + PAGE_W, &mut adv10);
+        let ps = pages(PREFIX, &long, 200.0 + PAGE_W, &mut adv10);
         assert!(ps.len() >= 2 && ps.iter().all(|p| (1..=2).contains(&p.len())), "{ps:?}");
         // 2 ページ以上のときは、ページ番号の幅を空けて割る
         assert!(
