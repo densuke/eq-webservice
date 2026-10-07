@@ -37,8 +37,8 @@ struct AppState<S> {
     send_timeout: Duration,
 }
 
-/// POST /api/tts/announce の同時実行数。1 本あたり最大 約 53MB (cache::MAX_ANNOUNCE_SAMPLES のコメント参照)、
-/// 送信が終わるまで枠を持つので、2 本で 約 106MB。256MB の MemoryMax に収まる数
+/// POST /api/tts/announce の同時実行数。1 本あたり最大 約 27MB (cache::MAX_ANNOUNCE_SAMPLES のコメント参照)、
+/// 送信が終わるまで枠を持つので、2 本で 約 54MB。256MB の MemoryMax に収まる数
 const MAX_ANNOUNCE_CONCURRENCY: usize = 2;
 
 pub fn router<S: Synth>(
@@ -94,12 +94,9 @@ impl RateQuery {
         matches!(self.rate, None | Some(wav::RATE) | Some(22_050))
     }
 
-    /// 組み立てた PCM を、指定の周波数の WAV にする
-    fn encode(&self, pcm: &[i16]) -> Vec<u8> {
-        match self.rate {
-            Some(22_050) => wav::encode_half(pcm),
-            _ => wav::encode(pcm),
-        }
+    /// 22.05kHz にするか
+    fn half(&self) -> bool {
+        self.rate == Some(22_050)
     }
 
     fn apply(&self, bytes: Vec<u8>) -> Vec<u8> {
@@ -263,10 +260,8 @@ async fn announce<S: Synth>(
     if segs.is_empty() {
         return StatusCode::NOT_FOUND.into_response();
     }
-    match cache.announce_cached(&segs).await {
-        Ok(Some(pcm)) => {
-            let bytes = q.encode(&pcm);
-            drop(pcm);
+    match cache.announce_wav(&segs, q.half()).await {
+        Ok(Some(bytes)) => {
             let len = bytes.len();
             let mut res = (
                 [(header::CONTENT_TYPE, "audio/wav")],

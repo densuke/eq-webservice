@@ -60,32 +60,87 @@ pub fn half_rate(wav: &[u8]) -> anyhow::Result<Vec<u8>> {
 
 /// PCM を半分の点数 (22.05kHz) にして WAV に書く。
 pub fn encode_half(pcm: &[i16]) -> Vec<u8> {
-    let half: Vec<i16> = pcm
-        .as_chunks::<2>()
-        .0
-        .iter()
-        .map(|[a, b]| ((*a as i32 + *b as i32) / 2) as i16)
-        .collect();
-    encode_at(&half, RATE / 2)
+    let mut sink = Sink::new(pcm.len(), RATE / 2);
+    sink.extend(pcm);
+    sink.finish()
 }
 
 fn encode_at(pcm: &[i16], rate: u32) -> Vec<u8> {
-    let data_len = (pcm.len() * 2) as u32;
-    let mut out = Vec::with_capacity(44 + pcm.len() * 2);
-    out.extend_from_slice(b"RIFF");
-    out.extend_from_slice(&(36 + data_len).to_le_bytes());
-    out.extend_from_slice(b"WAVEfmt ");
-    out.extend_from_slice(&16u32.to_le_bytes());
-    out.extend_from_slice(&1u16.to_le_bytes()); // PCM
-    out.extend_from_slice(&1u16.to_le_bytes()); // モノラル
-    out.extend_from_slice(&rate.to_le_bytes());
-    out.extend_from_slice(&(rate * 2).to_le_bytes()); // byte rate
-    out.extend_from_slice(&2u16.to_le_bytes()); // block align
-    out.extend_from_slice(&16u16.to_le_bytes());
-    out.extend_from_slice(b"data");
-    out.extend_from_slice(&data_len.to_le_bytes());
-    out.extend(pcm.iter().flat_map(|s| s.to_le_bytes()));
-    out
+    let mut sink = Sink::new(pcm.len(), rate);
+    sink.extend(pcm);
+    sink.finish()
+}
+
+/// 44 バイトの標準ヘッダ (data は data_len バイト)
+fn header(data_len: u32, rate: u32) -> [u8; 44] {
+    let mut h = Vec::with_capacity(44);
+    h.extend_from_slice(b"RIFF");
+    h.extend_from_slice(&(36 + data_len).to_le_bytes());
+    h.extend_from_slice(b"WAVEfmt ");
+    h.extend_from_slice(&16u32.to_le_bytes());
+    h.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    h.extend_from_slice(&1u16.to_le_bytes()); // モノラル
+    h.extend_from_slice(&rate.to_le_bytes());
+    h.extend_from_slice(&(rate * 2).to_le_bytes()); // byte rate
+    h.extend_from_slice(&2u16.to_le_bytes()); // block align
+    h.extend_from_slice(&16u16.to_le_bytes());
+    h.extend_from_slice(b"data");
+    h.extend_from_slice(&data_len.to_le_bytes());
+    h.try_into().unwrap()
+}
+
+/// WAV の出力を 1 つのバッファに直接書き足す。PCM を連結した大きな Vec<i16> を作らずに済む。
+/// 先頭にヘッダを置き、`finish` で実際の長さに直す (見込みより短くなっても正しい)。
+/// 半分の点数 (22.05kHz) では、隣り合う 2 点の平均を書く。部品の境目をまたぐ組も平均する (連結してから落とすのと同じ)
+pub struct Sink {
+    out: Vec<u8>,
+    rate: u32,
+    /// 半分にするときの、平均の相手待ちの 1 点
+    pending: Option<i16>,
+}
+
+impl Sink {
+    /// samples は、入れる点数の見込み (バッファの確保にだけ使う)。rate は RATE か RATE / 2
+    pub fn new(samples: usize, rate: u32) -> Self {
+        let per_out = if rate == RATE { 1 } else { 2 };
+        let mut out = Vec::with_capacity(44 + samples / per_out * 2);
+        out.extend_from_slice(&header(0, rate));
+        Sink {
+            out,
+            rate,
+            pending: None,
+        }
+    }
+
+    /// 入力は常に 44.1kHz の点
+    pub fn extend(&mut self, pcm: &[i16]) {
+        if self.rate == RATE {
+            self.out.extend(pcm.iter().flat_map(|s| s.to_le_bytes()));
+            return;
+        }
+        for &s in pcm {
+            match self.pending.take() {
+                Some(a) => self
+                    .out
+                    .extend_from_slice(&(((a as i32 + s as i32) / 2) as i16).to_le_bytes()),
+                None => self.pending = Some(s),
+            }
+        }
+    }
+
+    /// 無音を n 点入れる
+    pub fn silence(&mut self, n: usize) {
+        for _ in 0..n {
+            self.extend(&[0]);
+        }
+    }
+
+    /// ヘッダの長さを直して返す (相手待ちの端の 1 点は捨てる)
+    pub fn finish(mut self) -> Vec<u8> {
+        let data_len = (self.out.len() - 44) as u32;
+        self.out[..44].copy_from_slice(&header(data_len, self.rate));
+        self.out
+    }
 }
 
 /// 部品の間にだけ gap_ms の無音を挟んで連結する。
@@ -237,5 +292,85 @@ mod tests {
     #[test]
     fn half_rate_rejects_broken_input() {
         assert!(half_rate(b"not a wav").is_err());
+    }
+
+    // 以前の実装 (PCM を全部つないでから書く)。Sink の出力がバイト単位で同じことの基準
+    fn old_encode_at(pcm: &[i16], rate: u32) -> Vec<u8> {
+        let data_len = (pcm.len() * 2) as u32;
+        let mut out = Vec::with_capacity(44 + pcm.len() * 2);
+        out.extend_from_slice(b"RIFF");
+        out.extend_from_slice(&(36 + data_len).to_le_bytes());
+        out.extend_from_slice(b"WAVEfmt ");
+        out.extend_from_slice(&16u32.to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&rate.to_le_bytes());
+        out.extend_from_slice(&(rate * 2).to_le_bytes());
+        out.extend_from_slice(&2u16.to_le_bytes());
+        out.extend_from_slice(&16u16.to_le_bytes());
+        out.extend_from_slice(b"data");
+        out.extend_from_slice(&data_len.to_le_bytes());
+        out.extend(pcm.iter().flat_map(|s| s.to_le_bytes()));
+        out
+    }
+
+    fn old_encode_half(pcm: &[i16]) -> Vec<u8> {
+        let half: Vec<i16> = pcm
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|[a, b]| ((*a as i32 + *b as i32) / 2) as i16)
+            .collect();
+        old_encode_at(&half, RATE / 2)
+    }
+
+    fn sample_parts() -> Vec<Vec<i16>> {
+        // 奇数長・偶数長・空・極端な値をまぜる (部品の境目で組がずれる)
+        vec![
+            vec![1, -2, 3],
+            vec![i16::MAX, i16::MIN],
+            vec![],
+            vec![7, 8, 9, 10, 11],
+            vec![-5],
+        ]
+    }
+
+    #[test]
+    fn sink_output_is_byte_identical_to_the_old_join_then_encode() {
+        let parts = sample_parts();
+        for gap_ms in [0u32, 150] {
+            let gap = (RATE as u64 * gap_ms as u64 / 1000) as usize;
+            let nonempty: Vec<&Vec<i16>> = parts.iter().collect();
+            let all = join(&parts, gap_ms);
+            for half in [false, true] {
+                let rate = if half { RATE / 2 } else { RATE };
+                let mut sink = Sink::new(1, rate); // 見込み違いでも正しい
+                for (i, p) in nonempty.iter().enumerate() {
+                    if i > 0 {
+                        sink.silence(gap);
+                    }
+                    sink.extend(p);
+                }
+                let want = if half {
+                    old_encode_half(&all)
+                } else {
+                    old_encode_at(&all, RATE)
+                };
+                assert_eq!(sink.finish(), want, "gap_ms={gap_ms} half={half}");
+            }
+        }
+    }
+
+    #[test]
+    fn encode_and_encode_half_are_unchanged() {
+        for pcm in [
+            vec![],
+            vec![1],
+            vec![1, 2],
+            vec![i16::MAX, i16::MAX, i16::MIN, i16::MIN, 3],
+        ] {
+            assert_eq!(encode(&pcm), old_encode_at(&pcm, RATE));
+            assert_eq!(encode_half(&pcm), old_encode_half(&pcm));
+        }
     }
 }
