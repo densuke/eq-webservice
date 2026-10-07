@@ -18,6 +18,7 @@ mod telop;
 mod tts;
 mod weather;
 mod youtube;
+mod youtube_viewers;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -101,6 +102,14 @@ async fn main() -> anyhow::Result<()> {
         city_weather::spawn(city.clone());
     }
     routes.push(city_weather::router(city));
+    let viewers = youtube_viewers::Shared::default();
+    if cfg.viewers.enabled {
+        match cfg.viewers.check() {
+            Ok(()) => youtube_viewers::spawn(cfg.viewers.clone(), viewers.clone()),
+            Err(e) => tracing::warn!("{e}"),
+        }
+    }
+    routes.push(youtube_viewers::router(viewers));
     routes.push(http::source_router(cfg.source.kind()));
     routes.push(bgm::router(&cfg.bgm));
     routes.push(banner::router(&cfg.banner));
