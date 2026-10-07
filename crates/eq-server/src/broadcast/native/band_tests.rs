@@ -51,7 +51,7 @@ fn write_band_pngs_when_asked() {
     save("band_none.png", r.render(&scene(None, &[], Some(&calm), None)));
     save("band_1line.png", r.render(&scene(None, &[], Some(&one), None)));
     save("band_2lines.png", r.render(&scene(None, &[], Some(&two), None)));
-    for (i, sec) in [0u64, 8, 16].into_iter().enumerate() {
+    for (i, sec) in (0u64..6).map(|i| i * 8).enumerate() {
         let sc = Scene {
             now_ms: now + sec * 1000,
             ..scene(None, &[], Some(&many), None)
@@ -106,7 +106,7 @@ fn write_quake_band_pngs_when_asked() {
     ];
     let watch = [area("福井県", TsunamiGrade::Watch)];
     let all: Vec<_> = major.iter().chain(&warn).cloned().collect();
-    let cases: [(&str, &[TsunamiArea], &Warnings, u64); 7] = [
+    let cases: [(&str, &[TsunamiArea], &Warnings, u64); 8] = [
         ("major", &major, &minor, 0),
         ("warning", &warn, &minor, 0),
         ("special", &[], &special, 0),
@@ -114,8 +114,9 @@ fn write_quake_band_pngs_when_asked() {
         ("all_three_p1", &all, &many_special, 0),
         ("all_three_p2", &all, &many_special, 8000),
         ("all_three_p3", &all, &many_special, 16000),
+        ("all_three_p4", &all, &many_special, 24000),
     ];
-    let now = scene(None, &[], None, None).now_ms / 24000 * 24000;
+    let now = scene(None, &[], None, None).now_ms / 48000 * 48000;
     for (name, areas, w, dt) in cases {
         let mk = |a, w| Scene {
             tsunami: a,

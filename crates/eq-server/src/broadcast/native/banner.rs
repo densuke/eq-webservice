@@ -83,6 +83,15 @@ fn paginate(sections: &[Section], max_w: f32, adv: &mut impl FnMut(char) -> f32)
                 w += adv(chars[end]);
                 end += 1;
             }
+            // 残りがあるときは、収まる範囲の最後の区切りの直後で折る (区切りが無ければ文字で割る)
+            if end < chars.len() {
+                if let Some(p) = (pos + 1..=end)
+                    .rev()
+                    .find(|&p| matches!(chars[p - 1], '、' | '・' | ' '))
+                {
+                    end = p;
+                }
+            }
             cur.push(format!("{head}{}", chars[pos..end].iter().collect::<String>()));
             pos = end;
             first = false;
@@ -195,6 +204,35 @@ mod tests {
             .map(|r| r.replace("【気象警報】(続き) ", "").replace("【気象警報】 ", ""))
             .collect();
         assert_eq!(joined, body);
+    }
+
+    #[test]
+    fn lines_break_after_a_separator_and_only_unbroken_words_are_split_by_character() {
+        // 1 行 10 字: 「あいう・えおか・きくけこ」は区切りの直後で折れる
+        let p = paginate(
+            &[Section::new("【見】", "あいう・えおか・きくけこ・さしす".into())],
+            10.0,
+            &mut adv,
+        );
+        let rows: Vec<&String> = p.iter().flatten().collect();
+        assert_eq!(rows[0], "【見】 あいう・");
+        let body: String = rows
+            .iter()
+            .map(|r| r.rsplit_once(' ').map_or(r.as_str(), |x| x.1).to_string())
+            .collect();
+        assert!(body.contains("さしす"), "{rows:?}");
+        // 区切りの無い長い語は文字で割れ、全文字が残る
+        let long = "あいうえおかきくけこさしすせそ";
+        let p = paginate(&[Section::new("【見】", long.into())], 10.0, &mut adv);
+        let joined: String = p
+            .iter()
+            .flatten()
+            .map(|r| r.replace("【見】(続き) ", "").replace("【見】 ", ""))
+            .collect();
+        assert_eq!(joined, long);
+        // 空白も区切り: 「岐阜県 第1市」は県の後ろで折れる
+        let p = paginate(&[Section::new("【見】", "あいお県 第1市".into())], 10.0, &mut adv);
+        assert_eq!(p[0][0], "【見】 あいお県 ");
     }
 
     #[test]
