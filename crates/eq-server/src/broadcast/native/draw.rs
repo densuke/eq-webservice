@@ -66,6 +66,8 @@ pub struct Scene<'a> {
     pub fast_forward: bool,
     /// 上部バーの右に出す状態の札 (docs/broadcast-status.md)。ライブだけが入れる。再現動画は None
     pub status: Option<Notice>,
+    /// 上部バーに出す同接 (取れて新しいときだけ。ライブだけが入れる。再現動画は None)
+    pub viewers: Option<u64>,
     /// 平時の右パネルの下に出すお知らせ (docs/broadcast-native.md)。ライブだけが入れる。再現動画は None
     pub notices: Option<&'a Notices>,
 }

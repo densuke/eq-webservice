@@ -29,6 +29,7 @@ mod step;
 mod telops;
 mod test_mark;
 mod text;
+mod viewers;
 mod yuv;
 
 use std::sync::{Arc, Mutex};
@@ -69,6 +70,8 @@ const POLL_RETRY: Duration = Duration::from_secs(30);
 const ICON_CHECK: Duration = Duration::from_secs(5);
 const ICON_RETRY: Duration = Duration::from_secs(60);
 const BGM_TITLE_EVERY: Duration = Duration::from_secs(15);
+/// 同接を取り直す間隔
+const VIEWERS_EVERY: Duration = Duration::from_secs(60);
 /// 覚えておく地震情報の数
 const MAX_EVENTS: usize = 300;
 /// 履歴に出す地震の数
@@ -86,6 +89,8 @@ struct State {
     notices: Option<Notices>,
     icons: Icons,
     bgm_title: String,
+    /// 同接 (取れていなければ None)。描き直しの合図 (rev) は進めない (still_key に出す値を入れる)
+    viewers: Option<viewers::Sample>,
     connected: bool,
     rev: u64,
 }
@@ -222,6 +227,7 @@ pub fn start(
         tokio::spawn(notice_loop(format!("{server}/api/banners"), st.clone())),
         tokio::spawn(icon_loop(icon::IMG_BASE.to_string(), st.clone())),
         tokio::spawn(bgm_title_loop(format!("{server}/stream/status-json.xsl"), st.clone())),
+        tokio::spawn(viewers_loop(format!("{server}/api/viewers"), st.clone())),
         tokio::spawn(render_loop(
             renderer,
             st,
@@ -334,6 +340,7 @@ async fn render_loop(renderer: Renderer, st: Shared, out: Out, notices: Option<U
                 hindsight: None,
                 fast_forward: false,
                 status,
+                viewers: viewers::visible(s.viewers, model::server_now(local_now_ms(), s.offset), local_now_ms()),
                 notices: s.notices.as_ref(),
             })
         };
@@ -572,6 +579,29 @@ async fn bgm_title_loop(url: String, st: Shared) {
             change(&st, |s| s.bgm_title = title);
         }
         tokio::time::sleep(BGM_TITLE_EVERY).await;
+    }
+}
+
+/// 同接を 60 秒おきに取る。失敗は前回の値のまま (古くなれば visible が隠す)。無効 (404) なら取りに行くのをやめる
+async fn viewers_loop(url: String, st: Shared) {
+    let Ok(client) = crate::net::client(Duration::from_secs(5)) else {
+        return;
+    };
+    loop {
+        match crate::net::json::<viewers::Wire>(client.get(&url)).await {
+            Ok(w) => {
+                let sample = viewers::Sample::from_wire(&w, local_now_ms());
+                st.lock().unwrap_or_else(|e| e.into_inner()).viewers = sample;
+            }
+            Err(e)
+                if e.downcast_ref::<reqwest::Error>().and_then(|e| e.status())
+                    == Some(reqwest::StatusCode::NOT_FOUND) =>
+            {
+                return;
+            }
+            Err(_) => {}
+        }
+        tokio::time::sleep(VIEWERS_EVERY).await;
     }
 }
 

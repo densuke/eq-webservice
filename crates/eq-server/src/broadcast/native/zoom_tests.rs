@@ -89,6 +89,7 @@ fn input<'a>(events: &'a [Event], now: u64, icons: &'a Icons) -> Input<'a> {
         hindsight: None,
         fast_forward: false,
         status: None,
+        viewers: None,
         notices: None,
     }
 }
@@ -197,6 +198,7 @@ fn the_insets_are_not_drawn_while_zoomed_and_come_back_at_home() {
         hindsight: None,
         fast_forward: false,
         status: None,
+        viewers: None,
         notices: None,
     };
     // 南西諸島の別枠の縁 (枠の 1 画素外側の線)
@@ -445,6 +447,7 @@ fn write_zoomed_png_when_asked() {
         hindsight: None,
         fast_forward: false,
         status: None,
+        viewers: None,
         notices: None,
     };
     let aim = camera::Aim {
@@ -486,6 +489,7 @@ fn eew_scene<'a>(e: &'a eew::EewSummary, icons: &'a Icons, now_ms: u64) -> Scene
         hindsight: None,
         fast_forward: false,
         status: None,
+        viewers: None,
         notices: None,
     }
 }
@@ -785,6 +789,7 @@ fn sub_map_cost() {
                     hindsight: None,
                     fast_forward: false,
                     status: None,
+                    viewers: None,
                     notices: None,
                 };
                 let renders: Vec<f64> = (0..RENDERS)
