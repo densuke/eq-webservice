@@ -15,6 +15,11 @@ ExecStart=/opt/eq-server/eq-server --config /opt/eq-server/config.toml
 # 待ち受けポート (リバースプロキシの転送先に合わせる)。config.toml の listen より優先
 Environment=EQ_PORT=8080
 Environment=RUST_LOG=info
+# glibc の malloc は既定でスレッドごとに最大 コア数×8 個のアリーナ (n2 は 2 コアで 16 個) を作る。tokio のマルチスレッドで
+# 大きな確保 (読み上げの WAV 数十 MB など) を別々のスレッドが繰り返すと、アリーナごとに空きが残り、解放しても RSS が戻りにくい
+# (Issue #196: 平常 29MB に対し最大 227MB)。2 個に絞ると空きを共有できて断片化が減る。効果は実測前の見込みで、
+# 適用後は memwatch のログ (journalctl の "memory: current_mb=") で最大値の推移を見て確かめる。手順は INSTALL.md
+Environment=MALLOC_ARENA_MAX=2
 # DISCORD_WEBHOOK_URL などの秘密情報はこちらに
 EnvironmentFile=-/etc/default/eq-server
 Restart=always

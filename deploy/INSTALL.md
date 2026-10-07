@@ -45,6 +45,26 @@ journalctl -u eq-server -f
 ポートはユニットファイルの `Environment=EQ_PORT=8080` で変えられます。
 Discord の Webhook URL などは `/etc/default/eq-server` に `DISCORD_WEBHOOK_URL=...` と書きます。
 
+### メモリの記録と MALLOC_ARENA_MAX
+
+eq-server と `eq-server broadcast` は、自分の cgroup (systemd のユニット) のメモリを 1 分ごとにログへ出します
+(`memory: current_mb=... peak_mb=... max_mb=...`)。`MemoryMax` の 80% を超えると WARN になります。
+最大値がいつ出たかは `journalctl -u eq-server | grep 'memory:'` (配信は `journalctl --user -u eq-broadcast`) で追えます。
+
+ユニットには glibc の断片化を抑える `Environment=MALLOC_ARENA_MAX=2` が入っています。既存の配置に足すときは、
+ユニットファイルを差し替えるか drop-in を作り、再起動します (配信は `PartOf` なので eq-server の再起動に連動)。
+
+```sh
+# system のユニット (eq-server)
+sudo systemctl edit eq-server        # [Service] に Environment=MALLOC_ARENA_MAX=2 を書く
+sudo systemctl restart eq-server
+# user のユニット (eq-broadcast)
+systemctl --user edit eq-broadcast   # 同じ内容
+systemctl --user restart eq-broadcast
+# 効いているか
+tr '\0' '\n' < /proc/$(systemctl show -p MainPID --value eq-server)/environ | grep MALLOC_ARENA_MAX
+```
+
 ## 4. Caddy から転送
 
 `deploy/Caddyfile.example` を参考に `reverse_proxy 127.0.0.1:<port>` を追加して `caddy reload` します。
