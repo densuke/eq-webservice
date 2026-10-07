@@ -168,6 +168,7 @@ fn frame_input<'a>(label: &'a str, events: &'a [Event], f: &'a Frame, icons: &'a
         hindsight: f.hindsight.as_ref(),
         fast_forward: f.fast_forward,
         status: None,
+        viewers: None,
         notices: None,
     }
 }

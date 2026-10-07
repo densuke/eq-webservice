@@ -126,6 +126,7 @@ pub(super) fn scene<'a>(
         hindsight: None,
         fast_forward: false,
         status: None,
+        viewers: None,
         notices: None,
     }
 }
@@ -713,6 +714,28 @@ fn write_fixture_pngs_when_asked() {
     })
     .save_png(std::path::Path::new(&out).join("status_busy_long_bgm.png"))
     .unwrap();
+    // 同接: BGM の左 / 長い BGM は切り詰めて同接を優先 / 札も一緒 / 値なし
+    for (name, viewers, bgm_title, status) in [
+        ("viewers_bgm.png", Some(1234), "テスト曲", None),
+        (
+            "viewers_long_bgm.png",
+            Some(1234),
+            "とても長い曲名のBGM とても長い曲名のBGM とても長い曲名のBGM とても長い曲名のBGM",
+            None,
+        ),
+        ("viewers_chip.png", Some(12), "テスト曲", busy),
+        ("viewers_none.png", None, "テスト曲", None),
+    ] {
+        r.render(&Scene {
+            viewers,
+            bgm_title,
+            status,
+            label: "配信元の名前",
+            ..scene(None, &history[1..], Some(&ishikari), Some(&weather))
+        })
+        .save_png(std::path::Path::new(&out).join(name))
+        .unwrap();
+    }
     // テスト配信の帯と警報の帯 (2 行) の下にも、情報の窓が重ならない
     let test_png = r.render(&Scene {
         test: true,
@@ -920,6 +943,7 @@ fn input<'a>(events: &'a [Event], now: u64, h: Option<&'a Hindsight>) -> Input<'
         hindsight: h,
         fast_forward: false,
         status: None,
+        viewers: None,
         notices: None,
     }
 }
