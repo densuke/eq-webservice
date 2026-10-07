@@ -1,6 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { viewersLabel } from "./viewers.ts";
+import { isDisabled, viewersLabel } from "./viewers.ts";
+
+test("a server that never fetched (updated_ms 0) means disabled", () => {
+  assert.equal(isDisabled({ viewers: null, video_id: "", updated_ms: 0 }), true);
+  assert.equal(isDisabled({ viewers: null, updated_ms: 1 }), false);
+  assert.equal(isDisabled(null), false);
+});
 
 const now = 1_000_000_000;
 

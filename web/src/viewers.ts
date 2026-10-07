@@ -16,21 +16,33 @@ export function viewersLabel(data: unknown, now: number): string | null {
   return `同接 ${viewers.toLocaleString("ja-JP")} 人`;
 }
 
-async function refresh(): Promise<void> {
+/** サーバが無効 (まだ一度も取っていない。updated_ms が 0) なら、以後取りに行かない */
+export function isDisabled(data: unknown): boolean {
+  return typeof data === "object" && data !== null && (data as { updated_ms?: unknown }).updated_ms === 0;
+}
+
+/** 取りに行って表示を更新する。もう取りに行かなくてよいときは true */
+async function refresh(): Promise<boolean> {
   const el = document.getElementById("viewers");
-  if (!el) return;
+  if (!el) return true;
   let label: string | null = null;
+  let off = false;
   try {
     const res = await fetch("api/viewers");
-    if (res.ok) label = viewersLabel(await res.json(), Date.now());
+    if (res.ok) {
+      const data: unknown = await res.json();
+      off = isDisabled(data);
+      label = viewersLabel(data, Date.now());
+    }
   } catch {
     // 取れなければ出さない
   }
   el.hidden = label === null;
   el.textContent = label ?? "";
+  return off;
 }
 
 export function startViewers(): void {
-  void refresh();
-  window.setInterval(() => void refresh(), EVERY_MS);
+  const timer = window.setInterval(() => void refresh().then((off) => off && clearInterval(timer)), EVERY_MS);
+  void refresh().then((off) => off && clearInterval(timer));
 }

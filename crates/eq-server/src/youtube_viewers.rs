@@ -16,9 +16,13 @@ use serde_json::Value;
 
 const API: &str = "https://www.googleapis.com/youtube/v3";
 /// API キーで探す search.list は 1 回 100 単位 (1 日 10,000 単位) なので、探し直しはこの間隔より詰めない
-const SEARCH_GAP_KEY: Duration = Duration::from_secs(600);
+/// (30 分ごとで 1 日 4,800 単位。videos.list の 1,440 単位と合わせて 6,240 単位)
+const SEARCH_GAP_KEY: Duration = Duration::from_secs(1800);
+/// 取得の間隔の範囲 (秒)。上は web が古い値を捨てる 5 分 (STALE_MS) と合わせる
+const INTERVAL_MIN: u64 = 10;
+const INTERVAL_MAX: u64 = 300;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct ViewersConfig {
     pub enabled: bool,
@@ -47,7 +51,26 @@ impl Default for ViewersConfig {
     }
 }
 
+/// api_key は伏せる (設定を丸ごとログに出しても漏れない)
+impl std::fmt::Debug for ViewersConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ViewersConfig")
+            .field("enabled", &self.enabled)
+            .field("interval_sec", &self.interval_sec)
+            .field("api_key", &if self.api_key.is_empty() { "" } else { "<redacted>" })
+            .field("token_file", &self.token_file)
+            .field("video_id", &self.video_id)
+            .field("channel_id", &self.channel_id)
+            .finish()
+    }
+}
+
 impl ViewersConfig {
+    /// 取得の間隔。10 秒から 300 秒に収める
+    pub fn interval(&self) -> Duration {
+        Duration::from_secs(self.interval_sec.clamp(INTERVAL_MIN, INTERVAL_MAX))
+    }
+
     /// 有効なのに足りない・重なっている設定を、起動時に知らせる
     pub fn check(&self) -> Result<(), &'static str> {
         if self.api_key.is_empty() == self.token_file.is_empty() {
@@ -175,7 +198,7 @@ async fn tick(client: &reqwest::Client, cfg: &ViewersConfig, shared: &Shared, st
     if cfg.video_id.is_empty() && should_search(cached, st.last, st.searched.map(|t| t.elapsed()), gap) {
         st.searched = Some(Instant::now());
         let url = if oauth {
-            format!("{API}/liveBroadcasts?part=id&mine=true&broadcastStatus=active&maxResults=1")
+            format!("{API}/liveBroadcasts?part=id&broadcastStatus=active&broadcastType=all&maxResults=1")
         } else {
             format!(
                 "{API}/search?part=id&channelId={}&eventType=live&type=video&maxResults=1",
@@ -207,6 +230,8 @@ pub fn spawn(cfg: ViewersConfig, shared: Shared) {
             Ok(c) => c,
             Err(e) => return tracing::warn!("viewers: {e:#}"),
         };
+        // 有効なら updated_ms は 0 でなくなる (web は 0 を「無効」と見て取りに行かなくなる)
+        set(&shared, None, &cfg.video_id);
         let mut st = State {
             video: cfg.video_id.clone(),
             last: None,
@@ -218,7 +243,7 @@ pub fn spawn(cfg: ViewersConfig, shared: Shared) {
                 tracing::warn!("viewers: {e:#}");
                 set(&shared, None, &st.video);
             }
-            tokio::time::sleep(Duration::from_secs(cfg.interval_sec.max(10))).await;
+            tokio::time::sleep(Duration::from_secs(cfg.interval().as_secs())).await;
         }
     });
 }
@@ -311,6 +336,28 @@ mod tests {
             ..Default::default()
         };
         assert!(both.check().is_err());
+    }
+
+    #[test]
+    fn interval_is_kept_between_10_and_300_seconds() {
+        let at = |s| {
+            ViewersConfig {
+                interval_sec: s,
+                ..Default::default()
+            }
+            .interval()
+            .as_secs()
+        };
+        assert_eq!((at(1), at(60), at(300), at(9999)), (10, 60, 300, 300));
+    }
+
+    #[test]
+    fn debug_hides_the_api_key() {
+        let c = ViewersConfig {
+            api_key: "SECRET".into(),
+            ..Default::default()
+        };
+        assert!(!format!("{c:?}").contains("SECRET"));
     }
 
     #[test]

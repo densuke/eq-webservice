@@ -230,7 +230,7 @@ interval_sec = 20   # 切り替える間隔 (秒)
 ```toml
 [viewers]
 enabled = true
-interval_sec = 60          # 取得の間隔 (秒。10 未満は 10)
+interval_sec = 60          # 取得の間隔 (秒。10〜300)
 token_file = "/home/eq/.config/pd2/youtube-upload-token.json"   # 認証: token_file か api_key のどちらか 1 つ
 # api_key = "..."
 channel_id = "UC..."       # 動画: channel_id (今の live を探す) か video_id (固定) のどちらか 1 つ
@@ -239,9 +239,12 @@ channel_id = "UC..."       # 動画: channel_id (今の live を探す) か vide
 
 - 応答は `{"viewers": N | null, "video_id": "...", "updated_ms": ...}`。無効・ライブでない・視聴者数が非表示・取得に失敗したときは `viewers` が null
 - `token_file` は OAuth の資格情報 JSON (client_id・client_secret・refresh_token・token_uri)。refresh_token でアクセストークンを取り直し、読むだけで書き戻しません
-- `channel_id` のときの動画の探し方: OAuth は `liveBroadcasts?mine=true` の live、API キーは `search` (1 回 100 単位)。見つけた動画 ID は覚えて、ライブでなくなったときだけ探し直します
-  (API キーの探し直しは 10 分以上あけます)
-- 費用は `videos.list` が 1 回 1 単位 (1 分ごとで 1 日 1,440 単位。上限は 10,000 単位)
+- `channel_id` のときの動画の探し方: OAuth は `liveBroadcasts?broadcastStatus=active&broadcastType=all` (常設の配信も拾う。1 回 1 単位)、API キーは `search` (1 回 100 単位)。見つけた動画 ID は覚えて、ライブでなくなったときだけ探し直します
+  (API キーの探し直しは 30 分以上あけます)
+- 割り当て (1 日 10,000 単位) の使い方: `videos.list` が 1 回 1 単位 (1 分ごとで 1 日 1,440 単位)。
+  API キーで `channel_id` のときは、さらに `search` が最大で 30 分ごと (1 日 48 回 = 4,800 単位) で、合計 6,240 単位。`video_id` を固定すれば 1,440 単位だけです
+- `token_file` (OAuth) は、pd2 のアップロードと同じプロジェクトの割り当てを共有します。アップロードの分を見込んでください
+- `interval_sec` は 10〜300 秒に収めます (超えたら警告して 300 秒。web は 5 分より古い値を出しません)
 - API キーとトークンはヘッダで送り、ログにも出しません。配信 (native) への表示は別の段で足します (Issue #178)
 
 ### 画面の並び (レイアウトの定義)

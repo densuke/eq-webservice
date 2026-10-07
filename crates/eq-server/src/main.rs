@@ -105,7 +105,15 @@ async fn main() -> anyhow::Result<()> {
     let viewers = youtube_viewers::Shared::default();
     if cfg.viewers.enabled {
         match cfg.viewers.check() {
-            Ok(()) => youtube_viewers::spawn(cfg.viewers.clone(), viewers.clone()),
+            Ok(()) => {
+                if cfg.viewers.interval().as_secs() != cfg.viewers.interval_sec {
+                    tracing::warn!(
+                        interval_sec = cfg.viewers.interval_sec,
+                        "viewers: interval_sec は 10〜300 秒に収めます"
+                    );
+                }
+                youtube_viewers::spawn(cfg.viewers.clone(), viewers.clone())
+            }
             Err(e) => tracing::warn!("{e}"),
         }
     }

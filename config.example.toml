@@ -96,7 +96,7 @@ interval_sec = 60
 # api_key = "..."                              # YouTube Data API v3 のキー
 # token_file = "~/.config/pd2/youtube-upload-token.json"  # OAuth の資格情報 JSON (refresh_token で取り直す。~ は展開されないので絶対パスで)
 # video_id = "qs2MfxEgBA0"                     # 動画を固定する
-# channel_id = "UC..."                         # 今の live を探す (OAuth は liveBroadcasts、キーは search で 100 単位。見つけたら覚える)
+# channel_id = "UC..."                         # 今の live を探す (OAuth は liveBroadcasts、キーは search で 100 単位 (30 分以上あけて探す)。見つけたら覚える)
 
 # 画面の並びの定義 (JSON)。書き換えてブラウザを再読み込みすれば変わる (再起動は不要)。
 # 空なら組み込みの定義 (web/src/layout.json)。正しくない定義は、画面が組み込みの定義を使う
