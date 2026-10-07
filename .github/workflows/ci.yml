@@ -175,7 +175,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm audit --omit=dev
+      - run: npm audit
         working-directory: web
 
   # カバレッジは計器として表示するだけ (合否には使わない)
