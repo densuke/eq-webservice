@@ -493,22 +493,25 @@ fn in_rect(i: usize, r: Rect) -> bool {
 }
 
 fn in_sub_rect(i: usize) -> bool {
-    in_rect(i, Placed::builtin().unwrap().sub.unwrap())
+    // 画素ごとに呼ばれるので、定義の読み込みは 1 度だけにする (毎回読むと debug で数十分かかっていた)
+    static SUB: std::sync::LazyLock<Rect> = std::sync::LazyLock::new(|| Placed::builtin().unwrap().sub.unwrap());
+    in_rect(i, *SUB)
 }
 
 /// 地震の画面で右の列が変わる範囲 (詳細からサブの地図・履歴まで。出典の上まで)
 fn in_quake_column(i: usize) -> bool {
-    let p = Placed::builtin().unwrap().for_screen(true);
-    let (d, h) = (p.detail.unwrap(), p.history.unwrap());
-    in_rect(
-        i,
+    // in_sub_rect と同じく画素ごとに呼ばれるので 1 度だけ求める
+    static COL: std::sync::LazyLock<Rect> = std::sync::LazyLock::new(|| {
+        let p = Placed::builtin().unwrap().for_screen(true);
+        let (d, h) = (p.detail.unwrap(), p.history.unwrap());
         Rect {
             x: d.x,
             y: d.y,
             w: d.w,
             h: h.bottom() - d.y,
-        },
-    )
+        }
+    });
+    in_rect(i, *COL)
 }
 
 #[test]
