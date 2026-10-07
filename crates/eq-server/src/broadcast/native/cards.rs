@@ -120,13 +120,13 @@ impl<'a> Zones<'a> {
         Zones { frame, items }
     }
 
-    /// 四角を横 5 x 縦 3 の点で調べ、区域の中に入る点が 1 つでもあれば真。
+    /// 四角を横 9 x 縦 5 の点で調べ、区域の中に入る点が 1 つでもあれば真 (細い区域に札の縁がかかるのを見落とさない間隔)。
     /// 外接矩形と重ならない区域は、多角形を調べずに飛ばす
     pub fn hit(&self, r: BoxRect) -> bool {
         self.items.iter().filter(|(b, _)| overlap(*b, r)).any(|(_, path)| {
-            (0..5).any(|i| {
-                (0..3).any(|j| {
-                    let p = (r.0 + r.2 * i as f32 / 4.0, r.1 + r.3 * j as f32 / 2.0);
+            (0..9).any(|i| {
+                (0..5).any(|j| {
+                    let p = (r.0 + r.2 * i as f32 / 8.0, r.1 + r.3 * j as f32 / 4.0);
                     self.frame.path_contains(path, p)
                 })
             })

@@ -28,7 +28,7 @@ fn inset_rect() -> super::layout_resolve::Rect {
     Placed::builtin().unwrap().inset.unwrap()
 }
 
-fn renderer(text: Text) -> Renderer {
+pub(super) fn renderer(text: Text) -> Renderer {
     renderer_with(text, Placed::builtin().unwrap())
 }
 
@@ -55,12 +55,12 @@ fn sea_px() -> (u32, u32) {
     (x as u32, y as u32)
 }
 
-fn rgb(pm: &Pixmap, (x, y): (u32, u32)) -> [u8; 3] {
+pub(super) fn rgb(pm: &Pixmap, (x, y): (u32, u32)) -> [u8; 3] {
     let p = pm.pixel(x, y).unwrap();
     [p.red(), p.green(), p.blue()]
 }
 
-fn quake(max: Scale, prefs: &[(&str, Scale)], at: Option<(f64, f64)>) -> QuakeSummary {
+pub(super) fn quake(max: Scale, prefs: &[(&str, Scale)], at: Option<(f64, f64)>) -> QuakeSummary {
     QuakeSummary {
         updated_ms: NOW,
         origin_time: "2026/09/30 12:00:00".into(),
@@ -104,7 +104,7 @@ fn eew(warning: bool, prefs: &[(&str, Scale)], at: Option<(f64, f64)>) -> EewSum
     }
 }
 
-fn scene<'a>(
+pub(super) fn scene<'a>(
     quake: Option<&'a QuakeSummary>,
     history: &'a [QuakeSummary],
     warnings: Option<&'a Warnings>,
@@ -228,16 +228,16 @@ fn an_eew_frame_paints_the_forecast_translucent_with_an_epicenter_and_a_colored_
     let (x, y) = View::fit_home(map_rect()).px(137.2, 37.5);
     assert!(near(&pm, (x as u32, y as u32), [0xe0, 0x1e, 0x1e]));
     // 右パネルの見出しの札: 警報は赤、予報は橙 (文字の左の余白)
-    assert_eq!(rgb(&pm, (SIDE + 3, 62)), [0xd7, 0x26, 0x3d]);
+    assert_eq!(rgb(&pm, (SIDE + 3, 112)), [0xd7, 0x26, 0x3d]);
     let forecast = eew(false, &[("石川県", Scale::S4)], Some((37.5, 137.2)));
     sc.eew = Some(&forecast);
-    assert_eq!(rgb(&r.render(&sc), (SIDE + 3, 62)), [0xb3, 0x59, 0x00]);
+    assert_eq!(rgb(&r.render(&sc), (SIDE + 3, 112)), [0xb3, 0x59, 0x00]);
     // 地震情報があれば、そちらを出す (観測の色、札は無い)
     let q = quake(Scale::S4, &[("石川県", Scale::S4)], Some((37.5, 137.2)));
     sc.quake = Some(&q);
     let pm = r.render(&sc);
     assert_eq!(rgb(&pm, center_of("石川県")), [0xfa, 0xf5, 0x00]);
-    assert_ne!(rgb(&pm, (SIDE + 3, 62)), [0xb3, 0x59, 0x00]);
+    assert_ne!(rgb(&pm, (SIDE + 3, 112)), [0xb3, 0x59, 0x00]);
 }
 
 #[test]
@@ -327,11 +327,11 @@ fn an_epicenter_just_west_of_the_inset_is_pinned_to_its_corner() {
     let mut sc = scene(None, &[], None, None);
     sc.eew = Some(&e);
     let pm = r.render(&sc);
-    assert!(near(&pm, (18, 258), [0xe0, 0x1e, 0x1e])); // 枠 (10,46 から高さ 220) の左下の隅
+    assert!(near(&pm, (18, 308), [0xe0, 0x1e, 0x1e])); // 枠 (10,96 から高さ 220) の左下の隅
                                                        // 遠い震央 (台湾の西) は、どこにも印を置かない
     let far = eew(false, &[], Some((23.6, 118.0)));
     sc.eew = Some(&far);
-    assert!(!near(&r.render(&sc), (18, 258), [0xe0, 0x1e, 0x1e]));
+    assert!(!near(&r.render(&sc), (18, 308), [0xe0, 0x1e, 0x1e]));
 }
 
 #[test]
@@ -339,8 +339,8 @@ fn the_okinawa_inset_is_drawn_with_land_and_the_scale_color() {
     let mut r = renderer(Text::none());
     let calm = r.render(&scene(None, &[], None, None));
     assert!(near(&calm, okinawa_px(), [0x3a, 0x42, 0x50])); // 別枠の中の沖縄本島は陸 (細い島なので、まわりも見る)
-    assert_eq!(rgb(&calm, (50, 60)), SEA); // 枠の中の海 (枠は 10,46 から)
-    let line = rgb(&calm, (9, 100)); // 枠線 (角の丸めで少しにじむ)
+    assert_eq!(rgb(&calm, (50, 110)), SEA); // 枠の中の海 (枠は 10,96 から)
+    let line = rgb(&calm, (9, 150)); // 枠線 (角の丸めで少しにじむ)
     assert!(line[2] > 60 && line[2] < 0x53, "{line:?}");
     let q = quake(Scale::S3, &[("沖縄県", Scale::S3)], None);
     let shaken = r.render(&scene(Some(&q), &[], None, None));
@@ -452,7 +452,7 @@ fn the_card_shows_tomorrow_every_other_interval_and_only_when_asked() {
 
 /// 情報の窓の中で、2 つの画面の画素が違うところの数 (縁を除く)
 fn window_diff(a: &Pixmap, b: &Pixmap) -> usize {
-    let (x, y, w, h) = super::calm::INFO_WINDOW;
+    let (x, y, w, h) = super::calm::info_window(Placed::builtin().unwrap().main);
     (y as u32 + 4..(y + h) as u32 - 4)
         .flat_map(|py| (x as u32 + 4..(x + w) as u32 - 4).map(move |px| (px, py)))
         .filter(|&p| rgb(a, p) != rgb(b, p))
@@ -461,11 +461,11 @@ fn window_diff(a: &Pixmap, b: &Pixmap) -> usize {
 
 #[test]
 fn the_info_window_sits_in_the_sea_clear_of_land_the_inset_and_the_banners() {
-    let (x, y, w, h) = super::calm::INFO_WINDOW;
+    let (x, y, w, h) = super::calm::info_window(Placed::builtin().unwrap().main);
     let inset = Frame::inset(&View::fit_home(map_rect()), &OKINAWA, inset_rect()).unwrap();
     let ((ix, _, iw, _), _) = inset.inset_box().unwrap();
     assert!(x > ix + iw); // 南西諸島の別枠の右
-    assert!(y > 36.0 + 20.0 + super::banner::banner_height(2)); // 上部バー・テスト配信の帯・警報の帯 (2 行) の下
+    assert!(y > map_rect().1 as f32 + super::test_mark::BAND_H); // 地図の上端・テスト配信の帯の下 (警報の帯は地図の外)
     assert!(x + w < 900.0 && y + h < 720.0 - 10.0 - 147.0); // 地図の中。左下の凡例より上
                                                             // 陸 (周辺国と日本) を描いた画面で、窓とその周り 6px が全部海の色
     let mut r = renderer(Text::none());
@@ -508,7 +508,7 @@ fn the_info_window_names_what_the_cards_show_in_the_same_frame() {
     let now = frame(&mut r, Some(&weather), None, noon + 5_000);
     let tomorrow = frame(&mut r, Some(&weather), None, noon + 25_000);
     // 窓の色が、窓の中にある (窓の枠の画素が海の色でなくなる)
-    let (x, y, _, _) = super::calm::INFO_WINDOW;
+    let (x, y, _, _) = super::calm::info_window(Placed::builtin().unwrap().main);
     assert_eq!(rgb(&plain, (x as u32 + 30, y as u32)), SEA);
     assert_ne!(rgb(&now, (x as u32 + 30, y as u32)), SEA);
     assert_ne!(rgb(&tomorrow, (x as u32 + 30, y as u32)), SEA);
@@ -734,12 +734,12 @@ fn test_broadcast_draws_red_bands_and_a_watermark_even_without_a_font() {
     let plain = r.render(&scene(None, &[], None, None));
     let marked = r.render(&test_scene(None, &[]));
     let red = super::test_mark::BAND;
-    // 上部バーのすぐ下と最下部の帯 (文字の無い端の画素)
-    assert_eq!(rgb(&marked, (5, 40)), red);
+    // 地図の上端 (警報の帯の下) と最下部の帯 (文字の無い端の画素)
+    assert_eq!(rgb(&marked, (5, 90)), red);
     assert_eq!(rgb(&marked, (5, 715)), red);
-    assert_ne!(rgb(&plain, (5, 40)), red);
+    assert_ne!(rgb(&plain, (5, 90)), red);
     // 地図の中央 (E の縦棒の上) に、うすい白が乗る
-    let (mx, my) = (450 - 256 + 134 + 5, 378 - 95 + 90);
+    let (mx, my) = (450 - 256 + 134 + 5, 403 - 95 + 90);
     assert_ne!(rgb(&marked, (mx, my)), rgb(&plain, (mx, my)));
     // 海の画素は、透かしの外なら変わらない
     assert_eq!(rgb(&marked, sea_px()), rgb(&plain, sea_px()));
@@ -765,6 +765,7 @@ fn hachijo(name: &str) -> Warnings {
 
 #[test]
 fn the_warning_banner_is_drawn_only_in_calm_and_only_for_warnings_and_above() {
+    use super::paint::PANEL;
     let mut r = renderer(Text::none());
     let at = |pm: &Pixmap| rgb(pm, (640, 50));
     let warn = hachijo("レベル３土砂災害警報");
@@ -774,26 +775,57 @@ fn the_warning_banner_is_drawn_only_in_calm_and_only_for_warnings_and_above() {
         at(&r.render(&scene(None, &[], Some(&danger), None))),
         [0x7a, 0x1f, 0xa2]
     );
-    // 注意報だけ・警報が無い・地震の画面のときは出ない
+    // 注意報だけ・警報が無い・まだ取れていないときは、帯の矩形は落ち着いた地のまま
     let adv = hachijo("レベル２大雨注意報");
-    assert_eq!(at(&r.render(&scene(None, &[], Some(&adv), None))), SEA);
-    assert_eq!(at(&r.render(&scene(None, &[], None, None))), SEA);
-    let q = quake(Scale::S5_LOWER, &[("東京都", Scale::S5_LOWER)], None);
-    assert_ne!(
-        at(&r.render(&scene(Some(&q), &[], Some(&warn), None))),
-        [0xb3, 0x26, 0x1e]
+    assert_eq!(at(&r.render(&scene(None, &[], Some(&adv), None))), PANEL);
+    assert_eq!(
+        at(&r.render(&scene(None, &[], Some(&Warnings::default()), None))),
+        PANEL
     );
+    assert_eq!(at(&r.render(&scene(None, &[], None, None))), PANEL);
+    // 地震の画面のときは、警報があっても矩形は空 (地のまま)
+    let q = quake(Scale::S5_LOWER, &[("東京都", Scale::S5_LOWER)], None);
+    assert_eq!(at(&r.render(&scene(Some(&q), &[], Some(&warn), None))), PANEL);
 }
 
 #[test]
-fn the_warning_banner_sits_below_the_test_band() {
+fn the_warning_banner_has_its_own_rect_and_does_not_cover_the_map() {
+    let mut r = renderer(Text::none());
+    let warn = hachijo("レベル３土砂災害警報");
+    let pm = r.render(&scene(None, &[], Some(&warn), None));
+    let banner = [0xb3, 0x26, 0x1e];
+    // 帯は 36 から 86 (上部バーの下) まで。地図は 86 から始まり、帯の色は入らない
+    assert_eq!((rgb(&pm, (5, 36)), rgb(&pm, (5, 85))), (banner, banner));
+    assert_ne!(rgb(&pm, (5, 35)), banner);
+    assert_ne!(rgb(&pm, (5, 86)), banner); // 地図の上端 (陸の色) に帯の色は入らない
+                                           // 右の列も帯の下から始まる (詳細の区切り線の上に帯の色が無い)
+    assert_ne!(rgb(&pm, (1000, 90)), banner);
+}
+
+#[test]
+fn the_idle_banner_message_is_drawn_when_a_font_is_available() {
+    let font = BroadcastConfig::default().font;
+    let mut r = renderer(Text::load(&font, 0).unwrap_or_else(|_| Text::none()));
+    if !r.text.enabled() {
+        return;
+    }
+    let unknown = r.render(&scene(None, &[], None, None));
+    let none = r.render(&scene(None, &[], Some(&Warnings::default()), None));
+    let differs = (36..86)
+        .flat_map(|y| (16..300).map(move |x| (x, y)))
+        .any(|p| rgb(&unknown, p) != rgb(&none, p));
+    assert!(differs);
+}
+
+#[test]
+fn the_test_band_is_at_the_top_of_the_map_below_the_warning_banner() {
     let mut r = renderer(Text::none());
     let warn = hachijo("レベル３土砂災害警報");
     let mut sc = scene(None, &[], Some(&warn), None);
     sc.test = true;
     let pm = r.render(&sc);
-    assert_eq!(rgb(&pm, (640, 38)), super::test_mark::BAND);
-    assert_eq!(rgb(&pm, (640, 36 + 20 + 14)), [0xb3, 0x26, 0x1e]);
+    assert_eq!(rgb(&pm, (640, 50)), [0xb3, 0x26, 0x1e]); // 警報の帯 (36〜86)
+    assert_eq!(rgb(&pm, (5, 90)), super::test_mark::BAND); // 赤い帯は地図の上端 (86〜106)
 }
 
 fn hindsight_at(lat: f64, lon: f64) -> Hindsight {
@@ -976,11 +1008,12 @@ fn a_warning_on_ishikari_is_not_hidden_by_the_sapporo_card() {
     };
     let none = r.render(&scene(None, &[], None, Some(&weather)));
     let covered = card_pixels_over_ishikari(&none);
-    assert!(covered > 100, "札幌の札は石狩の上にかかっているはず: {covered}");
+    assert!(covered > 75, "札幌の札は石狩の上にかかっているはず: {covered}");
     // 警報なら札は石狩を避ける (線の分だけは残る)
     let w = warned("レベル３大雨警報");
     let moved = r.render(&scene(None, &[], Some(&w), Some(&weather)));
-    assert!(card_pixels_over_ishikari(&moved) < covered / 10);
+    let left = card_pixels_over_ishikari(&moved);
+    assert!(left < covered / 10, "札が石狩に残っている: {left} (避ける前 {covered})");
     // 注意報なら今までどおり (札は動かない)
     let adv = warned("レベル２大雨注意報");
     let stay = r.render(&scene(None, &[], Some(&adv), Some(&weather)));

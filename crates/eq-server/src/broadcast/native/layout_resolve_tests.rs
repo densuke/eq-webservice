@@ -38,10 +38,12 @@ fn near(a: Rect, b: Rect) {
 fn the_calm_layout_has_the_rects_the_drawing_assumes() {
     let m = resolve(&shipped("broadcast"), W as f32, H as f32).unwrap();
     assert_eq!(m["topbar"], r(0.0, 0.0, W as f32, 36.0));
-    assert_eq!(m["main"], r(0.0, 36.0, 900.0, 684.0));
-    // 右の列 (詳細の区切り線 y180、履歴の見出し y204・1 行目 y216、出典の 1 行目 y640)
-    assert_eq!(m["detail"], r(900.0, 36.0, 380.0, 144.0));
-    assert_eq!(m["history"], r(900.0, 180.0, 380.0, 312.0));
+    // 警報の帯の専用の場所 (banner::banner_height(2) と同じ高さ)。地図と右の列はその下から始まる
+    assert_eq!(m["banners"], r(0.0, 36.0, W as f32, super::banner::banner_height(2)));
+    assert_eq!(m["main"], r(0.0, 86.0, 900.0, 634.0));
+    // 右の列 (詳細の区切り線 y230、履歴の見出し y254・1 行目 y266。出典の 1 行目 y640)。履歴が帯の分だけ低くなる
+    assert_eq!(m["detail"], r(900.0, 86.0, 380.0, 144.0));
+    assert_eq!(m["history"], r(900.0, 230.0, 380.0, 262.0));
     // お知らせの箱 (x = 矩形 + 16、y = 矩形の上端 492)
     assert_eq!(m["notice"], r(900.0, 492.0, 380.0, 138.0));
     // 出典 (下端は画面の下端 720。1 行目の字の上端より少し上が 630)
@@ -56,7 +58,7 @@ fn the_overlays_have_the_rects_the_drawing_assumes() {
     let main = View::fit_home(m["main"].tuple64());
     let (ins, _) = Frame::inset(&main, &OKINAWA, m["inset"]).unwrap().inset_box().unwrap();
     near(m["inset"], r(ins.0, ins.1, ins.2, ins.3));
-    assert_eq!((m["inset"].x, m["inset"].y, m["inset"].h), (10.0, 46.0, 220.0));
+    assert_eq!((m["inset"].x, m["inset"].y, m["inset"].h), (10.0, 96.0, 220.0));
     // 凡例
     assert_eq!(m["legend"], r(10.0, 563.0, 34.0, 147.0));
     // 時計 (176x74、地図の右下から 10px)
@@ -67,14 +69,14 @@ fn the_overlays_have_the_rects_the_drawing_assumes() {
 fn the_quake_layout_has_the_sub_map_rect_and_the_same_frame() {
     let calm = resolve(&shipped("broadcast"), W as f32, H as f32).unwrap();
     let q = resolve(&shipped("broadcast-quake"), W as f32, H as f32).unwrap();
-    assert_eq!(q["map-sub"], r(900.0, 190.0, 380.0, 300.0));
+    assert_eq!(q["map-sub"], r(900.0, 240.0, 380.0, 300.0));
     // 枠 (地図・上部バー・重ね物) は平時と同じ。違うと base の絵や投影を作り直すことになる
-    for k in ["main", "topbar", "inset", "legend", "clock"] {
+    for k in ["main", "topbar", "banners", "inset", "legend", "clock"] {
         assert_eq!(calm[k], q[k], "{k}");
     }
     assert!(!q.contains_key("notice"));
-    // 詳細は平時より 10px 高い (サブの地図を y190 から置くため)。出典は同じ
-    assert_eq!(q["detail"], r(900.0, 36.0, 380.0, 154.0));
+    // 詳細は平時より 10px 高い (サブの地図を y240 から置くため)。出典は同じ
+    assert_eq!(q["detail"], r(900.0, 86.0, 380.0, 154.0));
     assert_eq!(q["credit"], calm["credit"]);
 }
 
@@ -96,7 +98,7 @@ fn the_drawing_uses_the_quake_rects_only_on_the_quake_screen() {
         (c.main, c.topbar, c.credit, c.clock)
     );
     assert_eq!(p.sub, Some(q["map-sub"]));
-    assert_eq!(p.map_aspect(), 900.0 / 684.0);
+    assert_eq!(p.map_aspect(), 900.0 / 634.0);
     assert_eq!(p.sub_aspect(), Some(380.0 / 300.0));
 }
 

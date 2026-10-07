@@ -5,7 +5,6 @@ use std::collections::HashMap;
 
 use tiny_skia::{Pixmap, PixmapPaint, Transform};
 
-use super::banner::banner_height;
 use super::cards::{place, signature, Card, CardCache, Placed, Zones};
 use super::data::{
     city_side, city_side_tomorrow, rain_color, range_label, temp_label, top_level, warning_fill, weather_caption,
@@ -29,12 +28,15 @@ pub struct CardEnv<'a> {
     pub fixed: &'a [BoxRect],
     /// 札を置いてよい範囲 (地図の枠から、警報の帯・テストの帯を除いたもの)
     pub bounds: BoxRect,
+    /// 情報の窓の枠 (info_window)。本図だけが描く
+    pub info: BoxRect,
 }
 
-/// 札を置いてよい範囲 (本図 = 定義の main の矩形)。上は警報の帯 (最大 2 行) とテスト配信の帯の下まで
+/// 札を置いてよい範囲 (本図 = 定義の main の矩形)。警報の帯は main の外 (定義の banners) なので、
+/// 上はテスト配信の帯の下まで
 pub fn main_bounds(test: bool, main: Rect) -> BoxRect {
     let band = if test { super::test_mark::BAND_H } else { 0.0 };
-    let top = main.y + banner_height(2) + band;
+    let top = main.y + band;
     (main.x, top, main.w, main.bottom() - band - top)
 }
 
@@ -86,7 +88,7 @@ pub fn draw(
         draw_city(pm, text, frame, scene, c, view, p);
     }
     if !frame.is_inset() {
-        draw_info_window(pm, text, &weather_caption(view, scene.now_ms));
+        draw_info_window(pm, text, env.info, &weather_caption(view, scene.now_ms));
     }
 }
 
@@ -130,15 +132,17 @@ fn placements(
         .to_vec()
 }
 
-/// 情報の窓 (x, y, 幅, 高さ)。日本海の北の空いた海 (別枠の右・北海道の左・警報の帯の下)。
-/// 陸・別枠・警報の帯と重ならないことはテストで確かめる
-pub(super) const INFO_WINDOW: BoxRect = (274.0, 198.0, 242.0, 44.0);
+/// 情報の窓 (x, y, 幅, 高さ)。日本海の北の空いた海 (別枠の右・北海道の左)。地図の枠 main の原点からの位置で、
+/// 日本全体の地図の地理 (main の高さで縮尺が決まる) に合わせてある。陸・別枠と重ならないことはテストで確かめる
+pub(super) fn info_window(main: Rect) -> BoxRect {
+    (main.x + 270.0, main.y + 154.0, 242.0, 44.0)
+}
 const INFO_PX: f32 = 22.0;
 
 /// 今何を出しているか (今の天気 / 明日の天気) の案内を、情報の窓に出す。
 /// 窓は文字が描けなくても出す。中身の文 (caption) は窓とは別に決める
-fn draw_info_window(pm: &mut Pixmap, text: &mut Text, caption: &str) {
-    let (x, y, w, h) = INFO_WINDOW;
+fn draw_info_window(pm: &mut Pixmap, text: &mut Text, at: BoxRect, caption: &str) {
+    let (x, y, w, h) = at;
     rrect(pm, x, y, w, h, 8.0, INSET_LINE, 1.0);
     rrect(pm, x + 1.0, y + 1.0, w - 2.0, h - 2.0, 7.0, PANEL, 0.9);
     text.draw_fit(

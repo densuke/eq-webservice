@@ -221,8 +221,8 @@ impl Camera {
 mod tests {
     use super::*;
 
-    /// 組み込みの定義の main (900x684) の縦横比
-    const ASPECT: f64 = 900.0 / 684.0;
+    /// 組み込みの定義の main (900x634) の縦横比
+    const ASPECT: f64 = 900.0 / 634.0;
 
     fn close(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-6

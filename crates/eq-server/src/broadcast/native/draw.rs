@@ -234,6 +234,7 @@ impl Renderer {
                         prefs: &self.prefs,
                         fixed: &fixed,
                         bounds,
+                        info: calm::info_window(placed.main),
                     };
                     calm::draw(&mut pm, &mut self.text, &self.areas, f, scene, &env, &mut self.cards)
                 }
@@ -250,10 +251,9 @@ impl Renderer {
         if let (None, None, Some(n), Some(area)) = (scene.quake, scene.eew, scene.notices, placed.notice) {
             notice::draw(&mut pm, &mut self.text, &mut self.notice_lines, n, scene.now_ms, area);
         }
-        // 警報以上の帯は平時だけ。テスト配信の赤い帯の下に置く
-        if let (None, None, Some(w)) = (scene.quake, scene.eew, scene.warnings) {
-            let below = if scene.test { test_mark::BAND_H } else { 0.0 };
-            banner::draw(&mut pm, &mut self.text, w, main.y, below);
+        // 警報の帯は平時だけ。定義の banners の矩形の中に描く (地震の画面では矩形は空のまま)
+        if let (None, None, Some(at)) = (scene.quake, scene.eew, placed.banners) {
+            banner::draw(&mut pm, &mut self.text, scene.warnings, at, scene.now_ms);
         }
         if scene.test {
             test_mark::draw(&mut pm, &mut self.text, &placed);
@@ -285,7 +285,7 @@ fn card_room(f: &Frame, insets: &[Frame], zoomed: bool, test: bool, placed: &Pla
         return (Vec::new(), rect);
     }
     let mut fixed: Vec<BoxRect> = placed.legend.map(Rect::tuple).into_iter().collect();
-    fixed.push(calm::INFO_WINDOW);
+    fixed.push(calm::info_window(placed.main));
     if !zoomed {
         fixed.extend(insets.iter().filter_map(|i| i.inset_box().map(|(r, _)| r)));
     }
