@@ -31,6 +31,14 @@ pub enum Sink {
 }
 
 impl Sink {
+    /// 1 件の処理の時間切れ。jsonl は自分でやり直しを持ち、途中で切ると二重に書くので、保険の長さだけにする
+    fn timeout(&self) -> Duration {
+        match self {
+            Sink::Jsonl(_) => Duration::from_secs(600),
+            _ => Duration::from_secs(30),
+        }
+    }
+
     /// 新しいイベントを受け取る。
     pub async fn handle(&self, ev: &Event) -> anyhow::Result<()> {
         match self {
@@ -146,7 +154,7 @@ pub fn spawn(loaded: Loaded, hub: &Hub) {
             let ev = match rx.recv().await {
                 Ok(ev) => ev,
                 Err(RecvError::Lagged(n)) => {
-                    tracing::warn!(sink = %name, skipped = n, "sink is too slow, events dropped");
+                    tracing::error!(sink = %name, skipped = n, "sink is too slow, events dropped");
                     continue;
                 }
                 Err(RecvError::Closed) => return,
@@ -154,10 +162,13 @@ pub fn spawn(loaded: Loaded, hub: &Hub) {
             if !filter.accepts(&ev) {
                 continue;
             }
-            match tokio::time::timeout(Duration::from_secs(30), sink.handle(&ev)).await {
+            match tokio::time::timeout(sink.timeout(), sink.handle(&ev)).await {
                 Ok(Ok(())) => tracing::debug!(sink = %name, id = %ev.id, "delivered"),
                 Ok(Err(e)) => tracing::warn!(sink = %name, "failed: {e:#}"),
-                Err(_) => tracing::warn!(sink = %name, "timed out"),
+                Err(_) => {
+                    let line = serde_json::to_string(&*ev).unwrap_or_default();
+                    tracing::error!(sink = %name, id = %ev.id, %line, "timed out; line dumped here");
+                }
             }
         }
     });
