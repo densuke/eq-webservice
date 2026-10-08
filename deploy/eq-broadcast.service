@@ -16,7 +16,7 @@ EnvironmentFile=%h/.config/youtube-live-eq-webservice
 Environment=RUST_LOG=info
 Restart=always
 RestartSec=10
-Nice=19
+# 配信を最低優先度にしない (Nice は付けない)。重い処理 (再現動画) の側を下げる (Issue #204)
 CPUQuota=25%
 MemoryMax=320M
 # 配信に MemoryHigh は最初は設定しない: 平常の anon が 104〜142MB で、MemoryHigh を下回ると swap がほぼ無いため

@@ -95,6 +95,9 @@ pub fn systemd_run_args(
         s("MemorySwapMax=0"),
         s("-p"),
         s("Nice=19"),
+        // I/O も最低 (ionice -c3 相当)。単位の設定なので、中の ffmpeg にも効く
+        s("-p"),
+        s("IOSchedulingClass=idle"),
         s("-p"),
         format!("WorkingDirectory={}", p(cwd)),
         p(exe),
@@ -103,10 +106,25 @@ pub fn systemd_run_args(
     a
 }
 
-/// inline で起動するコマンド全体 (先頭が実行ファイル)。`inline_wrap` (優先度を下げるコマンド) の後ろに、eq-server と
-/// replay-video の引数を続ける。作業ディレクトリは作る係のまま (子は継ぐ)
+/// inline で子の前に付ける優先度を下げるコマンドの既定 (`inline_wrap` が空のとき)。
+/// macOS は background 扱い (CPU・ディスク)、他は nice 19 (I/O までは下げられない)
+pub fn default_inline_wrap(os: &str) -> Vec<String> {
+    let v: &[&str] = if os == "macos" {
+        &["/usr/sbin/taskpolicy", "-b"]
+    } else {
+        &["nice", "-n", "19"]
+    };
+    v.iter().map(|x| x.to_string()).collect()
+}
+
+/// inline で起動するコマンド全体 (先頭が実行ファイル)。`inline_wrap` (優先度を下げるコマンド。空なら OS の既定) の後ろに、
+/// eq-server と replay-video の引数を続ける。作業ディレクトリは作る係のまま (子は継ぐ)
 pub fn inline_command(cfg: &WorkerConfig, job: &Job, exe: &Path, out: &Path, chapters: &Path) -> Vec<String> {
-    let mut a = cfg.inline_wrap.clone();
+    let mut a = if cfg.inline_wrap.is_empty() {
+        default_inline_wrap(std::env::consts::OS)
+    } else {
+        cfg.inline_wrap.clone()
+    };
     a.push(exe.display().to_string());
     a.extend(replay_video_args(cfg, job, out, chapters));
     a
@@ -169,6 +187,7 @@ mod tests {
             "MemoryMax=200M",
             "MemorySwapMax=0",
             "Nice=19",
+            "IOSchedulingClass=idle",
             "WorkingDirectory=/srv/cast",
         ] {
             assert!(has(["-p", prop]), "{prop} is missing: {a:?}");
@@ -206,9 +225,17 @@ mod tests {
         assert!(!inline
             .iter()
             .any(|x| x.contains("CPUQuota") || x.contains("MemoryMax") || x == "--wait"));
-        // wrap が空なら、先頭が eq-server
-        let bare = inline_command(&WorkerConfig::default(), &j, exe, out, ch);
-        assert_eq!(&bare[..2], ["/opt/eq-server", "replay-video"]);
+        // wrap が空なら、OS の既定の優先度コマンドが付く
+        let dflt = inline_command(&WorkerConfig::default(), &j, exe, out, ch);
+        let n = default_inline_wrap(std::env::consts::OS).len();
+        assert_eq!(dflt[..n], default_inline_wrap(std::env::consts::OS));
+        assert_eq!(&dflt[n..n + 2], ["/opt/eq-server", "replay-video"]);
+    }
+
+    #[test]
+    fn the_default_inline_wrap_lowers_priority_per_os() {
+        assert_eq!(default_inline_wrap("macos"), ["/usr/sbin/taskpolicy", "-b"]);
+        assert_eq!(default_inline_wrap("linux"), ["nice", "-n", "19"]);
     }
 
     #[test]
