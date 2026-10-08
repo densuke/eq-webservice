@@ -2,6 +2,7 @@
 # ~/.config/systemd/user/eq-replay-worker.service に置く。eq-broadcast と同じディレクトリの eq-server・設定を使う。
 # 動画を作る本体 (replay-video) は、作る係が systemd-run で別の一時的な単位 (eq-replay-job-*) として起動する。
 # この単位自身は記録を見直してキューを管理するだけなので、小さく縛る。
+# 作る一時単位には Nice=19 と IOSchedulingClass=idle が固定で付く (配信を詰まらせない。Issue #204)。
 [Unit]
 Description=eq-webservice 再現動画を作る係 (eq-server replay-worker)
 After=eq-broadcast.service

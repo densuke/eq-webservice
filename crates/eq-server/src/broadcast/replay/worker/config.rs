@@ -103,7 +103,7 @@ pub struct WorkerConfig {
     pub runner: Runner,
     /// 配信の様子を見るか。"vm" (既定) か "none"
     pub gate: Gate,
-    /// runner = "inline" のとき、子の前に付けるコマンド (優先度を最低にするため。Mac は ["/usr/sbin/taskpolicy", "-b"])
+    /// runner = "inline" のとき、子の前に付けるコマンド (優先度を最低にするため。空なら OS の既定: Mac は taskpolicy -b、他は nice -n 19)
     pub inline_wrap: Vec<String>,
     /// 作る間の CPU・メモリの上限 (systemd の CPUQuota・MemoryMax)
     pub cpu_quota: String,

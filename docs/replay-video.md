@@ -214,7 +214,7 @@ eq-server replay-video --from <ms> --to <ms> --out x.mp4
      - 中身: 範囲・地震の一覧・状態 (待ち・作り中・できた・上げた・失敗)・やり直しの回数。
      - 人が見てもわかる形にする。
    - **作る**: 条件 (5.1) がそろったら、キューの古い順に 1 つ取り出す。
-     - `systemd-run --user --unit=eq-replay-job-<id> -p CPUQuota=… -p CPUWeight=1 -p MemoryMax=200M -p MemorySwapMax=0 -p Nice=19 eq-server replay-video …` で作る。
+     - `systemd-run --user --unit=eq-replay-job-<id> -p CPUQuota=… -p CPUWeight=1 -p MemoryMax=200M -p MemorySwapMax=0 -p Nice=19 -p IOSchedulingClass=idle eq-server replay-video …` で作る。
      - まとまりが複数の地震なら、1 本の動画にする。
        - R3.2 の replay-video は 1 つの地震を対象にしている。複数の地震を続けて描き、地震と地震の間を早送りで詰める形に広げる。
        - 各地震の始まりの、動画の中の時刻を記録する (チャプターに使う)。
@@ -342,7 +342,8 @@ eq-server replay-video --from <ms> --to <ms> --out x.mp4
 - **止まっていた間を取り戻す (checkpoint)。** URL のときは、前に見終えた時刻を `dir/checkpoint.json` (`{"scanned_until_ms": …}`) に残す。次の見直しは、`max(checkpoint - overlap, 今 - catchup_max_hours)` から今までを 1 時間ずつ取る。`overlap` は `max_group_hours + quiet_min` (checkpoint の時点で開いていたまとまりの始まりを含めるため)。checkpoint が無い最初は、`lookback_hours` だけさかのぼる。checkpoint は、**全部取れて、キューに積めたときだけ**今に進める。途中で 1 つでも失敗したら動かさず、次の `scan_secs` で同じところからやり直す。同じまとまりを二重に積まないのは 5.2.1 のとおり (キューにある地震と照らす)。
 - `catchup_max_hours` (既定 24、Mac の例は 168 = 7 日。`lookback_hours` 以上)。サーバのコード (`archive.rs`・jsonl の sink) には記録を消す仕組みが無く、`/api/archive` は jsonl を頭から読む。つまり、保管の長さは運用 (ファイルを残している間) で決まる。これより古い地震は、止まっていても動画にしない。
 - **取る先への負担を抑える。** 範囲と範囲の間に 1 秒空ける (eq.fuga.jp は 1GB の VM で、1 回ごとに記録を頭から読む)。7 日さかのぼっても約 3 分で、定常では (4 時間 + 経過分) の数回だけ。取れなくなったら (オフライン・スリープ明け)、その回は何もせず、警告は切れたときの 1 回だけ出して、続く間は静かに次の `scan_secs` を待つ。戻ったら 1 回だけ知らせる。
-- `inline_wrap` (既定は空): `inline` のとき、子の前に付けるコマンド。Mac は `["/usr/sbin/taskpolicy", "-b"]`。macOS の background の優先度 (CPU・ディスク・ネットワークが後回し) で動かし、子の ffmpeg も引き継ぐ。普段の作業を優先し、遅くなってよい。作るのは 1 本ずつ。
+- 優先度 (Issue #204): 動画作りの CPU・HDD 負荷で同じマシンの配信の送り出しが詰まったため、作る側を最低にする。`systemd` の一時単位には `Nice=19` と `IOSchedulingClass=idle` (ionice -c3 相当) を固定で付ける。単位の設定なので、中の ffmpeg など子プロセスにも効く。配信側 (eq-broadcast) は最低優先度にしない。
+- `inline_wrap` (既定は空 = OS の既定。macOS は `taskpolicy -b`、他は `nice -n 19`): `inline` のとき、子の前に付けるコマンド。Mac は `["/usr/sbin/taskpolicy", "-b"]`。macOS の background の優先度 (CPU・ディスク・ネットワークが後回し) で動かし、子の ffmpeg も引き継ぐ。普段の作業を優先し、遅くなってよい。作るのは 1 本ずつ。
 - `runner = "inline"` と `on_busy = "freeze"` の組み合わせは、凍結に systemd が要るので設定の読み込みで断る (`gate = "none"` なら凍結は使わないので構わない)。
 - 例: `deploy/replay.mac.toml`。YouTube への投稿は 6.8。
 

@@ -12,6 +12,7 @@ runner = "inline"
 gate = "none"
 # 子の前に付けて、優先度を最低にする (macOS の background の QoS。CPU・ディスク・ネットワークが後回しになり、
 # 普段の作業の邪魔をしない。遅くなってよい)
+# (省略すると macOS は同じ taskpolicy -b、他は nice -n 19。CPU・ディスクを背景扱いにして配信や普段の作業を優先する)
 inline_wrap = ["/usr/sbin/taskpolicy", "-b"]
 
 # Mac は起きているあいだだけ動く。止まっていた間 (スリープ・停止・オフライン) の地震は、起きたあとに記録から拾う。
