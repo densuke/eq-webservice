@@ -154,7 +154,7 @@ pub fn spawn(loaded: Loaded, hub: &Hub) {
             let ev = match rx.recv().await {
                 Ok(ev) => ev,
                 Err(RecvError::Lagged(n)) => {
-                    tracing::warn!(sink = %name, skipped = n, "sink is too slow, events dropped");
+                    tracing::error!(sink = %name, skipped = n, "sink is too slow, events dropped");
                     continue;
                 }
                 Err(RecvError::Closed) => return,
@@ -165,7 +165,10 @@ pub fn spawn(loaded: Loaded, hub: &Hub) {
             match tokio::time::timeout(sink.timeout(), sink.handle(&ev)).await {
                 Ok(Ok(())) => tracing::debug!(sink = %name, id = %ev.id, "delivered"),
                 Ok(Err(e)) => tracing::warn!(sink = %name, "failed: {e:#}"),
-                Err(_) => tracing::warn!(sink = %name, "timed out"),
+                Err(_) => {
+                    let line = serde_json::to_string(&*ev).unwrap_or_default();
+                    tracing::error!(sink = %name, id = %ev.id, %line, "timed out; line dumped here");
+                }
             }
         }
     });

@@ -2,6 +2,7 @@
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use crate::archive_store;
@@ -18,12 +19,14 @@ pub struct JsonlConfig {
 const RETRY_DELAYS: [Duration; 3] = [Duration::from_secs(1), Duration::from_secs(5), Duration::from_secs(30)];
 
 /// 記録の sink。handle は sink ごとの 1 本のタスクから直列にしか呼ばれない (plugins::spawn)。
-/// やり直しの間は次の報を待たせるので、順序は入れ替わらない。
+/// やり直しの間は次の報を待たせるので、順序は入れ替わらない (外側の時間切れのあとを除く)。
 /// 書き込みに時間切れは掛けない (掛けると、実は書けていた行をやり直しで二重に書く)。
 /// 他の sink や配信は別タスクなので、ここが詰まっても止まらない。
 pub struct JsonlSink {
     path: PathBuf,
     delays: Vec<Duration>,
+    /// 退避先を使った直後。直るまでは待たずに 1 回だけ試し、後ろに報を溜めない
+    degraded: AtomicBool,
 }
 
 impl JsonlSink {
@@ -31,6 +34,7 @@ impl JsonlSink {
         JsonlSink {
             path: cfg.path,
             delays: RETRY_DELAYS.to_vec(),
+            degraded: AtomicBool::new(false),
         }
     }
 
@@ -43,20 +47,35 @@ impl JsonlSink {
         let line = serde_json::to_string(ev)?;
         let path = archive_store::daily_path(&self.path, now_ms);
         let mut last = None;
-        for attempt in 0..=self.delays.len() {
+        let retries = if self.degraded.load(Ordering::Relaxed) {
+            0
+        } else {
+            self.delays.len()
+        };
+        for attempt in 0..=retries {
             if let Some(d) = attempt.checked_sub(1).map(|i| self.delays[i]) {
                 tokio::time::sleep(d).await;
             }
-            // 2 回目以降は頭に改行を足す。前回が途中まで書けていても、その破片が行として分かれる (読み手は壊れた行・空行を飛ばす)
+            // 2 回目以降は頭に改行を足す。前回が途中まで書けていても、その破片が行として分かれる。
+            // 破片は日付ファイルにしか入らない (読み手は壊れた行・空行を飛ばす) ことが安全性の前提
             match append_blocking(&path, &line, attempt > 0).await {
-                Ok(()) => return Ok(()),
+                Ok(()) => {
+                    self.degraded.store(false, Ordering::Relaxed);
+                    return Ok(());
+                }
                 Err(e) => {
-                    tracing::warn!(id = %ev.id, attempt, "jsonl write failed: {} : {e}", path.display());
+                    if attempt == 0 {
+                        // 以後どこで切られても journal から戻せるよう、最初の失敗で行そのものを残す
+                        tracing::warn!(id = %ev.id, %line, "jsonl write failed (line dumped here): {} : {e}", path.display());
+                    } else {
+                        tracing::warn!(id = %ev.id, attempt, "jsonl write failed: {} : {e}", path.display());
+                    }
                     last = Some(e);
                 }
             }
         }
         let err = last.expect("at least one attempt");
+        self.degraded.store(true, Ordering::Relaxed);
         let failed = failed_path(&self.path);
         match append_blocking(&failed, &line, true).await {
             Ok(()) => {
@@ -109,6 +128,7 @@ mod tests {
         JsonlSink {
             path: base,
             delays: delays.iter().map(|&m| Duration::from_millis(m)).collect(),
+            degraded: AtomicBool::new(false),
         }
     }
 
@@ -148,7 +168,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(60)).await;
             std::fs::remove_dir(d2).unwrap();
         });
-        let s = sink(base.clone(), &[40, 40, 200]);
+        let s = sink(base.clone(), &[40, 100, 500]);
         s.write_at(&ev("a"), T).await.unwrap();
         s.write_at(&ev("b"), T).await.unwrap();
         assert_eq!(ids(&daily), ["a", "b"]);
@@ -167,6 +187,21 @@ mod tests {
         // 退避先は archive の読む対象ではない
         let got = archive_store::files_in_range(&dir.path().join("events.jsonl"), 0, u64::MAX).unwrap();
         assert!(got.is_empty());
+    }
+
+    #[tokio::test]
+    async fn skips_the_waits_while_degraded_and_recovers_on_success() {
+        let dir = tempfile::tempdir().unwrap();
+        let daily = dir.path().join("events-2024-01-01.jsonl");
+        std::fs::create_dir(&daily).unwrap();
+        let s = sink(dir.path().join("events.jsonl"), &[600_000]); // 待つなら test が終わらない
+        s.degraded.store(true, Ordering::Relaxed);
+        s.write_at(&ev("a"), T).await.unwrap();
+        assert_eq!(ids(&dir.path().join("events-failed.jsonl")), ["a"]);
+        std::fs::remove_dir(&daily).unwrap();
+        s.write_at(&ev("b"), T).await.unwrap();
+        assert_eq!(ids(&daily), ["b"]);
+        assert!(!s.degraded.load(Ordering::Relaxed));
     }
 
     #[tokio::test]
