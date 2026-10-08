@@ -40,9 +40,13 @@ fn dedupe(it: impl IntoIterator<Item = String>) -> Vec<String> {
     it.into_iter().filter(|s| seen.insert(s.clone())).collect()
 }
 
-/// JSON Lines の Event を読む (旧ファイル + 日付ファイルの全部。archive_store)。壊れた行・空行は飛ばし、ファイルがなければ空。
-pub fn load_jsonl(path: &Path) -> Vec<Event> {
-    let files = crate::archive_store::files_in_range(path, 0, u64::MAX).unwrap_or_default();
+/// 記録を読む期間 (起動時に全期間を読むと、数年分たまったときに遅い)
+const ARCHIVE_DAYS: u64 = 30;
+
+/// JSON Lines の Event を読む (旧ファイル + since_ms 以降の日付ファイル。archive_store)。
+/// 壊れた行・空行と、received_at_ms が since_ms より前の行は飛ばし、ファイルがなければ空。
+pub fn load_jsonl(path: &Path, since_ms: u64) -> Vec<Event> {
+    let files = crate::archive_store::files_in_range(path, since_ms, u64::MAX).unwrap_or_default();
     let mut broken = 0;
     let events = files
         .iter()
@@ -55,6 +59,7 @@ pub fn load_jsonl(path: &Path) -> Vec<Event> {
             text.lines()
                 .filter(|l| !l.trim().is_empty())
                 .filter_map(|l| serde_json::from_str::<Event>(l).map_err(|_| broken += 1).ok())
+                .filter(|e| e.received_at_ms >= since_ms)
                 .collect::<Vec<_>>()
         })
         .collect();
@@ -100,7 +105,14 @@ pub fn load_demo_dir(dir: &Path) -> Vec<Vec<Event>> {
 /// 固定の部品 + 記録 + デモ の合成対象一覧 (重複なし、初出順)。ファイルを読むので blocking。
 fn build_list(archive: Option<&Path>, demo_dir: Option<&Path>) -> Vec<String> {
     let fixed = prewarm_segments();
-    let arch = archive.map(|p| record_segments(&load_jsonl(p))).unwrap_or_default();
+    let arch = archive
+        .map(|p| {
+            record_segments(&load_jsonl(
+                p,
+                crate::hub::now_ms().saturating_sub(ARCHIVE_DAYS * 86_400_000),
+            ))
+        })
+        .unwrap_or_default();
     let demo: Vec<String> = demo_dir
         .map(|d| load_demo_dir(d).iter().flat_map(|sc| record_segments(sc)).collect())
         .unwrap_or_default();
@@ -232,7 +244,7 @@ mod tests {
         let p = dir.path().join("e.jsonl");
         let body = format!("{}\nnot json\n\n{}\n", ev_json("a"), ev_json("b"));
         std::fs::write(&p, body).unwrap();
-        assert_eq!(load_jsonl(&p).len(), 2);
+        assert_eq!(load_jsonl(&p, 0).len(), 2);
     }
 
     #[test]
@@ -240,13 +252,37 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("e.jsonl"), format!("{}\n", ev_json("a"))).unwrap();
         std::fs::write(dir.path().join("e-2026-10-07.jsonl"), format!("{}\n", ev_json("b"))).unwrap();
-        assert_eq!(load_jsonl(&dir.path().join("e.jsonl")).len(), 2);
+        assert_eq!(load_jsonl(&dir.path().join("e.jsonl"), 0).len(), 2);
+    }
+
+    #[test]
+    fn load_jsonl_reads_only_recent_days() {
+        let dir = tempfile::tempdir().unwrap();
+        let line = |id: &str, ms: u64| {
+            let mut e: serde_json::Value = serde_json::from_str(&ev_json(id)).unwrap();
+            e["received_at_ms"] = ms.into();
+            format!("{e}\n")
+        };
+        let day = 86_400_000u64;
+        let since = 19_723 * day; // 2024-01-01
+        std::fs::write(
+            dir.path().join("e.jsonl"),
+            line("old-legacy", since - 1) + &line("new-legacy", since),
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("e-2023-12-30.jsonl"), line("old", since - 2 * day)).unwrap();
+        std::fs::write(dir.path().join("e-2024-01-02.jsonl"), line("new", since + day)).unwrap();
+        let ids: Vec<_> = load_jsonl(&dir.path().join("e.jsonl"), since)
+            .into_iter()
+            .map(|e| e.id)
+            .collect();
+        assert_eq!(ids, ["new-legacy", "new"]);
     }
 
     #[test]
     fn load_jsonl_missing_file_is_empty() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(load_jsonl(&dir.path().join("none.jsonl")).is_empty());
+        assert!(load_jsonl(&dir.path().join("none.jsonl"), 0).is_empty());
     }
 
     #[test]
