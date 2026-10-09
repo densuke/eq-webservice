@@ -466,13 +466,10 @@ fn ffmpeg_args(cfg: &BroadcastConfig, audio: &[String], output: &[String]) -> Ve
     a.extend(encode);
     // YouTube などはキーフレームの間隔を 4 秒以下に求める (2 秒ごとにする)
     if variable {
-        // コマの間隔が一定でないので、コマ数ではなく時刻で決める
-        a.extend(s(&[
-            "-fps_mode",
-            "passthrough",
-            "-force_key_frames",
-            "expr:gte(t,n_forced*2)",
-        ]));
+        // コマの間隔が一定でないので、コマ数ではなく時刻で決める。
+        // passthrough ではなく vfr: 同じ時刻に 2 コマ届くと (切り替え直後・遅れを取り戻す連続送り)、passthrough は
+        // 同じ DTS のまま mpegts に渡し、1 日 2 万行の「Non-monotonic DTS」が出た。vfr は時刻を単調に直す (コマは捨てない)
+        a.extend(s(&["-fps_mode", "vfr", "-force_key_frames", "expr:gte(t,n_forced*2)"]));
     } else {
         a.extend(["-g".to_string(), (cfg.fps.max(1) * 2).to_string()]);
     }
@@ -640,7 +637,7 @@ mod tests {
         // 入力の指定より前に置く (入力のオプション)
         assert!(pos("-use_wallclock_as_timestamps") < pos("-i"));
         assert!(!a.contains(&"-framerate".to_string()));
-        assert!(a.windows(2).any(|w| w == ["-fps_mode", "passthrough"]));
+        assert!(a.windows(2).any(|w| w == ["-fps_mode", "vfr"]));
         assert!(a
             .windows(2)
             .any(|w| w == ["-force_key_frames", "expr:gte(t,n_forced*2)"]));

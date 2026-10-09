@@ -247,7 +247,7 @@ y=720 └───────────────────────�
 - `broadcast.toml` に `fps_calm` (平時のコマ数) を足す。今の `fps` は地震の画面のときのコマ数とする。`fps_calm` を省けば今までどおり一定 (`fps`)。
 - 描く側は、平時か地震か (model の判断) に合わせて、ffmpeg に渡す間隔を変える。切り替えはすぐ反映する。
 - ffmpeg の入力は、届いた時刻をコマの時刻にする: `-use_wallclock_as_timestamps 1 -f rawvideo -pix_fmt yuv420p -s WxH -i -`
-  (native のときだけ。Chrome の経路は変えない)。出力は `-fps_mode passthrough`。
+  (native のときだけ。Chrome の経路は変えない)。出力は `-fps_mode vfr`。
 - キーフレームは時刻で 2 秒ごと: `-g` の代わりに `-force_key_frames expr:gte(t,n_forced*2)` (YouTube は 4 秒以内を求める)。
 - 例: Mac・Pi は `fps = 15`・`fps_calm = 2`、e2 は `fps = 10`・`fps_calm = 2`。
 
@@ -288,7 +288,7 @@ y=720 └───────────────────────�
 
 ### 11.1 実装したこと
 
-- `fps_calm` (native のみ): 指定すると ffmpeg の入力は `-use_wallclock_as_timestamps 1`、出力は `-fps_mode passthrough` と `-force_key_frames expr:gte(t,n_forced*2)`。
+- `fps_calm` (native のみ): 指定すると ffmpeg の入力は `-use_wallclock_as_timestamps 1`、出力は `-fps_mode vfr` と `-force_key_frames expr:gte(t,n_forced*2)`。
   描く側の「平時か」の知らせ (watch) で、送る間隔をすぐ切り替える (平時は `fps_calm`、地震の画面は `fps`)。
   `fps_calm` を省くと今までどおり (`-framerate fps`、`-g fps*2`)。Chrome の経路は変えていない。
 - `audio_bitrate` (既定 `128k`)、`label` (上部バーの右。BGM の曲名はその左)。
