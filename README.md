@@ -372,7 +372,7 @@ min_scale = 0            # 切り出す地震の最大震度 (10 倍した整数
 
 #### e2 から常時配信する
 
-`deploy/eq-broadcast.service` (ユーザーユニット。CPUQuota 25%・MemoryMax 200M・Nice 19・Restart always) と
+`deploy/eq-broadcast.service` (ユーザーユニット。CPUQuota 100%・MemoryMax 320M・Restart always。配信専用のマシンなら 1 vCPU まで使わせる、Issue #206) と
 `deploy/broadcast.e2.toml` (平時 2fps・地震 10fps・無音) を使います。
 
 ```sh

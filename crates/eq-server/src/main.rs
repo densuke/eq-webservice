@@ -12,6 +12,7 @@ mod demo;
 mod http;
 mod hub;
 mod layout;
+mod log_color;
 mod memwatch;
 mod net;
 mod plugins;
@@ -24,6 +25,7 @@ mod ws_guard;
 mod youtube;
 mod youtube_viewers;
 
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -36,7 +38,12 @@ use crate::hub::Hub;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let no_color = std::env::var("NO_COLOR").ok();
     tracing_subscriber::fmt()
+        .with_ansi(log_color::use_ansi(
+            std::io::stdout().is_terminal(),
+            no_color.as_deref(),
+        ))
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
         .init();
 

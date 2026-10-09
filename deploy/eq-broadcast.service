@@ -17,7 +17,9 @@ Environment=RUST_LOG=info
 Restart=always
 RestartSec=10
 # 配信を最低優先度にしない (Nice は付けない)。重い処理 (再現動画) の側を下げる (Issue #204)
-CPUQuota=25%
+# 配信専用のマシンなら 1 vCPU まで使わせる。低いと 1 秒ごとの描き直し・エンコードの瞬間に cgroup の周期(100ms)で
+# 止められ、描画の遅れ・送り出しの詰まりになる (#206: 50% で時間の約 3 割止められていた)
+CPUQuota=100%
 MemoryMax=320M
 # 配信に MemoryHigh は最初は設定しない: 平常の anon が 104〜142MB で、MemoryHigh を下回ると swap がほぼ無いため
 # 強い throttling で配信が壊れる。上限に当たるのは主にページキャッシュ (Issue #196) で、ring の破棄で減らす。
