@@ -1128,3 +1128,14 @@ fn the_quake_screen_without_the_sub_map_keeps_the_calm_history() {
     // 履歴の 5 行目 (矩形 y180 + 見出し 36 + 4 行 + 札の中ほど)
     assert_eq!(rgb(&pm, (936, 180 + 36 + 4 * 52 + 20)), scale_color(Scale::S7));
 }
+
+#[test]
+fn the_info_window_fits_the_longest_tomorrow_caption() {
+    // 月日が 2 桁ずつの明日の案内 (#214)。フォントが無い環境では測れないので見送る
+    let Ok(mut text) = Text::load(&BroadcastConfig::default().font, 0) else {
+        return;
+    };
+    let (_, _, w, _) = super::calm::info_window(Placed::builtin().unwrap().main);
+    let need = text.width("明日 12/31 (水) の天気", super::calm::INFO_PX);
+    assert!(need <= w - 24.0, "案内の幅 {need} が窓の中 {} を超える", w - 24.0);
+}
