@@ -621,6 +621,8 @@ async fn viewers_loop(url: String, st: Shared) {
 #[cfg(test)]
 mod band_tests;
 #[cfg(test)]
+mod dots_tests;
+#[cfg(test)]
 mod layout_def_tests;
 #[cfg(test)]
 mod layout_resolve_tests;

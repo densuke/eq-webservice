@@ -142,6 +142,7 @@ fn summarize(g: &[(u64, &Quake)]) -> QuakeSummary {
                     .map(|p| Point {
                         addr: p.addr.clone(),
                         is_area: p.is_area,
+                        scale: p.scale,
                         station: p.station.as_ref().map(|s| (s.lat, s.lon, s.area.clone())),
                     })
                     .collect()

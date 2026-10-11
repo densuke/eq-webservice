@@ -20,7 +20,7 @@ const NOW: u64 = 1_790_000_000_000;
 static NO_ICONS: std::sync::LazyLock<Icons> = std::sync::LazyLock::new(Icons::new);
 
 /// 組み込みの定義 (broadcast) の地図の枠・別枠の矩形
-fn map_rect() -> (f64, f64, f64, f64) {
+pub(super) fn map_rect() -> (f64, f64, f64, f64) {
     Placed::builtin().unwrap().main.tuple64()
 }
 
@@ -85,7 +85,7 @@ pub(super) fn quake(max: Scale, prefs: &[(&str, Scale)], at: Option<(f64, f64)>)
 /// 右パネルの見出しの札の左端の x (右パネルの左端 900 + 余白 16 + 70)
 const SIDE: u32 = 900 + 16 + 70;
 
-fn eew(warning: bool, prefs: &[(&str, Scale)], at: Option<(f64, f64)>) -> EewSummary {
+pub(super) fn eew(warning: bool, prefs: &[(&str, Scale)], at: Option<(f64, f64)>) -> EewSummary {
     EewSummary {
         event_id: "e".into(),
         serial: "3".into(),

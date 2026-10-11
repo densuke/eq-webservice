@@ -154,6 +154,20 @@ impl Frame {
         self.clip.as_ref().map(|c| &*c.mask)
     }
 
+    /// 観測点の点の半径 (画面のpx)。寄るほど大きく、日本全体でも潰れない大きさ
+    pub fn dot_radius(&self) -> f32 {
+        (1.6 * self.ts.sx.abs().sqrt()).clamp(1.8, 6.0)
+    }
+
+    /// 観測点の点を置く画面の位置。この面に置かない (別枠の範囲の外・寄った本図の枠の外) ときは None
+    pub fn dot_at(&self, lon: f64, lat: f64) -> Option<(f32, f32)> {
+        if !self.contains(lon, lat) {
+            return None;
+        }
+        let p = self.view.px(lon, lat);
+        self.clip.as_ref().is_none_or(|c| c.contains(p)).then_some(p)
+    }
+
     /// 別枠か
     pub fn is_inset(&self) -> bool {
         self.inset.is_some()
