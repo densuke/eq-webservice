@@ -18,7 +18,9 @@ use super::icon::Icons;
 use super::layout_resolve::Rect;
 use super::model::{scale_color, scale_text_color, QuakeSummary};
 use super::notice::{self, LayoutCache, Notices};
-use super::paint::{epicenter, ghost_epicenter, rect, rrect, LAND, LAND_EDGE, MUTED, NEIGHBOR, NEIGHBOR_EDGE, SEA};
+use super::paint::{
+    circle, epicenter, ghost_epicenter, rect, rrect, LAND, LAND_EDGE, MUTED, NEIGHBOR, NEIGHBOR_EDGE, SEA,
+};
 use super::panel;
 use super::placed::Placed;
 use super::pref_list;
@@ -350,7 +352,7 @@ impl Renderer {
             }
         }
         for (slot, f) in frames(&self.main, &self.insets, &self.zoomed).into_iter().enumerate() {
-            match Shake::of(scene) {
+            match Shake::of(scene, Some(&self.zones)) {
                 Some(s) => draw_shake(&mut t, &mut self.text, &self.prefs, f, &s, true, main.right()),
                 None => {
                     let (fixed, bounds) = card_room(f, &self.insets, self.zoomed.is_some(), scene.test, &placed);
@@ -518,7 +520,7 @@ fn draw_sub_map(
     let Rect { x, y, w, h } = at;
     rect(t.low(), x, y, w, h, SEA, 1.0);
     draw_land(t.low(), f, neighbors, prefs);
-    if let Some(s) = Shake::of(scene) {
+    if let Some(s) = Shake::of(scene, None) {
         draw_shake(t, text, prefs, f, &s, false, x + w);
     }
     tsunami_coast::draw(t.low(), f, coast, scene.tsunami);
@@ -551,24 +553,28 @@ struct Shake<'a> {
     /// 予測か (半透明の塗りと白い縁で、観測と見分ける)
     forecast: bool,
     hypocenter: Option<&'a Hypocenter>,
+    /// 観測点の点 (経度, 緯度, 震度)。震度の小さい順。予測は空
+    dots: Vec<(f64, f64, Scale)>,
     /// 震源の印の近くに出す札
     tag: Option<String>,
 }
 
 impl<'a> Shake<'a> {
     /// 地震情報があればそれ、無ければ緊急地震速報。どちらも無ければ平時
-    fn of(scene: &Scene<'a>) -> Option<Shake<'a>> {
+    fn of(scene: &Scene<'a>, zones: Option<&Zones>) -> Option<Shake<'a>> {
         match (scene.quake, scene.eew) {
             (Some(q), _) => Some(Shake {
                 scales: &q.pref_scales,
                 forecast: false,
                 hypocenter: q.hypocenter.as_ref(),
+                dots: zones.map(|z| z.dots(&q.points)).unwrap_or_default(),
                 tag: None,
             }),
             (None, Some(e)) => Some(Shake {
                 scales: &e.pref_scales,
                 forecast: true,
                 hypocenter: e.hypocenter.as_ref(),
+                dots: Vec::new(),
                 tag: forecast_tag(e),
             }),
             (None, None) => None,
@@ -615,6 +621,14 @@ fn draw_shake(
     for (s, sc) in &hit {
         frame.fill(t.low(), &s.path, scale_color(*sc), alpha);
         frame.stroke(t.low(), &s.path, edge, 1.0, if shake.forecast { 1.2 } else { 1.0 });
+    }
+    // 観測点の点: 県の塗りの上、波の円・札・印の下 (震度の小さい順なので強い点が上)
+    let r = frame.dot_radius();
+    for &(lon, lat, sc) in &shake.dots {
+        if let Some((x, y)) = frame.dot_at(lon, lat) {
+            circle(t.low(), x, y, r + 0.7, edge, 0.8);
+            circle(t.low(), x, y, r, scale_color(sc), 1.0);
+        }
     }
     // ここから先は札と印: 波の円より上
     let pm = t.top();

@@ -285,19 +285,21 @@ fn load_renderer_with(cfg: &BroadcastConfig, placed: Placed) -> anyhow::Result<R
     });
     let mut renderer = Renderer::new(view, neighbors, prefs, areas, text, placed);
     renderer.set_coast(coast);
-    if cfg.zoom || cfg.sub_map {
-        // 地震情報細分区域は寄りの範囲の計算だけに使う。読めなければ、県の本土の範囲で寄る
-        let zones = geo::load(&dir.join("areas.geojson"), "name", &view).unwrap_or_else(|e| {
+    // 地震情報細分区域は寄りの範囲の計算だけに使う (寄りもサブの地図も無ければ読まない)。読めなければ、県の本土の範囲で寄る
+    let zone_areas = if cfg.zoom || cfg.sub_map {
+        geo::load(&dir.join("areas.geojson"), "name", &view).unwrap_or_else(|e| {
             tracing::warn!("broadcast: 地震情報細分区域を読めないので、県の範囲で寄ります: {e:#}");
             Vec::new()
-        });
-        // 観測点の表は、各地の震度の観測点から区域を引くのに使う。読めなければ区域で届いた分だけで寄る
-        let stations = shaken::load_stations(&dir.join("stations.json")).unwrap_or_else(|e| {
-            tracing::warn!("broadcast: 観測点の表を読めないので、観測点では寄りません: {e:#}");
-            Default::default()
-        });
-        renderer.set_zones(zones, stations);
-    }
+        })
+    } else {
+        Vec::new()
+    };
+    // 観測点の表は、各地の震度の観測点から区域を引くのと、観測点の点を置くのに使う。読めなければ、観測点では寄らず点も描かない
+    let stations = shaken::load_stations(&dir.join("stations.json")).unwrap_or_else(|e| {
+        tracing::warn!("broadcast: 観測点の表を読めないので、観測点では寄らず、点も描きません: {e:#}");
+        Default::default()
+    });
+    renderer.set_zones(zone_areas, stations);
     if cfg.zoom {
         renderer.enable_zoom();
     }
@@ -620,6 +622,10 @@ async fn viewers_loop(url: String, st: Shared) {
 
 #[cfg(test)]
 mod band_tests;
+#[cfg(test)]
+mod dots_bench;
+#[cfg(test)]
+mod dots_tests;
 #[cfg(test)]
 mod layout_def_tests;
 #[cfg(test)]

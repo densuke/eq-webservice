@@ -9,6 +9,7 @@ use anyhow::Context;
 
 use super::camera::MapBox;
 use super::geo::{project, Shape};
+use crate::quake::Scale;
 
 /// 地震情報の観測点 1 つ
 #[derive(Debug, Clone, PartialEq)]
@@ -16,6 +17,7 @@ pub struct Point {
     /// 区域名 (is_area) か観測点名
     pub addr: String,
     pub is_area: bool,
+    pub scale: Scale,
     /// 記録に付いている観測点の位置 (緯度・経度・区域)。ライブには付かない
     pub station: Option<(f64, f64, String)>,
 }
@@ -47,6 +49,20 @@ impl Zones {
             prefs: prefs.iter().map(|s| (s.key.clone(), s.main)).collect(),
             stations,
         }
+    }
+
+    /// 観測点の点 (経度, 緯度, 震度)。震度の小さい順 (強い点が上に重なる)。位置は記録の値を優先し、引けない点・区域は除く
+    pub fn dots(&self, points: &[Point]) -> Vec<(f64, f64, Scale)> {
+        let mut dots: Vec<_> = points
+            .iter()
+            .filter(|p| !p.is_area)
+            .filter_map(|p| {
+                let (lat, lon, _) = p.station.as_ref().or_else(|| self.stations.get(&p.addr))?;
+                Some((*lon, *lat, p.scale))
+            })
+            .collect();
+        dots.sort_by_key(|d| d.2);
+        dots
     }
 
     /// 揺れた範囲。areas は区域名、points は観測点、prefs は県名
@@ -92,8 +108,39 @@ mod tests {
         Point {
             addr: addr.into(),
             is_area,
+            scale: Scale::S1,
             station: None,
         }
+    }
+
+    #[test]
+    fn dots_prefer_the_recorded_position_and_go_weakest_first() {
+        let z = zones();
+        let at = |addr: &str, scale, station| Point {
+            addr: addr.into(),
+            is_area: false,
+            scale,
+            station,
+        };
+        let pts = [
+            at("観測点A", Scale::S5_LOWER, None),
+            at("記録", Scale::S2, Some((36.0, 138.0, "島".into()))),
+            at("不明", Scale::S7, None),
+            Point {
+                is_area: true,
+                ..at("島", Scale::S6_UPPER, None)
+            },
+            at("観測点A", Scale::S1, Some((1.0, 2.0, "島".into()))),
+        ];
+        // 引けない点と区域は無し。記録の位置が表より先。震度の小さい順
+        assert_eq!(
+            z.dots(&pts),
+            [
+                (2.0, 1.0, Scale::S1),
+                (138.0, 36.0, Scale::S2),
+                (137.0, 35.0, Scale::S5_LOWER)
+            ]
+        );
     }
 
     #[test]
