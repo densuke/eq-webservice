@@ -422,11 +422,12 @@ impl From<RawEew> for Eew {
             })
             .collect();
         // 県の予想は上限 (警戒側。Wolfx と同じ)。上限が「程度以上」なら下限
-        let pref_max = aggregate_pref_max(
-            areas
-                .iter()
-                .map(|a| (a.pref.as_str(), a.scale_to.unwrap_or(a.scale_from))),
-        );
+        let pref_max = aggregate_pref_max(areas.iter().map(|a| {
+            (
+                a.pref.as_str(),
+                a.scale_to.filter(|s| s.is_known()).unwrap_or(a.scale_from),
+            )
+        }));
         let max_scale = areas
             .iter()
             .map(|a| a.scale_to.filter(|s| s.is_known()).unwrap_or(a.scale_from))
@@ -582,6 +583,12 @@ mod tests {
                 .collect::<Vec<_>>(),
             [("宮城県", Scale::S6_UPPER), ("岩手県", Scale::S5_UPPER)]
         );
+        // 上限が無い (scaleTo 欠落) なら下限。不明値を県の予想にしない
+        let no_to = json.replace(r#""scaleTo":60,"#, "");
+        let EventBody::Eew(e) = parse(&no_to).unwrap().unwrap().body else {
+            panic!()
+        };
+        assert_eq!(e.pref_max[0].scale, Scale::S6_LOWER);
         assert_eq!(ev.title(), "【緊急地震速報(警報)】宮城県沖 第3報");
     }
 

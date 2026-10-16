@@ -127,14 +127,16 @@ impl Hub {
             st.tsunami = Some(ev.clone());
         }
         // 同じ地震の EEW は最新の報だけを直近履歴に残す (予報は 1 地震で何報も出るため)。
-        // 遅れて届いた古い報は配信はするが、直近履歴には入れない
+        // 遅れて届いた古い報は配信はするが、直近履歴には入れない。
+        // 取り消し済みの地震に後から届いた報は配信もしない (読み上げや通知が再び鳴らないように)
         if let EventBody::Eew(e) = &ev.body {
             let same = |r: &Arc<Event>| match &r.body {
                 EventBody::Eew(x) if x.event_id == e.event_id => Some(rank(x)),
                 _ => None,
             };
-            if st.recent.iter().filter_map(same).any(|s| s > rank(e)) {
-                return Some(ev);
+            let newest = st.recent.iter().filter_map(same).max();
+            if newest.is_some_and(|s| s > rank(e)) {
+                return (newest != Some(u32::MAX)).then_some(ev);
             }
             st.recent.retain(|r| same(r).is_none());
         }
@@ -261,7 +263,10 @@ mod tests {
             e.cancelled = true;
         }
         hub.publish(cancel);
-        hub.publish(eew("w43", "A", "43"));
+        let mut rx = hub.subscribe();
+        // 取り消しのあとの報は配信もしない (読み上げや通知が再び鳴らないように)
+        assert!(!hub.publish(eew("w43", "A", "43")));
+        assert!(rx.try_recv().is_err());
         let recent: Vec<_> = hub.recent().iter().map(|e| e.id.clone()).collect();
         assert_eq!(recent, ["p2"], "取り消しのあとの報も取り消しを上書きしない");
     }
