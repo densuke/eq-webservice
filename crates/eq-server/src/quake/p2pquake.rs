@@ -283,8 +283,9 @@ struct RawTsunami {
     cancelled: bool,
     #[serde(default)]
     issue: RawIssue,
+    /// 取り消しでは null が来うる (EEW の取り消しと同じ)
     #[serde(default)]
-    areas: Vec<RawTsunamiArea>,
+    areas: Option<Vec<RawTsunamiArea>>,
 }
 
 #[derive(Deserialize)]
@@ -317,6 +318,7 @@ impl From<RawTsunami> for Tsunami {
     fn from(r: RawTsunami) -> Self {
         let mut areas: Vec<TsunamiArea> = r
             .areas
+            .unwrap_or_default()
             .into_iter()
             .map(|a| TsunamiArea {
                 grade: match a.grade.as_str() {
@@ -360,8 +362,9 @@ struct RawEew {
     #[serde(default)]
     issue: RawEewIssue,
     earthquake: Option<RawEewEarthquake>,
+    /// 取り消しでは null が来る (serde の default は「無い」ときだけで null には効かない)
     #[serde(default)]
-    areas: Vec<RawEewArea>,
+    areas: Option<Vec<RawEewArea>>,
 }
 
 #[derive(Deserialize, Default)]
@@ -403,6 +406,7 @@ impl From<RawEew> for Eew {
     fn from(r: RawEew) -> Self {
         let areas: Vec<EewArea> = r
             .areas
+            .unwrap_or_default()
             .into_iter()
             .map(|a| EewArea {
                 // pref は「北海道道北」のような地方名のことがあるので、区域名から都道府県を求める
@@ -417,7 +421,12 @@ impl From<RawEew> for Eew {
                 arrived: a.kind_code == "11",
             })
             .collect();
-        let pref_max = aggregate_pref_max(areas.iter().map(|a| (a.pref.as_str(), a.scale_from)));
+        // 県の予想は上限 (警戒側。Wolfx と同じ)。上限が「程度以上」なら下限
+        let pref_max = aggregate_pref_max(
+            areas
+                .iter()
+                .map(|a| (a.pref.as_str(), a.scale_to.unwrap_or(a.scale_from))),
+        );
         let max_scale = areas
             .iter()
             .map(|a| a.scale_to.filter(|s| s.is_known()).unwrap_or(a.scale_from))
@@ -565,7 +574,29 @@ mod tests {
         assert!(e.areas[0].arrived);
         assert_eq!(e.areas[1].scale_to, None);
         assert_eq!(e.pref_max[0].pref, "宮城県");
+        // 県の予想は上限 (警戒側。Wolfx と同じ)。「程度以上」は下限
+        assert_eq!(
+            e.pref_max
+                .iter()
+                .map(|p| (p.pref.as_str(), p.scale))
+                .collect::<Vec<_>>(),
+            [("宮城県", Scale::S6_UPPER), ("岩手県", Scale::S5_UPPER)]
+        );
         assert_eq!(ev.title(), "【緊急地震速報(警報)】宮城県沖 第3報");
+    }
+
+    #[test]
+    fn parses_a_cancel_whose_areas_and_earthquake_are_null() {
+        // 2026-10-16 12:48:50 千島列島 (M9.9) の取り消し (履歴 API の実物。id は WebSocket の _id に合わせた)
+        let json = r#"{"areas":null,"cancelled":true,"code":556,"earthquake":null,"_id":"6ad19ea2e88ee598246bf3f1",
+          "issue":{"eventId":"20261016123810","serial":"2","time":"2026/10/16 12:48:50"},
+          "time":"2026/10/16 12:48:50.829","ver":"20231023"}"#;
+        let EventBody::Eew(e) = parse(json).unwrap().unwrap().body else {
+            panic!()
+        };
+        assert!(e.cancelled);
+        assert_eq!((e.event_id.as_str(), e.serial.as_str()), ("20261016123810", "2"));
+        assert!(e.areas.is_empty());
     }
 
     #[test]
@@ -584,6 +615,16 @@ mod tests {
         let json = r#"{"code":556,"_id":"e2","cancelled":true,"issue":{"time":"t","eventId":"x","serial":"4"}}"#;
         let ev = parse(json).unwrap().unwrap();
         assert!(ev.title().ends_with("取消"));
+    }
+
+    #[test]
+    fn parses_a_tsunami_cancel_whose_areas_are_null() {
+        // 実物は未入手。EEW の取り消し (同じ生成元) が areas: null で届いたので同じ形を想定
+        let json = r#"{"code":552,"_id":"t2","cancelled":true,"issue":{"source":"気象庁","time":"2026/10/16 13:00:00","type":"Focus"},"areas":null}"#;
+        let EventBody::Tsunami(t) = parse(json).unwrap().unwrap().body else {
+            panic!()
+        };
+        assert!(t.cancelled && t.areas.is_empty());
     }
 
     #[test]
