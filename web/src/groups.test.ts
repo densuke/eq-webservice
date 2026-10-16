@@ -101,6 +101,9 @@ test("the latest eew is the one with the largest serial", () => {
   s.add(e("b", "10"));
   const g = s.add(e("c", "9"))!;
   assert.equal(latestEew(g as EewGroup).serial, "10");
+  // 取り消しは serial が小さくても最新 (別の配信元の取り消し)
+  const c = s.add({ ...e("p", "2"), cancelled: true })!;
+  assert.equal(latestEew(c as EewGroup).id, "p");
 });
 
 test("updatedAt follows the received time even when it is negative (records before 1970)", () => {

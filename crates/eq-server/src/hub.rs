@@ -127,14 +127,16 @@ impl Hub {
             st.tsunami = Some(ev.clone());
         }
         // 同じ地震の EEW は最新の報だけを直近履歴に残す (予報は 1 地震で何報も出るため)。
-        // 遅れて届いた古い報は配信はするが、直近履歴には入れない
+        // 遅れて届いた古い報は配信はするが、直近履歴には入れない。
+        // 取り消し済みの地震に後から届いた報は配信もしない (読み上げや通知が再び鳴らないように)
         if let EventBody::Eew(e) = &ev.body {
             let same = |r: &Arc<Event>| match &r.body {
-                EventBody::Eew(x) if x.event_id == e.event_id => Some(serial(x)),
+                EventBody::Eew(x) if x.event_id == e.event_id => Some(rank(x)),
                 _ => None,
             };
-            if st.recent.iter().filter_map(same).any(|s| s > serial(e)) {
-                return Some(ev);
+            let newest = st.recent.iter().filter_map(same).max();
+            if newest.is_some_and(|s| s > rank(e)) {
+                return (newest != Some(u32::MAX)).then_some(ev);
             }
             st.recent.retain(|r| same(r).is_none());
         }
@@ -151,8 +153,13 @@ impl Hub {
     }
 }
 
-fn serial(e: &crate::quake::Eew) -> u32 {
-    e.serial.parse().unwrap_or(0)
+/// 新しさの順位。取り消しは serial に関係なく最後 (配信元ごとに serial が違い、P2P の取り消しは小さい番号で届く)
+fn rank(e: &crate::quake::Eew) -> u32 {
+    if e.cancelled {
+        u32::MAX
+    } else {
+        e.serial.parse().unwrap_or(0)
+    }
 }
 
 pub fn now_ms() -> u64 {
@@ -244,6 +251,24 @@ mod tests {
             sent.push(e.id.clone());
         }
         assert_eq!(sent, ["a1", "x", "a3", "a2", "b1"]);
+    }
+
+    #[test]
+    fn a_cancel_replaces_the_report_even_with_a_lower_serial() {
+        // P2P の取り消しは第 2 報、Wolfx は第 42 報まで進んでいる (2026-10-16 千島列島)
+        let hub = Hub::new(10);
+        hub.publish(eew("w42", "A", "42"));
+        let mut cancel = eew("p2", "A", "2");
+        if let EventBody::Eew(e) = &mut cancel.body {
+            e.cancelled = true;
+        }
+        hub.publish(cancel);
+        let mut rx = hub.subscribe();
+        // 取り消しのあとの報は配信もしない (読み上げや通知が再び鳴らないように)
+        assert!(!hub.publish(eew("w43", "A", "43")));
+        assert!(rx.try_recv().is_err());
+        let recent: Vec<_> = hub.recent().iter().map(|e| e.id.clone()).collect();
+        assert_eq!(recent, ["p2"], "取り消しのあとの報も取り消しを上書きしない");
     }
 
     #[test]

@@ -54,8 +54,9 @@ pub fn latest_eews(events: &[Event]) -> Vec<EewSummary> {
     by_event
         .into_iter()
         .filter_map(|g| {
-            // 同じ serial なら後から届いた方 (max_by_key は最後の最大を返す)
-            let (ev, e) = *g.iter().max_by_key(|(_, e)| serial(e))?;
+            // 同じ serial なら後から届いた方 (max_by_key は最後の最大を返す)。
+            // 取り消しは serial に関係なく最新 (配信元ごとに serial が違い、P2P の取り消しは小さい番号で届く)
+            let (ev, e) = *g.iter().max_by_key(|(_, e)| (e.cancelled, serial(e)))?;
             if e.cancelled {
                 return None;
             }
@@ -367,6 +368,17 @@ mod tests {
         // 取り消しが最新なら、前の報の予想も持ち越さずに消える
         let cancelled = [events[0].clone(), eew_event("a", 3, t + 3_000, |e| e.cancelled = true)];
         assert!(latest_eews(&cancelled).is_empty());
+    }
+
+    #[test]
+    fn a_cancel_from_another_source_drops_the_event_even_with_a_lower_serial() {
+        // Wolfx は第 42 報まで、P2P の取り消しは第 2 報 (2026-10-16 千島列島)
+        let t = T0 as u64;
+        let events = [
+            eew_event("a", 42, t + 1_000, |e| e.max_scale = Scale::S7),
+            eew_event("a", 2, t + 2_000, |e| e.cancelled = true),
+        ];
+        assert!(latest_eews(&events).is_empty());
     }
 
     #[test]
