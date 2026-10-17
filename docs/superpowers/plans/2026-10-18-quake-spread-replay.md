@@ -10,6 +10,16 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-18-quake-spread-replay-design.md`
 
+## 実装との差 (2026-10-18、実装とレビューのあと)
+
+この計画のとおりでないところ。仕様書と docs/broadcast-native.md の 16 章は実装に合わせてある。
+
+- 案内は本図の左上ではなく右上 (左上は南西諸島の別枠と重なった)。
+- `look` は再現の波を数えない (数えると記録の描き直しで刻みの音が鳴る)。`look` の引数も変えていない。
+- 終わりは流す報の観測点で決める。再現の窓の外では、`spread_of` は点の計算をせずに返す。
+- 発生時刻の分からない地震情報では、再現を止めない。
+- テスト `the_still_is_redrawn_while_the_dots_spread` は、中身に合わせて `the_frame_is_redrawn_every_tick_while_spreading` にした。
+
 ## Global Constraints
 
 - 配信 (native) だけ。web (`web/src`) は変えない。

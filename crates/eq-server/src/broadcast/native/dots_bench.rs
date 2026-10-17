@@ -31,6 +31,23 @@ fn station_dots_cost() {
         }
     }
     let icons = Icons::new();
+    // 再現の判断 (spread_of) は地震の画面のあいだ毎コマ呼ばれる。窓の中 (受信の 20 秒後) と外 (受信の 10 分後) の 1 回の時間
+    {
+        let r = load_renderer(&config_sub(false, false)).unwrap();
+        let groups = model::group_quakes(&events);
+        let q = groups.iter().find(|g| g.updated_ms >= at).unwrap();
+        for (label, t) in [("in", at + 20_000), ("after", at + 600_000)] {
+            let started = std::time::Instant::now();
+            for _ in 0..RENDERS {
+                std::hint::black_box(super::spread::spread_of(&events, q, r.zones(), t));
+            }
+            println!(
+                "events={} spread_of {label}: {:.3} ms/call",
+                events.len(),
+                started.elapsed().as_secs_f64() * 1000.0 / RENDERS as f64
+            );
+        }
+    }
     for zoom in [false, true] {
         let mut cfg = config_sub(zoom, false);
         cfg.font = std::env::var("EQ_NATIVE_FONT").unwrap_or(cfg.font);

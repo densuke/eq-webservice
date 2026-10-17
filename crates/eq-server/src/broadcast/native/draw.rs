@@ -555,7 +555,7 @@ fn draw_hindsight(pm: &mut Pixmap, text: &mut Text, frame: &Frame, h: &Hindsight
     }
 }
 
-/// 揺れの広がりの再現の最中に、本図の左上に出す案内
+/// 揺れの広がりの再現の最中に、本図の右上に出す案内
 const SPREAD_LABEL: &str = "揺れの広がり (再現)";
 
 /// 地震の画面に描く揺れ (地震情報の観測、または緊急地震速報の予測)

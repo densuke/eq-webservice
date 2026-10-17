@@ -77,7 +77,7 @@ fn the_spread_wave_replaces_the_quake_wave() {
 }
 
 #[test]
-fn the_still_is_redrawn_while_the_dots_spread() {
+fn the_frame_is_redrawn_every_tick_while_spreading() {
     let mut st = Stepper::new(load_renderer(&config_sub(false, false)).unwrap());
     let icons = Icons::new();
     let start = R1 + LEAD_MS;

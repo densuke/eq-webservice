@@ -51,6 +51,11 @@ impl Zones {
         }
     }
 
+    /// 観測点の表の位置 (緯度, 経度)。表に無ければ None
+    pub fn position(&self, addr: &str) -> Option<(f64, f64)> {
+        self.stations.get(addr).map(|&(lat, lon, _)| (lat, lon))
+    }
+
     /// 観測点の点 (経度, 緯度, 震度)。震度の小さい順 (強い点が上に重なる)。位置は記録の値を優先し、引けない点・区域は除く
     pub fn dots(&self, points: &[Point]) -> Vec<(f64, f64, Scale)> {
         let mut dots: Vec<_> = points

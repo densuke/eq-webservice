@@ -3,7 +3,7 @@
 //! 状態は持たない: 届いた報と今の時刻だけで決める (ライブも記録からの描き直しも同じに動く)。
 
 use super::eew::{quake_place, surface_radius_km, Wave, DEFAULT_DEPTH_KM, VP_KM_S, VS_KM_S, WAVE_MAX_MS};
-use super::model::{distance_km, event_place, same_quake, QuakeSummary};
+use super::model::{distance_km, event_place, same_quake, QuakeSummary, SAME_QUAKE_KM};
 use super::shaken::Zones;
 use crate::quake::{Event, EventBody, ObservationPoint, Scale};
 
@@ -11,8 +11,6 @@ use crate::quake::{Event, EventBody, ObservationPoint, Scale};
 pub const LEAD_MS: u64 = 2_000;
 /// 一番遠い点に S 波が届いてから終わるまで
 pub const HOLD_MS: u64 = 5_000;
-/// 同じ地震とみなす震央の距離 (model の同じ地震の判定と同じ値)
-const SAME_EPICENTER_KM: f64 = 200.0;
 /// 流す最大震度の下限
 const MIN_SCALE: Scale = Scale::S3;
 
@@ -37,7 +35,12 @@ pub fn spread_of(events: &[Event], current: &QuakeSummary, zones: &Zones, now_ms
         .filter(|e| matches!(e.body, EventBody::Quake(_)) && event_place(e).is_some_and(|p| same_quake(&p, &place)))
         .collect();
     mine.sort_by_key(|e| e.received_at_ms);
-    let received = mine.iter().find(|e| stations(e).is_some())?.received_at_ms;
+    let trigger = mine.iter().find_map(|e| Some((e.received_at_ms, stations(e)?)));
+    let (received, points) = trigger?;
+    // 再現の窓 (受信から LEAD_MS + 上限) の外は、点の計算をせずに返す (地震の画面のあいだ毎コマ呼ばれる)
+    if now_ms < received || now_ms > received + LEAD_MS + WAVE_MAX_MS as u64 {
+        return None;
+    }
     let max = mine
         .iter()
         .filter(|e| e.received_at_ms <= received)
@@ -46,7 +49,7 @@ pub fn spread_of(events: &[Event], current: &QuakeSummary, zones: &Zones, now_ms
             _ => None,
         })
         .max()?;
-    if max < MIN_SCALE || now_ms < received {
+    if max < MIN_SCALE {
         return None;
     }
     let interrupted = events.iter().any(|e| {
@@ -54,7 +57,8 @@ pub fn spread_of(events: &[Event], current: &QuakeSummary, zones: &Zones, now_ms
             && e.received_at_ms <= now_ms
             && match &e.body {
                 EventBody::Eew(_) => true,
-                EventBody::Quake(_) => !event_place(e).is_some_and(|p| same_quake(&p, &place)),
+                // 発生時刻の分からない報は、別の地震か判断できないので止めない
+                EventBody::Quake(_) => event_place(e).is_some_and(|p| p.origin_ms.is_some() && !same_quake(&p, &place)),
                 _ => false,
             }
     });
@@ -67,10 +71,17 @@ pub fn spread_of(events: &[Event], current: &QuakeSummary, zones: &Zones, now_ms
         .and_then(|h| h.depth_km)
         .map_or(DEFAULT_DEPTH_KM, f64::from)
         .max(0.0);
-    let far = zones
-        .dots(&current.points)
+    // 終わりは流す報の観測点で決める。位置は記録の値を優先し、無ければ観測点の表 (Zones::dots と同じ)
+    let far = points
         .iter()
-        .map(|&(dlon, dlat, _)| distance_km(lat, lon, dlat, dlon))
+        .filter(|p| !p.is_area)
+        .filter_map(|p| {
+            p.station
+                .as_ref()
+                .map(|s| (s.lat, s.lon))
+                .or_else(|| zones.position(&p.addr))
+        })
+        .map(|(dlat, dlon)| distance_km(lat, lon, dlat, dlon))
         .reduce(f64::max)?;
     let start_ms = received + LEAD_MS;
     let arrive_ms = ((far * far + depth_km * depth_km).sqrt() / VS_KM_S * 1000.0).ceil() as u64;
@@ -114,7 +125,7 @@ pub fn wave(s: &Spread, now_ms: u64) -> Wave {
 
 /// 再現と同じ地震の波か (震央が近い)。再現の最中は、その地震の今の波を描かない
 pub fn near(s: &Spread, w: &Wave) -> bool {
-    distance_km(s.lat, s.lon, w.lat, w.lon) <= SAME_EPICENTER_KM
+    distance_km(s.lat, s.lon, w.lat, w.lon) <= SAME_QUAKE_KM
 }
 
 /// その点 (経度, 緯度) に S 波が届いたか
@@ -342,5 +353,32 @@ mod tests {
         ));
         let s = spread_at(&ev, &z, R1 + 12_000).unwrap();
         assert_eq!(s.start_ms, R1 + LEAD_MS);
+    }
+
+    #[test]
+    fn the_end_is_measured_on_the_report_that_started_it() {
+        let z = zones(&[]);
+        let first = spread_at(&base(Scale::S3), &z, R1).unwrap();
+        // 後の訂正で遠い点が無くなっても、終わりは流す報の点で決まる
+        let mut ev = base(Scale::S3);
+        ev.push(quake(
+            R1 + 10_000,
+            Some((LAT, LON)),
+            Scale::S3,
+            vec![point("近い", false, Scale::S3)],
+        ));
+        let s = spread_at(&ev, &z, R1 + 12_000).unwrap();
+        assert_eq!(s.end_ms, first.end_ms);
+    }
+
+    #[test]
+    fn a_report_without_an_origin_time_does_not_stop_it() {
+        let mut ev = base(Scale::S3);
+        let mut odd = quake(R1 + 10_000, Some((LAT + 500.0 / 111.2, LON)), Scale::S1, vec![]);
+        let EventBody::Quake(q) = &mut odd.body else { panic!() };
+        q.origin_time_ms = None;
+        ev.push(odd);
+        // 発生時刻が分からない報は、別の地震かどうか判断できないので止めない
+        assert!(spread_at(&ev, &zones(&[]), R1 + 12_000).is_some());
     }
 }

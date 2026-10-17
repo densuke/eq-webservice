@@ -10,7 +10,7 @@ use crate::quake::{jst, Event, EventBody, Hypocenter, ObservationPoint, Quake, S
 
 /// 同じ地震とみなす発生時刻の差と震央の距離
 const SAME_QUAKE_MS: i64 = 90_000;
-const SAME_QUAKE_KM: f64 = 200.0;
+pub(super) const SAME_QUAKE_KM: f64 = 200.0;
 /// 最後の情報から地震の画面を出し続ける時間 (震度 2 以下は短い)
 const SETTLE_MS: u64 = 3 * 60_000;
 const MINOR_SETTLE_MS: u64 = 60_000;
