@@ -3,7 +3,7 @@
 //! 状態は持たない: 届いた報と今の時刻だけで決める (ライブも記録からの描き直しも同じに動く)。
 
 use super::eew::{quake_place, surface_radius_km, Wave, DEFAULT_DEPTH_KM, VP_KM_S, VS_KM_S, WAVE_MAX_MS};
-use super::model::{distance_km, event_place, same_quake, to_point, QuakeSummary};
+use super::model::{distance_km, event_place, same_quake, QuakeSummary};
 use super::shaken::Zones;
 use crate::quake::{Event, EventBody, ObservationPoint, Scale};
 
@@ -38,14 +38,6 @@ pub fn spread_of(events: &[Event], current: &QuakeSummary, zones: &Zones, now_ms
         .collect();
     mine.sort_by_key(|e| e.received_at_ms);
     let received = mine.iter().find(|e| stations(e).is_some())?.received_at_ms;
-    // 点は観測点を含む最新の報から取る (区域だけの続報で消さない)
-    let points: Vec<_> = mine
-        .iter()
-        .rev()
-        .find_map(|e| stations(e))?
-        .iter()
-        .map(to_point)
-        .collect();
     let max = mine
         .iter()
         .filter(|e| e.received_at_ms <= received)
@@ -76,7 +68,7 @@ pub fn spread_of(events: &[Event], current: &QuakeSummary, zones: &Zones, now_ms
         .map_or(DEFAULT_DEPTH_KM, f64::from)
         .max(0.0);
     let far = zones
-        .dots(&points)
+        .dots(&current.points)
         .iter()
         .map(|&(dlon, dlat, _)| distance_km(lat, lon, dlat, dlon))
         .reduce(f64::max)?;

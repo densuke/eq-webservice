@@ -132,17 +132,19 @@ fn summarize(g: &[(u64, &Quake)]) -> QuakeSummary {
         max_scale: g.iter().map(|(_, q)| q.max_scale).max().unwrap_or(Scale::UNKNOWN),
         tsunami: latest.domestic_tsunami.clone(),
         pref_scales: pref_scales(g),
+        // 観測点を含む最新の報を優先する (区域だけの続報で観測点の点を消さない)。無ければ点のある最新の報
         points: g
             .iter()
             .rev()
-            .find(|(_, q)| !q.points.is_empty())
+            .find(|(_, q)| q.points.iter().any(|p| !p.is_area))
+            .or_else(|| g.iter().rev().find(|(_, q)| !q.points.is_empty()))
             .map(|(_, q)| q.points.iter().map(to_point).collect())
             .unwrap_or_default(),
     }
 }
 
 /// 地震情報の観測点を、配信の観測点 (寄り・点) に直す
-pub fn to_point(p: &ObservationPoint) -> Point {
+fn to_point(p: &ObservationPoint) -> Point {
     Point {
         addr: p.addr.clone(),
         is_area: p.is_area,

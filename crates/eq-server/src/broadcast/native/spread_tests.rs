@@ -170,3 +170,24 @@ mod drawing {
         assert!(!in_corner(&with, x as u32 + 8, x as u32 + 240));
     }
 }
+
+#[test]
+fn an_area_only_follow_up_keeps_the_station_dots() {
+    let mut events = report(Scale::S3);
+    let mut area_only = events[0].clone();
+    area_only.id = "q2".into();
+    area_only.received_at_ms = R1 + 10_000;
+    let EventBody::Quake(q) = &mut area_only.body else {
+        panic!()
+    };
+    q.info_type = QuakeInfoType::ScalePrompt;
+    q.points = vec![ObservationPoint {
+        is_area: true,
+        station: None,
+        ..q.points[0].clone()
+    }];
+    events.push(area_only);
+    let groups = group_quakes(&events);
+    // 区域だけの続報が来ても、観測点を含む報の点を使う (再現の最中に点が消えない)
+    assert!(groups[0].points.iter().any(|p| !p.is_area));
+}
