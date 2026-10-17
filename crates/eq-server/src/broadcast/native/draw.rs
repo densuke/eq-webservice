@@ -375,8 +375,9 @@ impl Renderer {
             }
         }
         if scene.spread.is_some() && self.text.enabled() {
+            // 右上 (左上は南西諸島の別枠と重なる)
             self.text
-                .draw(t.top(), SPREAD_LABEL, main.x + 12.0, main.y + 22.0, 13.0, TEXT);
+                .draw_right(t.top(), SPREAD_LABEL, main.right() - 12.0, main.y + 22.0, 13.0, TEXT);
         }
         panel::draw_dynamic(t.top(), &mut self.text, scene, &placed);
         if let (Some(f), Some(at), true) = (&self.sub, placed.sub, scene.quake.is_some() || scene.eew.is_some()) {

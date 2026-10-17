@@ -158,11 +158,15 @@ mod drawing {
         let without = r.render(&sc);
         sc.spread = Some(spreading());
         let with = r.render(&sc);
-        let (x, y, _, _) = map_rect();
-        let (x, y) = (x as u32, y as u32);
-        let differs = (y + 6..y + 30)
-            .flat_map(|yy| (x + 8..x + 200).map(move |xx| (xx, yy)))
-            .any(|p| rgb(&with, p) != rgb(&without, p));
-        assert!(differs);
+        // 本図の右上 (左上は南西諸島の別枠と重なる)
+        let (x, y, w, _) = map_rect();
+        let (right, y) = ((x + w) as u32, y as u32);
+        let in_corner = |pm: &tiny_skia::Pixmap, from: u32, to: u32| {
+            (y + 6..y + 30)
+                .flat_map(|yy| (from..to).map(move |xx| (xx, yy)))
+                .any(|p| rgb(pm, p) != rgb(&without, p))
+        };
+        assert!(in_corner(&with, right - 200, right - 8));
+        assert!(!in_corner(&with, x as u32 + 8, x as u32 + 240));
     }
 }

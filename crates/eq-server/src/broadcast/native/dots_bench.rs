@@ -2,6 +2,7 @@
 //! `EQ_NATIVE_FONT=... EQ_DOTS_OUT=/tmp/dots cargo test --release -p eq-server station_dots_cost -- --ignored --nocapture`
 
 use super::draw::Scene;
+use super::spread::Spread;
 use super::zoom_tests::{config_sub, input};
 use super::*;
 use crate::quake::EventBody;
@@ -37,10 +38,26 @@ fn station_dots_cost() {
         for k in 0..10 {
             st.step(&input(&events, now + k * 200, &icons)); // 温める (寄りの範囲も入る)
         }
-        for (label, ev) in [("dots", &events), ("none", &bare)] {
+        // spread: 揺れの広がりの再現の最中 (再現の発生から最大 20 秒。点を S 波の到達で絞る)
+        for (label, ev, spreading) in [
+            ("dots", &events, false),
+            ("none", &bare, false),
+            ("spread", &events, true),
+        ] {
             let groups = model::group_quakes(ev);
+            let quake = groups.iter().find(|g| g.updated_ms >= at).or(groups.first());
+            let spread = quake
+                .and_then(|q| q.hypocenter.as_ref())
+                .filter(|_| spreading)
+                .map(|h| Spread {
+                    lat: h.latitude.unwrap(),
+                    lon: h.longitude.unwrap(),
+                    depth_km: h.depth_km.map_or(10.0, f64::from),
+                    start_ms: now.saturating_sub(20_000),
+                    end_ms: now + 60_000,
+                });
             let scene = Scene {
-                quake: groups.iter().find(|g| g.updated_ms >= at).or(groups.first()),
+                quake,
                 eew: None,
                 history: &groups,
                 warnings: None,
@@ -58,7 +75,7 @@ fn station_dots_cost() {
                 status: None,
                 viewers: None,
                 notices: None,
-                spread: None,
+                spread,
             };
             let mut ms: Vec<f64> = (0..RENDERS)
                 .map(|_| {
