@@ -200,6 +200,7 @@ fn the_insets_are_not_drawn_while_zoomed_and_come_back_at_home() {
         status: None,
         viewers: None,
         notices: None,
+        spread: None,
     };
     // 南西諸島の別枠の縁 (枠の 1 画素外側の線)
     let line = |pm: &tiny_skia::Pixmap| {
@@ -449,6 +450,7 @@ fn write_zoomed_png_when_asked() {
         status: None,
         viewers: None,
         notices: None,
+        spread: None,
     };
     let aim = camera::Aim {
         epicenter: Some(camera::Epicenter {
@@ -491,6 +493,7 @@ pub(super) fn eew_scene<'a>(e: &'a eew::EewSummary, icons: &'a Icons, now_ms: u6
         status: None,
         viewers: None,
         notices: None,
+        spread: None,
     }
 }
 
@@ -791,6 +794,7 @@ fn sub_map_cost() {
                     status: None,
                     viewers: None,
                     notices: None,
+                    spread: None,
                 };
                 let renders: Vec<f64> = (0..RENDERS)
                     .map(|_| {

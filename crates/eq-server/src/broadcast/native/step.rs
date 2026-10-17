@@ -12,6 +12,7 @@ use super::icon::Icons;
 use super::model::same_quake;
 use super::notice::Notices;
 use super::shaken::Point;
+use super::spread::{self, Spread};
 use super::{eew, model, quake_band, yuv, HISTORY};
 use crate::broadcast::record::Shown;
 use crate::broadcast::status::Notice;
@@ -54,12 +55,14 @@ pub struct Look {
     pub waving: bool,
 }
 
-/// 描く地震波。地震の画面のときの地震波と、のちに分かった震源の波 (その間は平時の画面でも描く)
-fn frame_waves(
+/// 描く地震波。地震の画面のときの地震波と、のちに分かった震源の波 (その間は平時の画面でも描く)。
+/// 揺れの広がりの再現の最中は、その地震の今の波の代わりに再現の波を描く
+pub(super) fn frame_waves(
     groups: &[model::QuakeSummary],
     eews: &[eew::EewSummary],
     in_quake_screen: bool,
     hindsight: Option<&Hindsight>,
+    spread: Option<&Spread>,
     now: u64,
 ) -> Vec<eew::Wave> {
     let mut waves = if in_quake_screen {
@@ -67,6 +70,10 @@ fn frame_waves(
     } else {
         Vec::new()
     };
+    if let Some(s) = spread {
+        waves.retain(|w| !spread::near(s, w));
+        waves.push(spread::wave(s, now));
+    }
     waves.extend(hindsight::pending(hindsight, groups, eews).and_then(|h| hindsight::wave(h, now)));
     waves
 }
@@ -77,7 +84,8 @@ pub fn look(events: &[Event], now: u64, hindsight: Option<&Hindsight>) -> Look {
     let current = eew::current(&groups, &eews, now);
     Look {
         calm: current.is_none(),
-        waving: !frame_waves(&groups, &eews, current.is_some(), hindsight, now).is_empty(),
+        // 揺れの広がりの再現は数えない (記録の描き直しでは、波の間に刻みの音を鳴らすため)
+        waving: !frame_waves(&groups, &eews, current.is_some(), hindsight, None, now).is_empty(),
     }
 }
 
@@ -271,10 +279,15 @@ impl Stepper {
         let pending = hindsight::pending(i.hindsight, &groups, &eews);
         let view = self.aim_camera(current, &eews, pending, now, i.fast_forward);
         self.aim_sub(current, &eews);
+        // 揺れの広がりの再現は、地震の画面の地震が観測点の値の入った地震情報のときだけ
+        let spread = quake.and_then(|q| spread::spread_of(i.events, q, self.renderer.zones(), now));
         // 地震波は地震の画面のときだけ描く (のちに分かった震源の波は、平時の画面でも描く)
-        let waves = frame_waves(&groups, &eews, current.is_some(), i.hindsight, now);
+        let waves = frame_waves(&groups, &eews, current.is_some(), i.hindsight, spread.as_ref(), now);
         // サブの地図の波は、サブの地図に映している地震の波だけ (保持時間・薄さは配信のサブの地図には無い)
-        let sub_wave = current.and_then(|c| eew::sub_wave(c, &groups, &eews, now));
+        let sub_wave = match &spread {
+            Some(s) => Some(spread::wave(s, now)),
+            None => current.and_then(|c| eew::sub_wave(c, &groups, &eews, now)),
+        };
         // 地震波以外を描き直すのは、データが変わったとき・平時と地震が切り替わったとき・秒が進んだときだけ。
         // 地震波が動いている間は、その上にコマごとに波だけを重ねる
         let still_key = (
@@ -314,6 +327,7 @@ impl Stepper {
                 status: i.status,
                 viewers: i.viewers,
                 notices: i.notices,
+                spread,
             };
             let still = if layered {
                 Still::Layered(self.renderer.render_layers(&scene))

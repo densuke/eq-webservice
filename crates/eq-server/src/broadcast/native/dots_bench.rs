@@ -58,6 +58,7 @@ fn station_dots_cost() {
                 status: None,
                 viewers: None,
                 notices: None,
+                spread: None,
             };
             let mut ms: Vec<f64> = (0..RENDERS)
                 .map(|_| {

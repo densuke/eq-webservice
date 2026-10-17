@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use super::shaken::Point;
 use crate::broadcast::mixer::AlertLevel;
 use crate::quake::model::{Tsunami, TsunamiGrade};
-use crate::quake::{jst, Event, EventBody, Hypocenter, Quake, Scale};
+use crate::quake::{jst, Event, EventBody, Hypocenter, ObservationPoint, Quake, Scale};
 
 /// 同じ地震とみなす発生時刻の差と震央の距離
 const SAME_QUAKE_MS: i64 = 90_000;
@@ -136,18 +136,18 @@ fn summarize(g: &[(u64, &Quake)]) -> QuakeSummary {
             .iter()
             .rev()
             .find(|(_, q)| !q.points.is_empty())
-            .map(|(_, q)| {
-                q.points
-                    .iter()
-                    .map(|p| Point {
-                        addr: p.addr.clone(),
-                        is_area: p.is_area,
-                        scale: p.scale,
-                        station: p.station.as_ref().map(|s| (s.lat, s.lon, s.area.clone())),
-                    })
-                    .collect()
-            })
+            .map(|(_, q)| q.points.iter().map(to_point).collect())
             .unwrap_or_default(),
+    }
+}
+
+/// 地震情報の観測点を、配信の観測点 (寄り・点) に直す
+pub fn to_point(p: &ObservationPoint) -> Point {
+    Point {
+        addr: p.addr.clone(),
+        is_area: p.is_area,
+        scale: p.scale,
+        station: p.station.as_ref().map(|s| (s.lat, s.lon, s.area.clone())),
     }
 }
 
