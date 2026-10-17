@@ -13,6 +13,8 @@ const CHANNEL_CAPACITY: usize = 256;
 const SEEN_CAPACITY: usize = 4096;
 /// 読み上げ (tts) のために覚えておく受信済みイベントの数。EEW の古い報は直近履歴から消えるので、こちらで引けるようにする
 const PUBLISHED_CAPACITY: usize = 256;
+/// 取り消し済みとして覚えておく地震 (EEW の event_id) の数。直近履歴から押し出されても後の報で戻さないため
+const CANCELLED_CAPACITY: usize = 1024;
 
 pub struct Hub {
     tx: broadcast::Sender<Arc<Event>>,
@@ -28,6 +30,9 @@ struct State {
     seen_order: VecDeque<String>,
     /// 受信した順のイベント (直近履歴と違い、新しい報で置き換えない)
     published: VecDeque<Arc<Event>>,
+    /// 取り消し済みの地震 (EEW の event_id)。これ以降の報は配信も保持もしない
+    cancelled: HashSet<String>,
+    cancelled_order: VecDeque<String>,
 }
 
 impl Hub {
@@ -41,6 +46,8 @@ impl Hub {
                 seen: HashSet::new(),
                 seen_order: VecDeque::new(),
                 published: VecDeque::new(),
+                cancelled: HashSet::new(),
+                cancelled_order: VecDeque::new(),
             }),
             recent_capacity,
         })
@@ -110,6 +117,23 @@ impl Hub {
                 st.seen.remove(&old);
             }
         }
+        // 一度取り消された地震は、後の報 (別の配信元の取り消し・送り直し・遅れた古い報) で戻さない。
+        // 気象庁の取り消しはその地震について最終。2026-10-16 12:38 千島列島 (M9.9 と過大推定) では
+        // 取り消しが P2P の第 2 報だけで届き、そのあと Wolfx が第 42 報を送り直してきた。戻す作りだと震度 7 の予報が復活する
+        if let EventBody::Eew(e) = &ev.body {
+            if st.cancelled.contains(&e.event_id) {
+                return None;
+            }
+            if e.cancelled {
+                st.cancelled.insert(e.event_id.clone());
+                st.cancelled_order.push_back(e.event_id.clone());
+                if st.cancelled_order.len() > CANCELLED_CAPACITY {
+                    if let Some(old) = st.cancelled_order.pop_front() {
+                        st.cancelled.remove(&old);
+                    }
+                }
+            }
+        }
         if ev.received_at_ms == 0 {
             ev.received_at_ms = now_ms();
         }
@@ -127,16 +151,14 @@ impl Hub {
             st.tsunami = Some(ev.clone());
         }
         // 同じ地震の EEW は最新の報だけを直近履歴に残す (予報は 1 地震で何報も出るため)。
-        // 遅れて届いた古い報は配信はするが、直近履歴には入れない。
-        // 取り消し済みの地震に後から届いた報は配信もしない (読み上げや通知が再び鳴らないように)
+        // 遅れて届いた古い報は配信はするが、直近履歴には入れない
         if let EventBody::Eew(e) = &ev.body {
             let same = |r: &Arc<Event>| match &r.body {
                 EventBody::Eew(x) if x.event_id == e.event_id => Some(rank(x)),
                 _ => None,
             };
-            let newest = st.recent.iter().filter_map(same).max();
-            if newest.is_some_and(|s| s > rank(e)) {
-                return (newest != Some(u32::MAX)).then_some(ev);
+            if st.recent.iter().filter_map(same).any(|s| s > rank(e)) {
+                return Some(ev);
             }
             st.recent.retain(|r| same(r).is_none());
         }
@@ -153,7 +175,8 @@ impl Hub {
     }
 }
 
-/// 新しさの順位。取り消しは serial に関係なく最後 (配信元ごとに serial が違い、P2P の取り消しは小さい番号で届く)
+/// 新しさの順位。取り消しは serial に関係なく最後 (配信元ごとに serial が違い、P2P の取り消しは小さい番号で届く)。
+/// 取り消しのあとの報は `cancelled` で弾くので、ここでは取り消しが直近履歴の報を置き換えられればよい
 fn rank(e: &crate::quake::Eew) -> u32 {
     if e.cancelled {
         u32::MAX
@@ -269,6 +292,80 @@ mod tests {
         assert!(rx.try_recv().is_err());
         let recent: Vec<_> = hub.recent().iter().map(|e| e.id.clone()).collect();
         assert_eq!(recent, ["p2"], "取り消しのあとの報も取り消しを上書きしない");
+    }
+
+    fn cancel(id: &str, event_id: &str, serial: &str) -> Event {
+        let mut ev = eew(id, event_id, serial);
+        if let EventBody::Eew(e) = &mut ev.body {
+            e.cancelled = true;
+        }
+        ev
+    }
+
+    fn ids(events: &[Arc<Event>]) -> Vec<String> {
+        events.iter().map(|e| e.id.clone()).collect()
+    }
+
+    #[test]
+    fn a_resent_report_after_the_cancel_does_not_revive_the_earthquake() {
+        // 2026-10-16 12:38 千島列島の順序。取り消しは P2P の第 2 報だけで、
+        // そのあと Wolfx が第 42 報を送り直してきた (実際は古さで弾かれたが、別 id で届いても戻さない)
+        let hub = Hub::new(10);
+        for (id, serial) in [("p1", "1"), ("p2", "2"), ("w40", "40"), ("w41", "41"), ("w42", "42")] {
+            assert!(hub.publish(eew(id, "A", serial)));
+        }
+        assert!(hub.publish(cancel("p2-cancel", "A", "2")));
+        let mut rx = hub.subscribe();
+        assert!(!hub.publish(eew("w42-resent", "A", "42")));
+        assert!(rx.try_recv().is_err());
+        assert_eq!(ids(&hub.recent()), ["p2-cancel"]);
+        assert!(
+            !ids(&hub.snapshot()).contains(&"w42-resent".to_string()),
+            "取り消し後の報は受信保持にも残さない"
+        );
+    }
+
+    #[test]
+    fn a_cancel_from_both_sources_is_delivered_once() {
+        let hub = Hub::new(10);
+        hub.publish(eew("w42", "A", "42"));
+        let mut rx = hub.subscribe();
+        assert!(hub.publish(cancel("w43", "A", "43")));
+        assert!(!hub.publish(cancel("p2", "A", "2")));
+        assert_eq!(rx.try_recv().unwrap().id, "w43");
+        assert!(rx.try_recv().is_err());
+        assert_eq!(ids(&hub.recent()), ["w43"]);
+    }
+
+    #[test]
+    fn a_cancel_pushed_out_of_recent_still_blocks_later_reports() {
+        let hub = Hub::new(2);
+        hub.publish(eew("w42", "A", "42"));
+        hub.publish(cancel("p2", "A", "2"));
+        hub.publish(ev("x"));
+        hub.publish(ev("y"));
+        assert_eq!(ids(&hub.recent()), ["x", "y"]);
+        assert!(!hub.publish(eew("w43", "A", "43")));
+        assert_eq!(ids(&hub.recent()), ["x", "y"]);
+    }
+
+    #[test]
+    fn an_old_report_arriving_after_the_cancel_is_dropped() {
+        let hub = Hub::new(10);
+        hub.publish(cancel("p2", "A", "2"));
+        assert!(!hub.publish(eew("w1", "A", "1")));
+        assert_eq!(ids(&hub.recent()), ["p2"]);
+    }
+
+    #[test]
+    fn cancelled_ids_are_forgotten_oldest_first() {
+        let hub = Hub::new(10);
+        for i in 0..=CANCELLED_CAPACITY {
+            hub.publish(cancel(&format!("c{i}"), &format!("E{i}"), "1"));
+        }
+        // 最も古い取り消しは忘れ、新しいものは覚えている
+        assert!(hub.publish(eew("old", "E0", "2")));
+        assert!(!hub.publish(eew("new", &format!("E{CANCELLED_CAPACITY}"), "2")));
     }
 
     #[test]

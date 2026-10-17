@@ -147,7 +147,9 @@ export function summarizeQuake(g: QuakeGroup): QuakeSummary {
 
 /**
  * 新しさの順位。取り消しは serial に関係なく最後
- * (配信元ごとに serial が違い、P2P の取り消しは小さい番号で届く)
+ * (配信元ごとに serial が違い、P2P の取り消しは小さい番号で届く)。
+ * 一度取り消された地震は後の報で戻さない (気象庁の取り消しはその地震について最終)。
+ * 2026-10-16 千島列島では P2P の取り消しのあと Wolfx が第 42 報を送り直してきた。戻す作りだと震度 7 の予報が復活する
  */
 const rank = (e: EewEvent): number => (e.cancelled ? Number.MAX_SAFE_INTEGER : Number(e.serial));
 

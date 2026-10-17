@@ -56,6 +56,8 @@ pub fn latest_eews(events: &[Event]) -> Vec<EewSummary> {
         .filter_map(|g| {
             // 同じ serial なら後から届いた方 (max_by_key は最後の最大を返す)。
             // 取り消しは serial に関係なく最新 (配信元ごとに serial が違い、P2P の取り消しは小さい番号で届く)
+            // 一度取り消された地震は後の報で戻さない (気象庁の取り消しはその地震について最終)。
+            // 2026-10-16 千島列島では P2P の取り消しのあと Wolfx が第 42 報を送り直してきた。戻す作りだと震度 7 の予報が復活する
             let (ev, e) = *g.iter().max_by_key(|(_, e)| (e.cancelled, serial(e)))?;
             if e.cancelled {
                 return None;
