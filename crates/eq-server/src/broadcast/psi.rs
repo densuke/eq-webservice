@@ -1,4 +1,4 @@
-//! e2 の詰まりへの配慮 (再現動画の作る係と、配信の混雑中の札 (status.rs) の両方が読む)。Linux の /proc/pressure/{io,memory} の full の 60 秒平均が高い間は、描くのも ffmpeg に渡すのも止めて待つ。
+//! e2 の詰まりへの配慮 (再現動画の作る係と、配信の混雑中の札 (status.rs) の両方が読む。札は配信自身の cgroup の PSI を見る)。Linux の /proc/pressure/{io,memory} の full の 60 秒平均が高い間は、描くのも ffmpeg に渡すのも止めて待つ。
 //! 10 分以上待っても下がらなければ、あきらめる (作りかけは呼び出し側が消す。R3.3 のキューがやり直す)。Mac では /proc が無く、待たない。
 //! deploy/youtube-live-watch.sh の見送りと同じ値 (20%)。
 
@@ -25,6 +25,25 @@ pub fn full_avg10(text: &str) -> Option<f64> {
 /// full の 60 秒平均 (%)
 pub fn full_avg60(text: &str) -> Option<f64> {
     full_avg(text, "avg60=")
+}
+
+/// /proc/self/cgroup の文から、自分の cgroup (v2) の kind ("io" か "memory") の pressure の file を求める。
+/// v2 の行 (0::/...) が無い・根の cgroup (pressure の file が無い) のときは None
+pub fn cgroup_pressure_path(self_cgroup: &str, kind: &str) -> Option<String> {
+    let path = self_cgroup
+        .lines()
+        .find_map(|l| l.strip_prefix("0::"))?
+        .trim_end_matches('/');
+    (!path.is_empty()).then(|| format!("/sys/fs/cgroup{path}/{kind}.pressure"))
+}
+
+/// 自分の cgroup の kind の pressure の file を読めればそれを、読めなければ (cgroup v1、Mac) /proc/pressure/kind を返す
+pub fn own_pressure_path(kind: &str) -> String {
+    std::fs::read_to_string("/proc/self/cgroup")
+        .ok()
+        .and_then(|t| cgroup_pressure_path(&t, kind))
+        .filter(|p| std::fs::read_to_string(p).is_ok())
+        .unwrap_or_else(|| format!("/proc/pressure/{kind}"))
 }
 
 /// io か memory のどちらかが、limit (%) を超えて詰まっているか。読めないものは詰まっていないとみなす
@@ -132,6 +151,34 @@ mod tests {
         assert_eq!(full_avg60(SOME_ONLY), Some(2.0));
         assert_eq!(full_avg60("some avg60=9.0\n"), None);
         assert_eq!(full_avg60(""), None);
+    }
+
+    #[test]
+    fn the_own_cgroup_pressure_file_comes_from_the_v2_line() {
+        // pi の eq-broadcast の /proc/self/cgroup (2026-10-18)
+        let pi = "0::/user.slice/user-1000.slice/user@1000.service/eq.slice/eq-broadcast.service\n";
+        assert_eq!(
+            cgroup_pressure_path(pi, "memory").as_deref(),
+            Some("/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/eq.slice/eq-broadcast.service/memory.pressure")
+        );
+        assert_eq!(
+            cgroup_pressure_path(pi, "io").as_deref(),
+            Some(
+                "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/eq.slice/eq-broadcast.service/io.pressure"
+            )
+        );
+        // 根の cgroup には pressure の file が無い。v1 だけ (0:: の行が無い)・空のときも求めない
+        assert_eq!(cgroup_pressure_path("0::/\n", "io"), None);
+        assert_eq!(
+            cgroup_pressure_path("12:memory:/user.slice\n1:name=systemd:/user.slice\n", "io"),
+            None
+        );
+        assert_eq!(cgroup_pressure_path("", "io"), None);
+        // v1 と v2 が混ざっていても 0:: の行を使う (読めなければ呼び出し側が /proc/pressure に戻る)
+        assert_eq!(
+            cgroup_pressure_path("12:memory:/a\n0::/a.service\n", "io").as_deref(),
+            Some("/sys/fs/cgroup/a.service/io.pressure")
+        );
     }
 
     #[test]

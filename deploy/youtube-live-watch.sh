@@ -25,11 +25,18 @@ if [ ! -f "$state/ng" ]; then
   touch "$state/ng"
   exit 0
 fi
-# e2 全体が詰まっている (メモリかディスクの待ちが多い) 間は、つなぎ直しても戻らず負荷を足すだけなので見送る
-# (2026-10-01 07:00 の詰まりで、つなぎ直しの連発が悪化させた)。値は PSI の full の 60 秒平均 (%)
-busy=$(awk '/^full/{split($3,a,"="); if (a[2]+0 > 20) b=1} END{print b+0}' /proc/pressure/io /proc/pressure/memory 2>/dev/null)
+# 配信が詰まっている (メモリかディスクの待ちが多い) 間は、つなぎ直しても戻らず負荷を足すだけなので見送る
+# (2026-10-01 07:00 の e2 の詰まりで、つなぎ直しの連発が悪化させた)。値は PSI の full の 60 秒平均 (%)。
+# 配信 (eq-broadcast) の cgroup の PSI を見る。本体全体の PSI だと、同じ本体のデスクトップが上限で絞られている間
+# (pi で 2026-10-18 に memory full 57) ずっと見送り、止まった配信を戻せない。cgroup が読めなければ本体全体を見る
+cg=$(systemctl --user show -p ControlGroup --value eq-broadcast 2>/dev/null)
+psi=(/proc/pressure/io /proc/pressure/memory)
+if [ -n "$cg" ] && [ -r "/sys/fs/cgroup$cg/io.pressure" ]; then
+  psi=("/sys/fs/cgroup$cg/io.pressure" "/sys/fs/cgroup$cg/memory.pressure")
+fi
+busy=$(awk '/^full/{split($3,a,"="); if (a[2]+0 > 20) b=1} END{print b+0}' "${psi[@]}" 2>/dev/null)
 if [ "$busy" = 1 ]; then
-  echo "e2 全体が詰まっているので、つなぎ直しを見送る"
+  echo "配信が詰まっている (${psi[*]}) ので、つなぎ直しを見送る"
   exit 0
 fi
 last=$(cat "$state/restarted" 2>/dev/null || echo 0)

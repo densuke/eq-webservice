@@ -74,7 +74,7 @@ pub struct Window {
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Worst {
     pub window: Window,
-    /// PSI io の full の 10 秒平均 (%)。読めなければ 0
+    /// PSI io の full の 10 秒平均 (%)。配信の cgroup の (読めなければ本体全体の)。読めなければ 0
     pub io: f64,
     /// PSI memory の full の 10 秒平均 (%)。読めなければ 0
     pub memory: f64,
@@ -308,18 +308,21 @@ impl Monitor {
     }
 }
 
-/// 1 秒ごとに見張って、混雑中かを watch で渡す (PSI はここでだけ読む)。受け手が全部いなくなったら終わる
+/// 1 秒ごとに見張って、混雑中かを watch で渡す (PSI はここでだけ読む。配信自身の cgroup の、読めなければ本体全体の)。受け手が全部いなくなったら終わる
 pub fn spawn(load: Arc<Load>) -> (watch::Receiver<bool>, JoinHandle<()>) {
     let (tx, rx) = watch::channel(false);
     let task = tokio::spawn(async move {
         let origin = load.origin;
         let mut monitor = Monitor::new(load);
+        // 配信自身の cgroup の PSI を見る (同じ本体の別の処理が上限で絞られても、配信が遅れていなければ札を出さない)
+        let (io_path, mem_path) = (psi::own_pressure_path("io"), psi::own_pressure_path("memory"));
+        tracing::info!("broadcast: busy chip reads {io_path} and {mem_path}");
         let mut tick = tokio::time::interval(SAMPLE_EVERY);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tick.tick().await;
             let read = |p: &str| std::fs::read_to_string(p).ok();
-            let (io, mem) = (read("/proc/pressure/io"), read("/proc/pressure/memory"));
+            let (io, mem) = (read(&io_path), read(&mem_path));
             let (busy, line) = monitor.sample(
                 super::calm_state::now_ms(),
                 origin.elapsed(),
