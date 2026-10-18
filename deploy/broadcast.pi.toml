@@ -1,0 +1,43 @@
+# Raspberry Pi 5 (8GB) から YouTube へ直接配信する設定 (native・警戒音と読み上げ・BGM なし)。~/work/eq-e2cast/cast.toml に置く。
+# deploy/pi/user/eq-broadcast.service の WorkingDirectory (~/work/eq-e2cast) から相対で読む。docs/broadcast-pi.md。
+# ストリームキーは書かない (環境変数 YOUTUBE_LIVE_API_KEY を、権限 600 のファイルから systemd が渡す)。
+
+source = "native"
+# データ (地震情報・警報・天気) の取得先
+server = "https://eq.fuga.jp"
+# 地図のデータ (web/public の japan.geojson・warning-areas.geojson・neighbors.geojson をコピーしておく)
+map_dir = "map"
+# apt install fonts-noto-cjk
+font = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+label = "配信元: pi"
+
+# 地震の画面 15fps・平時 10fps。Pi 5 ではデモの地震の画面で 1 コアの 72% (20fps は 113%)
+fps = 15
+fps_calm = 10
+# 地震のとき震源へ寄る。地震の画面の CPU が 1 コアの 61% から 111% (最大 155%) に増える
+zoom = true
+# 可変 fps (fps_calm) では -maxrate / -bufsize を付けない: 入力が 25fps とみなされ、VBV が 1 コマを maxrate/25 に絞る
+encode = ["-threads", "2", "-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency", "-crf", "23"]
+
+# 音は eq-server の mixer で作る (警戒音と読み上げ)。読み上げはサーバの [tts] が有効なときだけ
+mixer = true
+voice = true
+# 読み上げを聞き取りやすく (32k では荒い)
+audio_bitrate = "64k"
+# BGM は流さない (2026-10-18)。BGM を嫌って音を切る人が、地震の警戒音・読み上げまで聞き逃さないように。
+# BGM は eq.fuga.jp のサイトだけ。空なら上部バーに曲名も出さない
+bgm_url = ""
+
+# 送り先 (ffmpeg の引数)。$VAR は環境変数に置き換え、ログでは伏せる。
+# -progress は送り出しの様子を 1 秒ごとに書く。SD カードを削らないよう tmpfs (/run/user/<uid>) に書く
+output = ["-progress", "/run/user/1000/eq-progress.txt", "-f", "flv", "rtmps://a.rtmps.youtube.com/live2/$YOUTUBE_LIVE_API_KEY"]
+
+# 直近 15 分の録画 (ring) と、地震のときの切り出し (archive)。書き込みが多いので SSD に置く (microSD に書かない)
+[record]
+ring_dir = "/opt/eq-cast/ring"
+archive_dir = "/opt/eq-cast/archive"
+before_min = 5
+after_min = 10
+keep = 10
+min_free_mb = 500
+min_scale = 30
