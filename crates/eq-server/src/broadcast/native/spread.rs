@@ -30,19 +30,23 @@ pub struct Spread {
 pub fn spread_of(events: &[Event], current: &QuakeSummary, zones: &Zones, now_ms: u64) -> Option<Spread> {
     let place = quake_place(current);
     let (lat, lon) = (place.lat?, place.lon?);
-    let mut mine: Vec<&Event> = events
+    let mine =
+        |e: &&Event| matches!(e.body, EventBody::Quake(_)) && event_place(e).is_some_and(|p| same_quake(&p, &place));
+    // 流す報: 同じ地震で観測点を含む、最も早く届いた報 (同時刻なら届いた順で先のもの)。配列を作らずに求める
+    let trigger = events
         .iter()
-        .filter(|e| matches!(e.body, EventBody::Quake(_)) && event_place(e).is_some_and(|p| same_quake(&p, &place)))
-        .collect();
-    mine.sort_by_key(|e| e.received_at_ms);
-    let trigger = mine.iter().find_map(|e| Some((e.received_at_ms, stations(e)?)));
-    let (received, points) = trigger?;
-    // 再現の窓 (受信から LEAD_MS + 上限) の外は、点の計算をせずに返す (地震の画面のあいだ毎コマ呼ばれる)
+        .filter(mine)
+        .filter(|e| stations(e).is_some())
+        .min_by_key(|e| e.received_at_ms)?;
+    let received = trigger.received_at_ms;
+    // 再現の窓 (受信から LEAD_MS + 上限) の外は、ほかの計算をせずに返す (地震の画面のあいだ毎コマ呼ばれる)
     if now_ms < received || now_ms > received + LEAD_MS + WAVE_MAX_MS as u64 {
         return None;
     }
-    let max = mine
+    let points = stations(trigger)?;
+    let max = events
         .iter()
+        .filter(mine)
         .filter(|e| e.received_at_ms <= received)
         .filter_map(|e| match &e.body {
             EventBody::Quake(q) => Some(q.max_scale),
@@ -380,5 +384,18 @@ mod tests {
         ev.push(odd);
         // 発生時刻が分からない報は、別の地震かどうか判断できないので止めない
         assert!(spread_at(&ev, &zones(&[]), R1 + 12_000).is_some());
+    }
+
+    #[test]
+    fn the_window_ends_at_lead_plus_the_wave_limit() {
+        // とても遠い点で、終わりが上限 (受信 + LEAD_MS + WAVE_MAX_MS) にかかる
+        let z = zones(&[("とても遠い", (35.0 + 2000.0 / 111.2, 139.0))]);
+        let mut ev = base(Scale::S3);
+        let EventBody::Quake(q) = &mut ev[1].body else { panic!() };
+        q.points.push(point("とても遠い", false, Scale::S1));
+        let edge = R1 + LEAD_MS + WAVE_MAX_MS as u64;
+        assert!(spread_at(&ev, &z, edge - 1).is_some());
+        assert_eq!(spread_at(&ev, &z, edge).map(|s| s.end_ms), Some(edge));
+        assert_eq!(spread_at(&ev, &z, edge + 1), None);
     }
 }
