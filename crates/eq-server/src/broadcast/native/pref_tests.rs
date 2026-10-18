@@ -91,6 +91,7 @@ fn the_list_replaces_the_notice_only_while_a_warning_is_out_and_the_notice_retur
         let s = Scene {
             now_ms,
             notices: Some(&n),
+            spread: None,
             ..scene(None, &[], Some(w), None)
         };
         let pm = r.render(&s);
@@ -137,6 +138,7 @@ fn write_pref_list_pngs_when_asked() {
         let s = Scene {
             now_ms: k * 8_000,
             notices: Some(&n),
+            spread: None,
             ..scene(None, &[], Some(&many), None)
         };
         save(&mut r, &format!("many_p{k}"), &s);
@@ -153,6 +155,7 @@ fn write_pref_list_pngs_when_asked() {
         let s = Scene {
             now_ms: k * 8_000,
             notices: Some(&n),
+            spread: None,
             ..scene(None, &[], w, None)
         };
         save(&mut r, name, &s);
@@ -160,6 +163,7 @@ fn write_pref_list_pngs_when_asked() {
     let q = quake(Scale::S5_LOWER, &[("東京都", Scale::S5_LOWER)], None);
     let s = Scene {
         notices: Some(&n),
+        spread: None,
         ..scene(Some(&q), &[], Some(&many), None)
     };
     save(&mut r, "quake", &s);

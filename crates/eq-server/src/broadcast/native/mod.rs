@@ -31,6 +31,7 @@ mod pref_list;
 mod pref_tests;
 mod quake_band;
 mod shaken;
+mod spread;
 mod step;
 mod telops;
 mod test_mark;
@@ -632,6 +633,8 @@ mod layout_def_tests;
 mod layout_resolve_tests;
 #[cfg(test)]
 mod sound_tests;
+#[cfg(test)]
+mod spread_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

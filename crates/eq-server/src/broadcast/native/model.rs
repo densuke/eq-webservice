@@ -6,11 +6,11 @@ use std::collections::BTreeMap;
 use super::shaken::Point;
 use crate::broadcast::mixer::AlertLevel;
 use crate::quake::model::{Tsunami, TsunamiGrade};
-use crate::quake::{jst, Event, EventBody, Hypocenter, Quake, Scale};
+use crate::quake::{jst, Event, EventBody, Hypocenter, ObservationPoint, Quake, Scale};
 
 /// 同じ地震とみなす発生時刻の差と震央の距離
 const SAME_QUAKE_MS: i64 = 90_000;
-const SAME_QUAKE_KM: f64 = 200.0;
+pub(super) const SAME_QUAKE_KM: f64 = 200.0;
 /// 最後の情報から地震の画面を出し続ける時間 (震度 2 以下は短い)
 const SETTLE_MS: u64 = 3 * 60_000;
 const MINOR_SETTLE_MS: u64 = 60_000;
@@ -132,22 +132,24 @@ fn summarize(g: &[(u64, &Quake)]) -> QuakeSummary {
         max_scale: g.iter().map(|(_, q)| q.max_scale).max().unwrap_or(Scale::UNKNOWN),
         tsunami: latest.domestic_tsunami.clone(),
         pref_scales: pref_scales(g),
+        // 観測点を含む最新の報を優先する (区域だけの続報で観測点の点を消さない)。無ければ点のある最新の報
         points: g
             .iter()
             .rev()
-            .find(|(_, q)| !q.points.is_empty())
-            .map(|(_, q)| {
-                q.points
-                    .iter()
-                    .map(|p| Point {
-                        addr: p.addr.clone(),
-                        is_area: p.is_area,
-                        scale: p.scale,
-                        station: p.station.as_ref().map(|s| (s.lat, s.lon, s.area.clone())),
-                    })
-                    .collect()
-            })
+            .find(|(_, q)| q.points.iter().any(|p| !p.is_area))
+            .or_else(|| g.iter().rev().find(|(_, q)| !q.points.is_empty()))
+            .map(|(_, q)| q.points.iter().map(to_point).collect())
             .unwrap_or_default(),
+    }
+}
+
+/// 地震情報の観測点を、配信の観測点 (寄り・点) に直す
+fn to_point(p: &ObservationPoint) -> Point {
+    Point {
+        addr: p.addr.clone(),
+        is_area: p.is_area,
+        scale: p.scale,
+        station: p.station.as_ref().map(|s| (s.lat, s.lon, s.area.clone())),
     }
 }
 

@@ -19,13 +19,14 @@ use super::layout_resolve::Rect;
 use super::model::{scale_color, scale_text_color, QuakeSummary};
 use super::notice::{self, LayoutCache, Notices};
 use super::paint::{
-    circle, epicenter, ghost_epicenter, rect, rrect, LAND, LAND_EDGE, MUTED, NEIGHBOR, NEIGHBOR_EDGE, SEA,
+    circle, epicenter, ghost_epicenter, rect, rrect, LAND, LAND_EDGE, MUTED, NEIGHBOR, NEIGHBOR_EDGE, SEA, TEXT,
 };
 use super::panel;
 use super::placed::Placed;
 use super::pref_list;
 use super::quake_band;
 use super::shaken::{Stations, Zones};
+use super::spread::{self, Spread};
 use super::test_mark;
 use super::text::Text;
 use super::tsunami_coast;
@@ -74,6 +75,8 @@ pub struct Scene<'a> {
     pub viewers: Option<u64>,
     /// 平時の右パネルの下に出すお知らせ (docs/broadcast-native.md)。ライブだけが入れる。再現動画は None
     pub notices: Option<&'a Notices>,
+    /// 揺れの広がりの再現の最中なら、その再現 (S 波が届いた観測点だけを灯す)
+    pub spread: Option<Spread>,
 }
 
 /// 波の円を挟んで描くための絵: 札・時計・凡例まで重ねた 1 枚と、そのうち札などが塗っている画素 (波はそこを塗らない)。
@@ -371,6 +374,11 @@ impl Renderer {
                 draw_hindsight(t.top(), &mut self.text, f, h);
             }
         }
+        if scene.spread.is_some() && self.text.enabled() {
+            // 右上 (左上は南西諸島の別枠と重なる)
+            self.text
+                .draw_right(t.top(), SPREAD_LABEL, main.right() - 12.0, main.y + 22.0, 13.0, TEXT);
+        }
         panel::draw_dynamic(t.top(), &mut self.text, scene, &placed);
         if let (Some(f), Some(at), true) = (&self.sub, placed.sub, scene.quake.is_some() || scene.eew.is_some()) {
             draw_sub_map(
@@ -547,6 +555,9 @@ fn draw_hindsight(pm: &mut Pixmap, text: &mut Text, frame: &Frame, h: &Hindsight
     }
 }
 
+/// 揺れの広がりの再現の最中に、本図の右上に出す案内
+const SPREAD_LABEL: &str = "揺れの広がり (再現)";
+
 /// 地震の画面に描く揺れ (地震情報の観測、または緊急地震速報の予測)
 struct Shake<'a> {
     scales: &'a [(String, Scale)],
@@ -567,7 +578,13 @@ impl<'a> Shake<'a> {
                 scales: &q.pref_scales,
                 forecast: false,
                 hypocenter: q.hypocenter.as_ref(),
-                dots: zones.map(|z| z.dots(&q.points)).unwrap_or_default(),
+                dots: zones
+                    .map(|z| z.dots(&q.points))
+                    .unwrap_or_default()
+                    .into_iter()
+                    // 揺れの広がりの再現の最中は、S 波が届いた点だけ
+                    .filter(|&(lon, lat, _)| scene.spread.is_none_or(|s| spread::lit(&s, scene.now_ms, lon, lat)))
+                    .collect(),
                 tag: None,
             }),
             (None, Some(e)) => Some(Shake {
