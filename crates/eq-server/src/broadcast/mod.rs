@@ -187,6 +187,13 @@ impl Default for BroadcastConfig {
     }
 }
 
+impl BroadcastConfig {
+    /// 音に BGM を混ぜるか (mixer を使い、bgm_url があるとき)。混ぜないときは、上部バーに曲名も出さない
+    pub fn mixes_bgm(&self) -> bool {
+        self.mixer && !self.bgm_url.is_empty()
+    }
+}
+
 /// 止まってから立ち上げ直すまで
 const RESTART_AFTER: Duration = Duration::from_secs(5);
 /// 設定が安全でなくて始めなかったとき (Refused) に、次を試すまで。すぐには繰り返さない
@@ -572,6 +579,28 @@ mod tests {
             redact("rtmps://x/live2/abc-123: I/O error", &secrets),
             "rtmps://x/live2/***: I/O error"
         );
+    }
+
+    #[test]
+    fn the_pi_example_mixes_no_bgm_and_records_to_the_ssd() {
+        let cfg: BroadcastConfig = toml::from_str(include_str!("../../../../deploy/broadcast.pi.toml")).unwrap();
+        assert_eq!((cfg.source, cfg.fps, cfg.fps_calm), (Source::Native, 15, Some(10)));
+        assert!(cfg.mixer && cfg.zoom && !cfg.mixes_bgm());
+        assert!(cfg.output.iter().any(|x| x.ends_with("$YOUTUBE_LIVE_API_KEY")));
+        assert!(cfg.record.unwrap().ring_dir.starts_with("/opt/eq-cast"));
+    }
+
+    #[test]
+    fn the_bgm_is_mixed_only_with_the_mixer_and_a_bgm_url() {
+        let cfg = |mixer, bgm_url: &str| BroadcastConfig {
+            mixer,
+            bgm_url: bgm_url.into(),
+            ..Default::default()
+        };
+        assert!(cfg(true, "https://x/stream/bgm.mp3").mixes_bgm());
+        // 配信は BGM なし (bgm_url = "")、または mixer を使わない (e2 の無音の配信) ときは混ぜない
+        assert!(!cfg(true, "").mixes_bgm());
+        assert!(!cfg(false, "https://x/stream/bgm.mp3").mixes_bgm());
     }
 
     #[test]

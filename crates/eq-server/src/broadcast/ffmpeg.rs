@@ -79,13 +79,16 @@ async fn pump(
 /// 途切れとみなす跳びを 1 時間にして、詰まりの跳びはそのまま通す (直送の flv と同じ)。
 /// `-copyts` にしないのは、mpegts の時刻が 26.5 時間で一周するとき、途切れの補正まで止まって flv の時刻が壊れるため
 /// (1 時間の閾値なら一周の跳びは今までどおり直る。docs/quake-archive.md 3.8 章)
+/// `-analyzeduration 15000000`: ffmpeg 8 (Raspberry Pi 5 / Ubuntu 26.04 の 8.0.1) は 3 秒では映像の寸法を掴めず
+/// (Could not find codec parameters ... unspecified size)、何も送らない (ffmpeg 6 では起きない)。
+/// 起動のとき、送り出しは寸法を掴むまで最大 15 秒待つ (掴めればそこで始まる)。pi では再起動から YouTube の受信まで約 20〜30 秒
 fn sender_args(output: &[String]) -> Vec<String> {
     let mut args: Vec<String> = [
         "-hide_banner",
         "-loglevel",
         "warning",
         "-analyzeduration",
-        "3000000",
+        "15000000",
         "-dts_delta_threshold",
         "3600",
         "-f",
@@ -195,6 +198,9 @@ mod tests {
         let pos = |k: &str| a.iter().position(|x| x == k).unwrap();
         // 入力の指定 (-i) より前に置く (入力のオプション)。-copyts にはしない (mpegts の一周の補正が止まる)
         assert!(a.windows(2).any(|w| w == ["-dts_delta_threshold", "3600"]));
+        // ffmpeg 8 (pi の 8.0.1) は 3 秒では映像の寸法を掴めず、何も送らない。15 秒あれば足りる
+        assert!(a.windows(2).any(|w| w == ["-analyzeduration", "15000000"]));
+        assert!(pos("-analyzeduration") < pos("-i"));
         assert!(pos("-dts_delta_threshold") < pos("-i"));
         assert!(!a.contains(&"-copyts".to_string()));
         assert!(a.windows(2).any(|w| w == ["-f", "mpegts"]));

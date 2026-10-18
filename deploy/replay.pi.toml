@@ -1,0 +1,10 @@
+# Raspberry Pi 5 の再現動画を作る係の設定 (eq-server replay-worker replay.toml)。docs/broadcast-pi.md。
+# deploy/replay.e2.toml との違いだけを書く。ほかの項目は replay.e2.toml の値 (= 既定値) のまま。
+[replay]
+# 記録は eq.fuga.jp の /api/archive から取る (pi では eq-server を動かさない)
+events = "https://eq.fuga.jp"
+# 作業場所は SSD に置く
+dir = "/opt/eq-cast/replay"
+# 作る間の上限。Pi 5 は 4 コアあるので 1 コア分まで (作る単位には Nice=19・IOSchedulingClass=idle が付く)
+cpu_quota = "100%"
+memory_max = "1G"

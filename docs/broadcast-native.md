@@ -74,7 +74,7 @@ y=720 └───────────────────────�
 
 - 時計: 地図の右下の枠 (今のページの `.clock-panel` に寄せる)。日付と「HH:MM」「秒」。JST。
 - 凡例: 地図の左下に縦 (今のページの `.legend`)。
-- 上部バー: 題、版、平時か地震か、BGM の曲名 (Icecast の `/stream/status-json.xsl` の title。15 秒ごと)。
+- 上部バー: 題、版、平時か地震か、BGM の曲名 (Icecast の `/stream/status-json.xsl` の title。15 秒ごと)。曲名は BGM を混ぜるとき (`mixer = true` で `bgm_url` が空でない) だけ取りに行き、出す。YouTube の配信は 2026-10-18 から BGM なし (`bgm_url = ""`) なので出さない。`replay-video` の動画も出さない。
 
 ## 4. 表示の判断 (純粋な関数にしてテストする)
 

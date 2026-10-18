@@ -1,0 +1,24 @@
+# eq-server broadcast: Raspberry Pi 5 から YouTube へ直接配信する (native)。docs/broadcast-pi.md
+# ~/.config/systemd/user/eq-broadcast.service に置く。設定は deploy/broadcast.pi.toml (cast.toml)
+# 配信は上限を付けない。同じ本体のデスクトップの側に上限を付け、配信は eq.slice の CPUWeight と MemoryLow で守る。
+# pi では eq-server (サイト) を動かさないので、PartOf / After=eq-server.service は付けない
+[Unit]
+Description=eq-webservice ライブ配信 (eq-server broadcast -> YouTube)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Slice=eq.slice
+WorkingDirectory=%h/work/eq-e2cast
+ExecStart=%h/work/eq-e2cast/eq-server broadcast cast.toml
+# ストリームキー (YOUTUBE_LIVE_API_KEY=...、権限 600)
+EnvironmentFile=%h/.config/youtube-live-eq-webservice
+Environment=RUST_LOG=info
+Restart=always
+RestartSec=10
+# 同じユーザーのほかの処理 (デスクトップなど) より CPU を優先する (既定は 100)
+CPUWeight=1000
+
+[Install]
+WantedBy=default.target

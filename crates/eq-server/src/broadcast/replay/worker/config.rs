@@ -436,6 +436,20 @@ mod tests {
     }
 
     #[test]
+    fn the_pi_example_takes_the_events_from_the_site_and_one_core() {
+        let f: File = toml::from_str(include_str!("../../../../../../deploy/replay.pi.toml")).unwrap();
+        let c = f.replay.check().unwrap();
+        assert_eq!(c.events_source(), EventsSource::Url("https://eq.fuga.jp".into()));
+        assert_eq!((c.cpu_quota.as_str(), c.memory_max.as_str()), ("100%", "1G"));
+        // 書いていない項目は e2 と同じ既定値 (systemd で作り、配信の様子を見る)
+        let d = WorkerConfig::default();
+        assert_eq!(
+            (c.runner, c.gate, c.hours.as_str()),
+            (d.runner, d.gate, d.hours.as_str())
+        );
+    }
+
+    #[test]
     fn the_mac_example_runs_inline_without_the_vm_gate() {
         let f: File = toml::from_str(include_str!("../../../../../../deploy/replay.mac.toml")).unwrap();
         let c = f.replay.check().unwrap();

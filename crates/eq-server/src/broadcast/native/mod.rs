@@ -216,7 +216,8 @@ pub fn start(
     let (label, test) = (cfg.label.clone(), cfg.test);
     // 描き直すかを調べる間隔。地震波が動く間はこの間隔ごとに描き直すので、地震の画面の fps に合わせる
     let check_ms = 1000 / u64::from(cfg.fps.max(1));
-    let tasks = vec![
+    let st_bgm = st.clone();
+    let mut tasks = vec![
         tokio::spawn(ws_loop(
             ws_url(&server),
             server.clone(),
@@ -234,7 +235,6 @@ pub fn start(
         )),
         tokio::spawn(notice_loop(format!("{server}/api/banners"), st.clone())),
         tokio::spawn(icon_loop(icon::IMG_BASE.to_string(), st.clone())),
-        tokio::spawn(bgm_title_loop(format!("{server}/stream/status-json.xsl"), st.clone())),
         tokio::spawn(viewers_loop(format!("{server}/api/viewers"), st.clone())),
         tokio::spawn(render_loop(
             renderer,
@@ -252,6 +252,13 @@ pub fn start(
             notices,
         )),
     ];
+    // BGM を混ぜない配信 (2026-10-18 から YouTube は BGM なし) では、流れていない曲の名前を出さない
+    if cfg.mixes_bgm() {
+        tasks.push(tokio::spawn(bgm_title_loop(
+            format!("{server}/stream/status-json.xsl"),
+            st_bgm,
+        )));
+    }
     Ok(Native {
         frames,
         calm,

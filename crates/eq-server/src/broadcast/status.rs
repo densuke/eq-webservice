@@ -1,5 +1,5 @@
 //! 配信の状態の札 (docs/broadcast-status.md)。ライブ配信だけが出す。
-//! A. 混雑中: 1 秒ごとに「遅いか」を見て、10 秒続いたら出し、60 秒落ち着いたら消す。
+//! A. 混雑中: 1 秒ごとに「遅いか」を見て、10 秒続いたら出し、60 秒落ち着いたら消す。起動から 90 秒は数えない。
 //! B. 途切れた: 起動のとき、前の最後のコマから 30 秒以上あいていたら、起動から 10 分のあいだ出す。
 //! 時計と /proc に触れる所は薄くして、判断は時刻と文字を受け取る関数に分けてある。
 
@@ -23,6 +23,9 @@ pub const WRITE_LIMIT: Duration = Duration::from_secs(1);
 const ON_AFTER_MS: u64 = 10_000;
 /// 遅くない状態がこれ続いたら札を消す
 const OFF_AFTER_MS: u64 = 60_000;
+/// 起動 (Load を作った時) からこの間は、遅くても数えない。本体の起動直後は OS の起動の I/O で、
+/// コマの遅れ・書き込みの遅さ・PSI が約 1 分続き、札が出ていた (2026-10-17 pi)。途切れた札 (B) は別に出る
+const STARTUP_GRACE: Duration = Duration::from_secs(90);
 /// 前の最後のコマから、これを超えてあいていたら途切れたとみなす
 const OUTAGE_MIN_MS: u64 = 30_000;
 /// 途切れた札を出す長さ (起動から)
@@ -74,7 +77,7 @@ pub struct Window {
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Worst {
     pub window: Window,
-    /// PSI io の full の 10 秒平均 (%)。読めなければ 0
+    /// PSI io の full の 10 秒平均 (%)。配信の cgroup の (読めなければ本体全体の)。読めなければ 0
     pub io: f64,
     /// PSI memory の full の 10 秒平均 (%)。読めなければ 0
     pub memory: f64,
@@ -282,6 +285,8 @@ impl Monitor {
     /// 返すのは、札を出すか・出すログの文 (札が出ない間は何も出さない)
     fn sample(&mut self, now_ms: u64, at: Duration, io: Option<&str>, memory: Option<&str>) -> (bool, Option<String>) {
         let now = Worst::of(self.load.take_window_at(at), io, memory);
+        // 起動の猶予の間は、遅くないとみなす (最大にも入れない)
+        let now = if at < STARTUP_GRACE { Worst::default() } else { now };
         let on = self.hysteresis.update(now_ms, now.is_busy());
         let was = std::mem::replace(&mut self.on, on);
         // 札が出る前は、遅い状態が途切れたら数え直す (ヒステリシスと同じ)
@@ -308,18 +313,21 @@ impl Monitor {
     }
 }
 
-/// 1 秒ごとに見張って、混雑中かを watch で渡す (PSI はここでだけ読む)。受け手が全部いなくなったら終わる
+/// 1 秒ごとに見張って、混雑中かを watch で渡す (PSI はここでだけ読む。配信自身の cgroup の、読めなければ本体全体の)。受け手が全部いなくなったら終わる
 pub fn spawn(load: Arc<Load>) -> (watch::Receiver<bool>, JoinHandle<()>) {
     let (tx, rx) = watch::channel(false);
     let task = tokio::spawn(async move {
         let origin = load.origin;
         let mut monitor = Monitor::new(load);
+        // 配信自身の cgroup の PSI を見る (同じ本体の別の処理が上限で絞られても、配信が遅れていなければ札を出さない)
+        let (io_path, mem_path) = (psi::own_pressure_path("io"), psi::own_pressure_path("memory"));
+        tracing::info!("broadcast: busy chip reads {io_path} and {mem_path}");
         let mut tick = tokio::time::interval(SAMPLE_EVERY);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tick.tick().await;
             let read = |p: &str| std::fs::read_to_string(p).ok();
-            let (io, mem) = (read("/proc/pressure/io"), read("/proc/pressure/memory"));
+            let (io, mem) = (read(&io_path), read(&mem_path));
             let (busy, line) = monitor.sample(
                 super::calm_state::now_ms(),
                 origin.elapsed(),
@@ -531,7 +539,7 @@ mod tests {
             if t < 100 {
                 l.end_write_at(Duration::from_secs(t), ms(3000 + t));
             }
-            let (on, line) = m.sample(t * 1000, Duration::from_secs(t), Some(IDLE), None);
+            let (on, line) = m.sample(t * 1000, STARTUP_GRACE + Duration::from_secs(t), Some(IDLE), None);
             if let Some(line) = line {
                 lines.push((t, line));
             }
@@ -553,11 +561,38 @@ mod tests {
         // PSI だけでも効く
         let mut m = Monitor::new(Load::new());
         let out: Vec<_> = (0..=10)
-            .map(|t| m.sample(t * 1000, Duration::from_secs(t), None, Some(HIGH)))
+            .map(|t| m.sample(t * 1000, STARTUP_GRACE + Duration::from_secs(t), None, Some(HIGH)))
             .collect();
         assert!(out[10].0);
         assert!(out[10].1.as_deref().unwrap().contains("reasons=psi_memory"));
         assert!(out[..10].iter().all(|(on, l)| !on && l.is_none()));
+    }
+
+    #[test]
+    fn the_first_ninety_seconds_after_start_do_not_count() {
+        // 起動 (Load の origin) から毎秒遅い。90 秒までは数えず、そこから 10 秒続いた 100 秒で出る
+        let l = Load::new();
+        let mut m = Monitor::new(l.clone());
+        let on: Vec<bool> = (0..=100u64)
+            .map(|t| {
+                l.end_write_at(Duration::from_secs(t), ms(3000));
+                m.sample(t * 1000, Duration::from_secs(t), Some(HIGH), Some(HIGH)).0
+            })
+            .collect();
+        assert_eq!(on.iter().position(|&b| b), Some(100));
+        // 猶予の間の遅さは、出たときのログの最大にも入れない
+        let l = Load::new();
+        let mut m = Monitor::new(l.clone());
+        l.end_write_at(ms(0), ms(9000));
+        m.sample(0, ms(0), None, None);
+        let line = (90..=100u64)
+            .filter_map(|t| {
+                l.end_write_at(Duration::from_secs(t), ms(3000));
+                m.sample(t * 1000, Duration::from_secs(t), None, None).1
+            })
+            .next()
+            .unwrap();
+        assert!(line.contains("lag_ms=3000 "), "{line}");
     }
 
     /// 2026-10 の JST の日・時・分の epoch ミリ秒

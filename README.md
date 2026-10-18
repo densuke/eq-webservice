@@ -391,6 +391,12 @@ journalctl --user -u eq-broadcast -f
 
 `eq-server` の入れ替えは、ファイルを置き換えてから `systemctl --user restart eq-server` です。`eq-broadcast` と `eq-bgm` は `PartOf=eq-server.service` で `eq-server` にひも付いているので、一緒に再起動され、web・配信・BGM の版がそろいます (配信は数秒途切れます)。配信だけを再起動するときは `systemctl --user restart eq-broadcast`。
 
+#### Raspberry Pi 5 から常時配信する
+
+2026-10-17 から YouTube の配信は家の Raspberry Pi 5 (8GB) で動かしています。学習用のデスクトップと同居させるため、配信は上限を付けずに `CPUWeight` と `MemoryLow` で守り、デスクトップの側を絞ります。
+設定の例は `deploy/broadcast.pi.toml`・`deploy/replay.pi.toml`・`deploy/pi/` (ユーザーユニットと `/etc/systemd` の追加分)、考え方と測定は [docs/broadcast-pi.md](docs/broadcast-pi.md) にあります。
+配信は BGM なし (`bgm_url = ""`) です。BGM を嫌って音を切る人が、地震の警戒音や読み上げまで聞き逃さないようにするためで、BGM は eq.fuga.jp のサイトだけで流します。
+
 #### 記録から地震の動画を作る (replay-video)
 
 記録 (jsonl) から当時の画面を描き直して、音入りの mp4 を 1 本作ります (仕様は [docs/replay-video.md](docs/replay-video.md) の 4 章)。
