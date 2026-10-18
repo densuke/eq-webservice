@@ -582,6 +582,15 @@ mod tests {
     }
 
     #[test]
+    fn the_pi_example_mixes_no_bgm_and_records_to_the_ssd() {
+        let cfg: BroadcastConfig = toml::from_str(include_str!("../../../../deploy/broadcast.pi.toml")).unwrap();
+        assert_eq!((cfg.source, cfg.fps, cfg.fps_calm), (Source::Native, 15, Some(10)));
+        assert!(cfg.mixer && cfg.zoom && !cfg.mixes_bgm());
+        assert!(cfg.output.iter().any(|x| x.ends_with("$YOUTUBE_LIVE_API_KEY")));
+        assert!(cfg.record.unwrap().ring_dir.starts_with("/opt/eq-cast"));
+    }
+
+    #[test]
     fn the_bgm_is_mixed_only_with_the_mixer_and_a_bgm_url() {
         let cfg = |mixer, bgm_url: &str| BroadcastConfig {
             mixer,

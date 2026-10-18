@@ -3,7 +3,7 @@
 # ストリームキーは書かない (環境変数 YOUTUBE_LIVE_API_KEY を、権限 600 のファイルから systemd が渡す)。
 
 source = "native"
-# データ (地震情報・警報・天気・BGM の曲名) の取得先
+# データ (地震情報・警報・天気) の取得先 (無音なので BGM の曲名は出さない)
 server = "https://eq.fuga.jp"
 # 地図のデータ (web/public の japan.geojson・warning-areas.geojson・neighbors.geojson をコピーしておく)
 map_dir = "map"
