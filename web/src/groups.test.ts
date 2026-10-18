@@ -101,6 +101,12 @@ test("the latest eew is the one with the largest serial", () => {
   s.add(e("b", "10"));
   const g = s.add(e("c", "9"))!;
   assert.equal(latestEew(g as EewGroup).serial, "10");
+  // 取り消しは serial が小さくても最新 (別の配信元の取り消し)
+  const c = s.add({ ...e("p", "2"), cancelled: true })!;
+  assert.equal(latestEew(c as EewGroup).id, "p");
+  // 取り消しのあとに送り直しが届いても戻らない (2026-10-16 千島列島、Wolfx の第 42 報の送り直し)
+  const r = s.add(e("b-resent", "10"))!;
+  assert.equal(latestEew(r as EewGroup).id, "p");
 });
 
 test("updatedAt follows the received time even when it is negative (records before 1970)", () => {

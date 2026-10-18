@@ -145,9 +145,17 @@ export function summarizeQuake(g: QuakeGroup): QuakeSummary {
   };
 }
 
-/** EEW は最新の報 (serial が最大のもの) */
+/**
+ * 新しさの順位。取り消しは serial に関係なく最後
+ * (配信元ごとに serial が違い、P2P の取り消しは小さい番号で届く)。
+ * 一度取り消された地震は後の報で戻さない (気象庁の取り消しはその地震について最終)。
+ * 2026-10-16 千島列島では P2P の取り消しのあと Wolfx が第 42 報を送り直してきた。戻す作りだと震度 7 の予報が復活する
+ */
+const rank = (e: EewEvent): number => (e.cancelled ? Number.MAX_SAFE_INTEGER : Number(e.serial));
+
+/** EEW は最新の報 (serial が最大のもの。取り消しがあればそれ) */
 export function latestEew(g: EewGroup): EewEvent {
-  return g.events.reduce((a, b) => (Number(b.serial) >= Number(a.serial) ? b : a));
+  return g.events.reduce((a, b) => (rank(b) >= rank(a) ? b : a));
 }
 
 /** 同じ地震の予想を、報が変わっても最大で持ち続けた EEW (表示用。通知や音など、報ごとに反応するものは latestEew の方) */
@@ -163,7 +171,7 @@ const maxOf = (xs: number[]): number => xs.reduce((a, b) => Math.max(a, b));
  * 最新の報が取り消しなら、その報のまま (取り消しは消す)
  */
 export function heldForecast(events: EewEvent[]): EewEvent {
-  const ordered = [...events].sort((a, b) => Number(a.serial) - Number(b.serial));
+  const ordered = [...events].sort((a, b) => rank(a) - rank(b));
   const latest = ordered[ordered.length - 1];
   if (latest.cancelled) return latest;
   const live = ordered.filter((e) => !e.cancelled);

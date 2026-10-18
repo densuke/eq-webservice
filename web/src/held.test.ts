@@ -70,6 +70,13 @@ test("a warning stays a warning", () => {
   assert.equal(heldForecast([eew(1, 40, [], []), eew(2, 30, [], [])]).warning, false);
 });
 
+test("a cancel clears the event even when its serial is lower (another source)", () => {
+  // Wolfx は第 42 報まで、P2P の取り消しは第 2 報 (2026-10-16 千島列島)
+  const h = heldForecast([eew(42, 70, [CHIBA(45, 70)], [["千葉県", 70]], { warning: true }), eew(2, 0, [], [], { cancelled: true })]);
+  assert.equal(h.cancelled, true);
+  assert.deepEqual(h.areas, []);
+});
+
 test("a cancelled latest report clears the event", () => {
   const h = heldForecast([seq[1], eew(6, 0, [], [], { cancelled: true })]);
   assert.equal(h.cancelled, true);
