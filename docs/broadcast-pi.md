@@ -30,7 +30,7 @@ YouTube のライブ配信 (`eq-server broadcast`、native) を、n2 (GCE) か�
 - メモリ: デスクトップは `MemoryHigh=4G` (超えると遅くなる)・`MemoryMax=5G` (強制終了)。配信は eq.slice の `MemoryLow=512M` で守り、足りなくなったときはデスクトップのメモリから先にスワップへ出す。systemd は cgroup v2 を memory_recursiveprot で使うので、子の `MemoryLow` は親の階層にも保護がないと効かない。そのため `user@<uid>.service` にも `MemoryLow` を付ける。
 - ディスク: デスクトップは `IOWeight=50`。
 
-デスクトップが自分の上限で絞られると、本体全体の PSI (/proc/pressure) は上がる (memory full 57 を見た)。配信は遅れていないので、配信の混雑中の札と見張りのつなぎ直しの見送りは、配信自身の cgroup の PSI を見る (docs/broadcast-status.md)。
+デスクトップが自分の上限で絞られると、本体全体の PSI (/proc/pressure) は上がる (memory full 57 を見た)。配信は遅れていないので、配信の混雑中の札と見張りのつなぎ直しの見送りは、配信自身の cgroup の PSI を見る (docs/broadcast-status.md)。配信が止まっていて cgroup が無いときは、見張りはつなぎ直しを見送らない。
 
 ## 3. 測定 (2026-10-17〜18)
 
@@ -45,7 +45,7 @@ YouTube のライブ配信 (`eq-server broadcast`、native) を、n2 (GCE) か�
 
 ## 5. ffmpeg 8
 
-Ubuntu 26.04 の ffmpeg 8.0.1 では、`[record]` で分けた送り出し (mpegts → flv、`-c copy`) が `-analyzeduration 3000000` では映像の寸法を掴めず (`Could not find codec parameters for stream 0 ... unspecified size`)、何も送らなかった。n2 の ffmpeg 6 では起きない。v0.48.0 のあとで 15 秒 (`15000000`) にした。それより前の版を pi で使うときは、送り出しの引数だけを書き換えるラッパーを `ffmpeg` に指定して回避する。
+Ubuntu 26.04 の ffmpeg 8.0.1 では、`[record]` で分けた送り出し (mpegts → flv、`-c copy`) が `-analyzeduration 3000000` では映像の寸法を掴めず (`Could not find codec parameters for stream 0 ... unspecified size`)、何も送らなかった。n2 の ffmpeg 6 では起きない。v0.48.0 のあとで 15 秒 (`15000000`) にした。そのため起動のとき、送り出しは映像の寸法を掴むまで最大 15 秒待つ (掴めればそこで始まる)。pi では、配信の再起動から YouTube で live になるまで約 20〜30 秒 (2026-10-18 の実測で 22〜34 秒)。それより前の版を pi で使うときは、送り出しの引数だけを書き換えるラッパーを `ffmpeg` に指定して回避する。
 
 ## 6. YouTube の超低遅延
 

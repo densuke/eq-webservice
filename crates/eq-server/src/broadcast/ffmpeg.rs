@@ -80,7 +80,8 @@ async fn pump(
 /// `-copyts` にしないのは、mpegts の時刻が 26.5 時間で一周するとき、途切れの補正まで止まって flv の時刻が壊れるため
 /// (1 時間の閾値なら一周の跳びは今までどおり直る。docs/quake-archive.md 3.8 章)
 /// `-analyzeduration 15000000`: ffmpeg 8 (Raspberry Pi 5 / Ubuntu 26.04 の 8.0.1) は 3 秒では映像の寸法を掴めず
-/// (Could not find codec parameters ... unspecified size)、何も送らない (ffmpeg 6 では起きない)。上限なので、掴めれば待たない
+/// (Could not find codec parameters ... unspecified size)、何も送らない (ffmpeg 6 では起きない)。
+/// 起動のとき、送り出しは寸法を掴むまで最大 15 秒待つ (掴めればそこで始まる)。pi では再起動から YouTube の受信まで約 20〜30 秒
 fn sender_args(output: &[String]) -> Vec<String> {
     let mut args: Vec<String> = [
         "-hide_banner",
