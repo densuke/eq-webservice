@@ -120,7 +120,12 @@ impl Hub {
         // 一度取り消された地震は、後の報 (別の配信元の取り消し・送り直し・遅れた古い報) で戻さない。
         // 気象庁の取り消しはその地震について最終。2026-10-16 12:38 千島列島 (M9.9 と過大推定) では
         // 取り消しが P2P の第 2 報だけで届き、そのあと Wolfx が第 42 報を送り直してきた。戻す作りだと震度 7 の予報が復活する
-        if let EventBody::Eew(e) = &ev.body {
+        // event_id が無い (P2P で issue が欠けると空になる) 報は、どの地震か分からないので覚えも遮断もしない
+        let eew = match &ev.body {
+            EventBody::Eew(e) if !e.event_id.trim().is_empty() => Some(e),
+            _ => None,
+        };
+        if let Some(e) = eew {
             if st.cancelled.contains(&e.event_id) {
                 return None;
             }
@@ -355,6 +360,16 @@ mod tests {
         hub.publish(cancel("p2", "A", "2"));
         assert!(!hub.publish(eew("w1", "A", "1")));
         assert_eq!(ids(&hub.recent()), ["p2"]);
+    }
+
+    #[test]
+    fn a_cancel_without_event_id_does_not_block_other_eews() {
+        // P2P の event_id は欠けると空になる。空どうしを同じ地震とみなして遮断しない
+        let hub = Hub::new(10);
+        assert!(hub.publish(cancel("c", "", "1")));
+        assert!(hub.publish(eew("other", "", "1")));
+        assert!(hub.publish(cancel("c-blank", " ", "1")));
+        assert!(hub.publish(eew("blank", " ", "1")));
     }
 
     #[test]
