@@ -31,7 +31,7 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: web-dist
           path: web/dist
@@ -124,7 +124,7 @@ jobs:
           curl -fsS http://127.0.0.1:18081/ | grep -q '地震情報マップ'
           kill $pid
           cat server.log server2.log
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: package-${{ matrix.target }}
           path: |
