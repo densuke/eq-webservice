@@ -10,6 +10,11 @@ export const WAVE_MAX_SEC = 180;
 export const VP_KM_S = 6.5;
 export const VS_KM_S = 3.75;
 
+/** 円の広がりを maxKm で止める (揺れの範囲を越えて日本全体を覆わないように)。未到達 (null) はそのまま */
+export function capKm(r: number | null, maxKm: number): number | null {
+  return r == null ? null : Math.min(r, maxKm);
+}
+
 /** 震源の深さ depthKm、発生からの経過秒 elapsedSec での地表到達半径 (km)。未到達なら null */
 export function surfaceRadiusKm(velocity: number, depthKm: number, elapsedSec: number): number | null {
   if (elapsedSec <= 0) return null;

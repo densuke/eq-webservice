@@ -170,6 +170,17 @@ pub struct Wave {
     pub s_km: Option<f64>,
 }
 
+impl Wave {
+    /// 円の広がりを max_km で止める (揺れの範囲を越えて日本全体を覆わないように)
+    pub fn capped(self, max_km: f64) -> Wave {
+        Wave {
+            p_km: self.p_km.map(|r| r.min(max_km)),
+            s_km: self.s_km.map(|r| r.min(max_km)),
+            ..self
+        }
+    }
+}
+
 struct Source {
     lat: f64,
     lon: f64,

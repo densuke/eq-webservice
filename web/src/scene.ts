@@ -1,6 +1,6 @@
 // 地図の場面: 自動カメラの目標、P波・S波の円、震央の印。
 
-import { type Box, followRadiusKm, pad, pointBox, stopRadiusKm, union } from "./camera.ts";
+import { type Box, DEFAULT_STOP_KM, followRadiusKm, pad, pointBox, stopRadiusKm, union } from "./camera.ts";
 import { project } from "./map.ts";
 import { type Center, type WaveSource, currentGroup, geoOf, groupPlace, groupScale, pendingHindsight, recentQuakes, relatedQuake, shakenGeo, unsettledGroups, waveSources } from "./quakes.ts";
 import { sameQuake } from "./priority.ts";
@@ -9,7 +9,7 @@ import { heldEew } from "./groups.ts";
 import { $, map } from "./dom.ts";
 import { REPLAY_SPEED, WAVE_MAX_SEC, app, now } from "./state.ts";
 import { activeAreas } from "./tsunami.ts";
-import { VP_KM_S, VS_KM_S, surfaceRadiusKm } from "./waves.ts";
+import { VP_KM_S, VS_KM_S, capKm, surfaceRadiusKm } from "./waves.ts";
 
 /** 震央の印。番号ごとに 1 つ (同じ地震の EEW と地震情報は地震情報の震源を使う) */
 export function renderMarkers(now: number): void {
@@ -126,9 +126,10 @@ export function renderScene(sc: Scene | null): { box: Box | null; waving: boolea
   // 再生は揺れた地域を覆い終えたら打ち切る (早回しでも 180 秒分は長い)
   const waving = sc.t != null && sc.t < WAVE_MAX_SEC && !(sc.replay && (s ?? 0) > stop);
   if (!waving) return { box: pad(union(sc.shaken, pointBox(x, y, 0))!), waving, wave: null };
-  const wave = (w: Center, t: number) => ({ ...w, pKm: surfaceRadiusKm(VP_KM_S, w.depth, t), sKm: surfaceRadiusKm(VS_KM_S, w.depth, t) });
-  const main = wave(c, sc.t!);
-  map.setWaves([main, ...sc.others.map((o) => wave(o, (now() - o.origin) / 1000))]);
+  // 円は寄りが引く上限 (揺れた範囲の一番遠い角) で止める。ほかの地震は揺れた範囲を持たないので既定の上限
+  const wave = (w: Center, t: number, maxKm: number) => ({ ...w, pKm: capKm(surfaceRadiusKm(VP_KM_S, w.depth, t), maxKm), sKm: capKm(surfaceRadiusKm(VS_KM_S, w.depth, t), maxKm) });
+  const main = wave(c, sc.t!, stop);
+  map.setWaves([main, ...sc.others.map((o) => wave(o, (now() - o.origin) / 1000, DEFAULT_STOP_KM))]);
   $("#wave-info").textContent = sc.replay ? `再生中 ${sc.t!.toFixed(0)}秒 (×${REPLAY_SPEED})` : `発生から${sc.t!.toFixed(0)}秒`;
   const follow = pointBox(x, y, followRadiusKm(s, stop));
   const sub = sc.key ? { key: sc.key, lat: main.lat, lon: main.lon, pKm: main.pKm, sKm: main.sKm } : null;
