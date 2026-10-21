@@ -93,9 +93,9 @@ export function groupScale(g: Group): Scale {
  * 最近 (FULL_MS 以内) の地震を優先度順に。揺れの大きい方 (EEW は予測、地震情報は観測) が先、同じなら新しい方。
  * 地震情報が届いた EEW はその地震情報に任せる (予測の震度で居座らないように)
  */
-/** まだ表示を続ける地震 (最後の情報から settleMs 以内。軽い地震は短い) */
+/** まだ表示を続ける地震 (最後の情報から、EEW は EEW_BANNER_MS、地震情報は settleMs 以内。軽い地震は短い) */
 export function unsettledGroups(now: number): Group[] {
-  return priorityGroups(now).filter((g) => now - g.updatedAt <= settleMs(groupScale(g)));
+  return priorityGroups(now).filter((g) => now - g.updatedAt <= (g.kind === "eew" ? EEW_BANNER_MS : settleMs(groupScale(g))));
 }
 
 export function priorityGroups(now: number): Group[] {

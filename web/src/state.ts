@@ -13,7 +13,7 @@ import type { Warnings } from "./warnings.ts";
 
 export { WAVE_MAX_SEC } from "./waves.ts";
 /** EEW 警報バナーを出し続ける時間 */
-export const EEW_BANNER_MS = 3 * 60_000;
+export const EEW_BANNER_MS = 5 * 60_000;
 /** 履歴を選んだときの P波・S波の再生速度 */
 export const REPLAY_SPEED = 3;
 

@@ -294,7 +294,7 @@ mod tests {
         assert_eq!(alert_level(&ev[..1], T), Some(AlertLevel::Medium));
         assert_eq!(alert_level(&ev[..2], T + 1_000), Some(AlertLevel::Info));
         assert_eq!(alert_level(&ev, T + 2_000), Some(AlertLevel::Info));
-        // 3 分以内の緊急地震速報があれば、地震情報の最初の報は案内音。3 分を過ぎていれば震度で鳴らす
+        // 5 分以内の緊急地震速報があれば、地震情報の最初の報は案内音。5 分を過ぎていれば震度で鳴らす
         let with_eew = [
             eew("E", 1, T, T0, false, Scale::S3, TOKYO),
             q(T + 60_000, QuakeInfoType::ScalePrompt),
@@ -302,9 +302,9 @@ mod tests {
         assert_eq!(alert_level(&with_eew, T + 60_000), Some(AlertLevel::Info));
         let late = [
             eew("E", 1, T, T0, false, Scale::S3, TOKYO),
-            q(T + 200_000, QuakeInfoType::ScalePrompt),
+            q(T + 300_000, QuakeInfoType::ScalePrompt),
         ];
-        assert_eq!(alert_level(&late, T + 200_000), Some(AlertLevel::Medium));
+        assert_eq!(alert_level(&late, T + 300_000), Some(AlertLevel::Medium));
     }
 
     #[test]

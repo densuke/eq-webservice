@@ -8,8 +8,8 @@ use crate::broadcast::record::Shown;
 use super::held::hold;
 use super::model::{current_quake, same_quake, Place, QuakeSummary};
 
-/// 緊急地震速報を表示し続ける時間 (web の EEW_BANNER_MS)
-pub const EEW_ACTIVE_MS: u64 = 3 * 60_000;
+/// 緊急地震速報を表示し続ける時間 (web の EEW_BANNER_MS)。最後の報から。地震情報は最終報の 4〜5 分後に来ることが多い
+pub const EEW_ACTIVE_MS: u64 = 5 * 60_000;
 /// 地震情報が届いた緊急地震速報を、その地震情報に任せるかを見る範囲 (web の FULL_MS)
 const RECENT_MS: u64 = 10 * 60_000;
 /// 発生からこの時間を過ぎた地震波は描かない (web の WAVE_MAX_SEC)
@@ -384,11 +384,11 @@ mod tests {
     }
 
     #[test]
-    fn an_eew_is_shown_for_three_minutes() {
+    fn an_eew_is_shown_for_five_minutes() {
         let t = T0 as u64;
         let l = latest_eews(&[eew_event("a", 1, t, |_| {})]);
-        assert!(current(&[], &l, t + 179_999).is_some());
-        assert!(current(&[], &l, t + 180_000).is_none());
+        assert!(current(&[], &l, t + 299_999).is_some());
+        assert!(current(&[], &l, t + 300_000).is_none());
         assert!(current(&[], &[], t).is_none());
     }
 
