@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { arrivalSec, distanceKm, geoCircle, surfaceRadiusKm, VP_KM_S } from "./waves.ts";
+import { arrivalSec, capKm, distanceKm, geoCircle, surfaceRadiusKm, VP_KM_S } from "./waves.ts";
 
 test("wave has not surfaced before reaching the depth", () => {
   assert.equal(surfaceRadiusKm(VP_KM_S, 65, 5), null);
@@ -22,4 +22,10 @@ test("geo circle points are at the requested distance", () => {
   for (const [lon, lat] of geoCircle(38, 142, 150, 12)) {
     assert.ok(Math.abs(distanceKm(38, 142, lat, lon) - 150) < 0.5);
   }
+});
+
+test("wave circles stop growing at the cap; a wave not yet surfaced stays null", () => {
+  assert.equal(capKm(450, 120), 120);
+  assert.equal(capKm(80, 120), 80);
+  assert.equal(capKm(null, 120), null);
 });

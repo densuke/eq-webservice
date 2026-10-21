@@ -88,8 +88,9 @@ test("a minor quake (intensity 2 or less) comes back after 1 minute once its wav
 test("an earthquake early warning pauses entertainment while it is shown", () => {
   world([eew]);
   assert.equal(calmState(T + 10 * S, false).quiet, false);
-  // 緊急地震速報のバナー (3 分) と波 (発生から 180 秒) が終われば戻る
-  assert.equal(calmState(T + 181 * S, false).quiet, true);
+  // 波 (発生から 180 秒) が終わっても、緊急地震速報のバナー (最後の報から 5 分) の間は戻らない
+  assert.equal(calmState(T + 181 * S, false).quiet, false);
+  assert.equal(calmState(T + 301 * S, false).quiet, true);
 });
 
 test("a tsunami forecast pauses entertainment until it is cancelled", () => {

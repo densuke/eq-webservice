@@ -3,7 +3,7 @@
 
 use tiny_skia::Pixmap;
 
-use super::camera::{fit_box, target_box, Aim, Camera, Epicenter};
+use super::camera::{fit_box, target_box, wave_cap_km, Aim, Camera, Epicenter};
 use super::data::{CityWeather, Warnings};
 use super::draw::{self, Renderer, Scene};
 use super::eew::{eew_place, quake_place};
@@ -282,12 +282,18 @@ impl Stepper {
         // 揺れの広がりの再現は、地震の画面の地震が観測点の値の入った地震情報のときだけ
         let spread = quake.and_then(|q| spread::spread_of(i.events, q, self.renderer.zones(), now));
         // 地震波は地震の画面のときだけ描く (のちに分かった震源の波は、平時の画面でも描く)
-        let waves = frame_waves(&groups, &eews, current.is_some(), i.hindsight, spread.as_ref(), now);
+        // 円は寄りの地震の揺れた範囲で止める。shortcut: 同時に起きた別の地震の円も同じ半径で止める、重なる地震が増えたら地震ごとに
+        let cap = wave_cap_km(aim_of(&self.renderer, current, &eews, pending).as_ref());
+        let waves: Vec<eew::Wave> = frame_waves(&groups, &eews, current.is_some(), i.hindsight, spread.as_ref(), now)
+            .into_iter()
+            .map(|w| w.capped(cap))
+            .collect();
         // サブの地図の波は、サブの地図に映している地震の波だけ (保持時間・薄さは配信のサブの地図には無い)
         let sub_wave = match &spread {
             Some(s) => Some(spread::wave(s, now)),
             None => current.and_then(|c| eew::sub_wave(c, &groups, &eews, now)),
-        };
+        }
+        .map(|w| w.capped(cap));
         // 地震波以外を描き直すのは、データが変わったとき・平時と地震が切り替わったとき・秒が進んだときだけ。
         // 地震波が動いている間は、その上にコマごとに波だけを重ねる
         let still_key = (

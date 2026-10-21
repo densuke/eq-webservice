@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { GroupStore } from "./groups.ts";
-import { currentGroup, pendingHindsight, priorityGroups, shakenGeo, updateNumbers, waveSources } from "./quakes.ts";
+import { currentGroup, pendingHindsight, priorityGroups, shakenGeo, unsettledGroups, updateNumbers, waveSources } from "./quakes.ts";
 import { DEFAULT_STOP_KM, stopRadiusKm } from "./camera.ts";
 import { app } from "./state.ts";
 import type { EewEvent, EqEvent, QuakeEvent } from "./types.ts";
@@ -77,6 +77,15 @@ test("waves use the eew (precise origin time) rather than the quake report of th
     src.map((s) => s.group?.key),
     ["e:kumamoto", "e:miyagi"],
   );
+});
+
+test("an eew keeps the quake screen for 5 minutes after its last report, even when weak", () => {
+  // 2026-10-21 10:04 千葉県北西部: 予想震度 3 の最終報から約 4 分半後に地震情報が届いた
+  world([eew("chiba", "千葉県北西部", 35.7, 140.1, 30)]);
+  assert.equal(unsettledGroups(t0 + 270_000)[0]?.key, "e:chiba");
+  assert.equal(unsettledGroups(t0 + 301_000).length, 0);
+  world([eew("chiba2", "千葉県北西部", 35.7, 140.1, 20)]);
+  assert.equal(unsettledGroups(t0 + 270_000)[0]?.key, "e:chiba2");
 });
 
 test("a selected earthquake is shown instead of the priority one", () => {

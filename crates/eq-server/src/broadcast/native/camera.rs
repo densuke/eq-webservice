@@ -71,6 +71,16 @@ pub fn stop_radius_km(x: f64, y: f64, shaken: Option<MapBox>) -> f64 {
     (dx.hypot(dy) / KM_TO_UNITS).max(MIN_RADIUS_KM)
 }
 
+/// 地震波の円を止める半径 (km)。寄りが引く上限 (揺れた範囲の一番遠い角) と同じなので、円は画面からはみ出さない
+pub fn wave_cap_km(aim: Option<&Aim>) -> f64 {
+    aim.and_then(|a| {
+        let c = a.epicenter?;
+        let (x, y) = project(c.lon, c.lat);
+        Some(stop_radius_km(x, y, a.shaken))
+    })
+    .unwrap_or(DEFAULT_STOP_KM)
+}
+
 /// S 波の半径 s_km のときに見せる半径 (km)
 pub fn follow_radius_km(s_km: Option<f64>, stop_km: f64) -> f64 {
     s_km.unwrap_or(0.0).max(MIN_RADIUS_KM).min(stop_km)
@@ -286,6 +296,38 @@ mod tests {
         assert_eq!(follow_radius_km(Some(10.0), 300.0), MIN_RADIUS_KM);
         assert_eq!(follow_radius_km(Some(150.0), 300.0), 150.0);
         assert_eq!(follow_radius_km(Some(900.0), 300.0), 300.0);
+    }
+
+    #[test]
+    fn the_wave_circles_stop_where_the_view_stops() {
+        use super::super::eew::Wave;
+        let (x, y) = chiba();
+        let shaken = MapBox::around(x + 30.0, y - 20.0, 60.0);
+        let aim = Aim {
+            epicenter: epicenter(None),
+            shaken: Some(shaken),
+            forecast: true,
+        };
+        let cap = wave_cap_km(Some(&aim));
+        assert_eq!(cap, stop_radius_km(x, y, Some(shaken)));
+        // 揺れた範囲が分からない・寄る地震が無いときは 300km
+        assert_eq!(wave_cap_km(Some(&Aim { shaken: None, ..aim })), DEFAULT_STOP_KM);
+        assert_eq!(wave_cap_km(None), DEFAULT_STOP_KM);
+        // 発生から 120 秒 (S 波 450km、P 波 780km) でも、円は cap で止まる。届いていない波は届いていないまま
+        let w = Wave {
+            lat: 35.7,
+            lon: 140.1,
+            p_km: Some(780.0),
+            s_km: Some(450.0),
+        };
+        assert_eq!(w.capped(cap).p_km, Some(cap));
+        assert_eq!(w.capped(cap).s_km, Some(cap));
+        let early = Wave {
+            s_km: None,
+            p_km: Some(20.0),
+            ..w
+        };
+        assert_eq!(early.capped(cap), early);
     }
 
     #[test]
