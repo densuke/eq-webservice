@@ -8,6 +8,7 @@ use anyhow::Context;
 use tokio::io::AsyncWriteExt;
 use tokio::process::{Child, Command};
 
+use super::args::Transition;
 use super::plan::{duration_ms, Frame, Plan};
 use super::voice::{self, Clip};
 use super::Options;
@@ -187,6 +188,7 @@ pub async fn encode_video(
     let icons = Icons::new();
     let check_ms = 1000 / u64::from(o.fps);
     let mut last: Vec<u8> = Vec::new();
+    let mut dissolve = Dissolve::new(o.transition, o.transition_ms, o.fps);
     for (i, f) in plan.frames.iter().enumerate() {
         throttle.wait().await?;
         let input = frame_input(&o.label, events, f, &icons, check_ms);
@@ -194,13 +196,64 @@ pub async fn encode_video(
         if let Some(out) = stepper.step(&input) {
             last = out.i420;
         }
-        stdin.write_all(&last).await.context("writing a frame to ffmpeg")?;
+        let frame = dissolve.frame(f.jumped, &last);
+        stdin.write_all(&frame).await.context("writing a frame to ffmpeg")?;
         if i % 500 == 499 {
             tracing::info!("replay-video: {}/{} コマ", i + 1, plan.frames.len());
         }
     }
     drop(stdin);
     finish(child, "ffmpeg (映像)").await
+}
+
+/// 時計を飛ばしたところで、飛ぶ前の画面を飛んだ後の画面へ溶かす。動画の長さは変えない
+/// (飛んだ後のコマに重ねるので、音の筋書きとずれない)
+struct Dissolve {
+    /// 溶かすコマ数 (0 は切り替えるだけ)
+    frames: usize,
+    /// 飛ぶ前に出した最後のコマと、溶かし始めてからのコマ数
+    from: Option<(Vec<u8>, usize)>,
+    /// 前に書いたコマ (次に飛んだときの「飛ぶ前」)
+    shown: Vec<u8>,
+}
+
+impl Dissolve {
+    fn new(t: Transition, ms: u32, fps: u32) -> Self {
+        let frames = match t {
+            Transition::Cut => 0,
+            Transition::Dissolve => (ms * fps / 1000) as usize,
+        };
+        Dissolve {
+            frames,
+            from: None,
+            shown: Vec::new(),
+        }
+    }
+
+    /// このコマに書く画面
+    fn frame(&mut self, jumped: bool, now: &[u8]) -> Vec<u8> {
+        if jumped && self.frames > 0 && self.shown.len() == now.len() {
+            self.from = Some((std::mem::take(&mut self.shown), 0));
+        }
+        let out = match self.from.take() {
+            Some((from, k)) if k < self.frames => {
+                let out = blend(&from, now, (k + 1) as u32, self.frames as u32 + 1);
+                self.from = Some((from, k + 1));
+                out
+            }
+            _ => now.to_vec(),
+        };
+        self.shown.clone_from(&out);
+        out
+    }
+}
+
+/// a と b を b の割合 num/den で混ぜる (I420 のまま。Y・U・V とも線形に混ぜてよい)
+fn blend(a: &[u8], b: &[u8], num: u32, den: u32) -> Vec<u8> {
+    a.iter()
+        .zip(b)
+        .map(|(&x, &y)| ((u32::from(x) * (den - num) + u32::from(y) * num + den / 2) / den) as u8)
+        .collect()
 }
 
 #[cfg(test)]
@@ -234,11 +287,31 @@ mod tests {
     }
 
     #[test]
+    fn a_jump_dissolves_the_frame_before_into_the_frames_after_without_adding_frames() {
+        let mut d = Dissolve::new(Transition::Dissolve, 600, 5); // 3 コマ
+        assert_eq!(d.frame(false, &[0, 0]), vec![0, 0]);
+        // 飛んだコマから 3 コマは、飛ぶ前 (0) と今 (200) を 1/4・2/4・3/4 で混ぜる。4 コマ目からは今のまま
+        let got: Vec<Vec<u8>> = [true, false, false, false]
+            .iter()
+            .map(|&j| d.frame(j, &[200, 100]))
+            .collect();
+        assert_eq!(got, vec![vec![50, 25], vec![100, 50], vec![150, 75], vec![200, 100]]);
+        // cut は飛んでもそのまま
+        let mut c = Dissolve::new(Transition::Cut, 600, 5);
+        c.frame(false, &[0]);
+        assert_eq!(c.frame(true, &[200]), vec![200]);
+        // 最初のコマ (前の画面が無い) で飛んでも混ぜない
+        let mut first = Dissolve::new(Transition::Dissolve, 600, 5);
+        assert_eq!(first.frame(true, &[200]), vec![200]);
+    }
+
+    #[test]
     fn replay_frames_never_carry_a_status_chip() {
         let f = Frame {
             now_ms: 1,
             applied: 0,
             fast_forward: false,
+            jumped: false,
             hindsight: None,
         };
         let icons = Icons::new();

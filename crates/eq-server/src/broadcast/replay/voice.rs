@@ -212,6 +212,7 @@ mod tests {
             now_ms: 0,
             applied,
             fast_forward: false,
+            jumped: false,
             hindsight: None,
         }
     }

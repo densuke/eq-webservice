@@ -10,14 +10,36 @@ use super::super::BroadcastConfig;
 pub const USAGE: &str = "\
 usage: eq-server replay-video --from <ms> --to <ms> --out <x.mp4> (--events <jsonl> | --archive <URL>)
            [--quake <origin_ms>[,<lat>,<lon>]]... [--chapters <x.json>]
-           [--voice <URL>] [--fps 5] [--no-zoom] [--label \"記録から再現\"] [--map-dir web/public] [--font <ttf/ttc>] [--ffmpeg ffmpeg]
+           [--voice <URL>] [--fps 5] [--no-zoom] [--transition dissolve|cut] [--transition-ms 1000]
+           [--label \"記録から再現\"] [--map-dir web/public] [--font <ttf/ttc>] [--ffmpeg ffmpeg]
   --from/--to   報を集める範囲 (received_at_ms。epoch ミリ秒)。--archive のときは 1 時間まで
   --events      eq-server の jsonl の記録 (sink が書いたもの) を直接読む。samples/scenarios の形も読める
   --archive     /api/archive から取る (例: https://eq.fuga.jp)
   --quake       動画に入れる地震 (発生時刻と、分かれば震源の緯度・経度)。何度でも書ける (連続地震)。省けば範囲で最大震度の 1 つ
   --chapters    各地震の始まりの、動画の中の時刻を JSON で書き出す
   --voice       読み上げを入れる。サーバの URL (例: https://eq.fuga.jp)。キャッシュ済みの声だけをもらい、Google は呼ばない。省けば入れない
-  --no-zoom     震源へ寄らず、常に日本全体を映す (既定は web と同じく震源へ寄る)";
+  --no-zoom     震源へ寄らず、常に日本全体を映す (既定は web と同じく震源へ寄る)
+  --transition  時計を飛ばすところの見せ方。dissolve (既定: 飛ぶ前の画面を --transition-ms かけて溶かす) か cut (そのまま切り替える)";
+
+/// 時計を飛ばすところの見せ方
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Transition {
+    /// そのまま切り替える
+    Cut,
+    /// 飛ぶ前の画面を、飛んだ後の画面に溶かす (クロスディゾルブ)
+    Dissolve,
+}
+
+impl std::str::FromStr for Transition {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> anyhow::Result<Self> {
+        match s {
+            "cut" => Ok(Transition::Cut),
+            "dissolve" => Ok(Transition::Dissolve),
+            other => anyhow::bail!("transition must be dissolve or cut, got {other:?}"),
+        }
+    }
+}
 
 /// 報の取り方
 #[derive(Debug, Clone, PartialEq)]
@@ -40,6 +62,8 @@ pub struct Options {
     pub fps: u32,
     /// 地震のとき震源へ寄る
     pub zoom: bool,
+    pub transition: Transition,
+    pub transition_ms: u32,
     pub label: String,
     pub map_dir: String,
     pub font: String,
@@ -60,6 +84,8 @@ pub fn parse(args: &[String]) -> anyhow::Result<Options> {
         voice: None,
         fps: 5,
         zoom: true,
+        transition: Transition::Dissolve,
+        transition_ms: 1000,
         label: "記録から再現".into(),
         map_dir: d.map_dir,
         font: d.font,
@@ -83,6 +109,8 @@ pub fn parse(args: &[String]) -> anyhow::Result<Options> {
             "--voice" => o.voice = Some(value("--voice")?.trim_end_matches('/').to_string()),
             "--fps" => o.fps = value("--fps")?.parse().context("--fps")?,
             "--no-zoom" => o.zoom = false,
+            "--transition" => o.transition = value("--transition")?.parse()?,
+            "--transition-ms" => o.transition_ms = value("--transition-ms")?.parse().context("--transition-ms")?,
             "--label" => o.label = value("--label")?,
             "--map-dir" => o.map_dir = value("--map-dir")?,
             "--font" => o.font = value("--font")?,
@@ -95,6 +123,7 @@ pub fn parse(args: &[String]) -> anyhow::Result<Options> {
     o.out = out.with_context(|| format!("--out is required\n\n{USAGE}"))?;
     anyhow::ensure!(o.from <= o.to, "--from must not be later than --to");
     anyhow::ensure!((1..=60).contains(&o.fps), "--fps must be 1..=60");
+    anyhow::ensure!(o.transition_ms <= 5000, "--transition-ms must be 0..=5000");
     o.source = match (events, archive) {
         (Some(p), None) => Source::Events(p),
         (None, Some(u)) => Source::Archive(u),
@@ -164,6 +193,12 @@ mod tests {
         let base = ["--from", "1", "--to", "9", "--out", "x", "--events", "e"];
         assert!(parse_strs(&base).unwrap().zoom);
         assert!(!parse_strs(&[&base[..], &["--no-zoom"]].concat()).unwrap().zoom);
+        let d = parse_strs(&base).unwrap();
+        assert_eq!((d.transition, d.transition_ms), (Transition::Dissolve, 1000));
+        let c = parse_strs(&[&base[..], &["--transition", "cut", "--transition-ms", "0"]].concat()).unwrap();
+        assert_eq!((c.transition, c.transition_ms), (Transition::Cut, 0));
+        assert!(parse_strs(&[&base[..], &["--transition", "wipe"]].concat()).is_err());
+        assert!(parse_strs(&[&base[..], &["--transition-ms", "9000"]].concat()).is_err());
     }
 
     #[test]

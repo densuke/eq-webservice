@@ -1,7 +1,7 @@
 // デモモード: 場面の一覧と再生・操作 (ブラウザの中だけで再生し、実際の情報は裏で受け続ける)。
 
 import { type Scenario, type ScenarioSummary, makePlan } from "./demo.ts";
-import { hindsightOf, historyStart, skipRanges } from "./history.ts";
+import { hindsightOf, historyStart, skipLabel, skipRanges } from "./history.ts";
 import { GroupStore } from "./groups.ts";
 import { type StartSound, startSoundInit, startSoundLevel, stepStartSound } from "./replay-sound.ts";
 import { esc } from "./html.ts";
@@ -93,6 +93,20 @@ function rebuild(d: DemoState): void {
   showWorld(d.world);
 }
 
+/** 飛んだことが分かるよう、画面を一瞬暗くして飛んだ長さを出す */
+function showSkip(ms: number): void {
+  const veil = $("#skip-veil");
+  veil.querySelector("span")!.textContent = skipLabel(ms);
+  veil.hidden = false;
+  veil.classList.remove("run");
+  void veil.offsetWidth; // 続けて飛んでも最初から流す
+  veil.classList.add("run");
+}
+
+$("#skip-veil").addEventListener("animationend", (e) => {
+  (e.currentTarget as HTMLElement).hidden = true;
+});
+
 /**
  * 再生位置までの情報を流す。quiet なら警戒音などを鳴らさない (位置を動かしたとき)。
  * 画面の更新 (tick) ごとに呼ぶ
@@ -106,6 +120,7 @@ export function advanceDemo(quiet = false): void {
   if (skip) {
     d.clock = { ...d.clock, pos: skip.to, anchor: performance.now() };
     d.ffUntil = performance.now() + FF_SHOW_MS;
+    if (!quiet) showSkip(d.plan.toReal(skip.to) - d.plan.toReal(pos));
     pos = skip.to;
   }
   // 履歴の再生: 発生時刻をまたいだ瞬間に 1 回だけ鳴らす (位置のつまみや早送りで飛んだときは鳴らさない)

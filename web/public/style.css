@@ -382,3 +382,10 @@ body[data-layout="trial"] #demo-panel { max-height: 25vh; overflow: auto; }
 .sub-legend-row i { width: 10px; height: 10px; border-radius: 2px; }
 .sub-legend-row i.forecast { background: transparent; border: 1px dashed var(--muted); }
 .sub-legend-row .x { width: 10px; text-align: center; color: var(--text); }
+
+/* 履歴の再生で時計を飛ばしたとき: 一瞬暗くして、飛んだ長さを出す */
+.skip-veil { position: fixed; inset: 0; z-index: 50; pointer-events: none; display: grid; place-items: center; background: rgba(0, 0, 0, 0.65); opacity: 0; }
+.skip-veil.run { animation: skip-veil 1.2s ease-in-out; }
+.skip-veil span { padding: 10px 24px; border-radius: 10px; background: rgba(13, 17, 23, 0.9); border: 1px solid #ffb300; color: #ffb300; font-size: 28px; font-weight: 800; }
+@keyframes skip-veil { 0% { opacity: 0; } 30%, 60% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .skip-veil.run { animation-duration: 0.01s; } }

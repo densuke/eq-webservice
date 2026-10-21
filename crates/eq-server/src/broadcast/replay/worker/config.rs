@@ -135,6 +135,10 @@ pub struct WorkerConfig {
 
     // replay-video に渡すもの
     pub fps: u32,
+    /// 時計を飛ばすところの見せ方。"dissolve" (既定) か "cut"
+    pub skip_transition: String,
+    /// dissolve で溶かす長さ (ミリ秒)
+    pub skip_transition_ms: u32,
     pub label: String,
     pub map_dir: String,
     pub font: String,
@@ -188,6 +192,8 @@ impl Default for WorkerConfig {
             youtube_daily_limit: 3,
             youtube_delete_after_upload: false,
             fps: 5,
+            skip_transition: "dissolve".into(),
+            skip_transition_ms: 1000,
             label: "記録から再現".into(),
             map_dir: b.map_dir,
             font: b.font,
@@ -227,6 +233,10 @@ impl WorkerConfig {
             "間隔は 1 秒以上"
         );
         anyhow::ensure!((1..=60).contains(&self.fps), "fps must be 1..=60");
+        self.skip_transition
+            .parse::<crate::broadcast::replay::args::Transition>()
+            .context("skip_transition")?;
+        anyhow::ensure!(self.skip_transition_ms <= 5000, "skip_transition_ms must be 0..=5000");
         anyhow::ensure!(
             self.catchup_max_hours >= self.lookback_hours,
             "catchup_max_hours は lookback_hours 以上にしてください"
