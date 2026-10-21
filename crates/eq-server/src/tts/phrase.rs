@@ -499,14 +499,13 @@ pub fn announce_segments(ev: &Event, priors: &[&Event]) -> Vec<String> {
 /// 津波警報・大津波警報の入った津波の報だけ「繰り返します」と 2 回目を足す。docs/tts.md S13
 pub fn spoken_segments(ev: &Event, priors: &[&Event]) -> Vec<String> {
     let segs = announce_segments(ev, priors);
-    if !repeats(ev, &segs) {
+    if segs.is_empty() {
         return segs;
     }
-    let again: Vec<String> = if segs.len() <= REPEAT_FULL_MAX {
-        segs.clone()
-    } else {
-        // 長い報は地名を除いた見出しと避難の呼びかけだけを繰り返す (部品数・長さの上限に収める)
-        segs.iter().filter(|s| !is_area_name(s)).cloned().collect()
+    let again = match &ev.body {
+        EventBody::Quake(q) if q.info_type == QuakeInfoType::DetailScale => segs.clone(),
+        EventBody::Tsunami(t) if segs.iter().any(|s| s == EVACUATE) => tsunami_again(t, &segs),
+        _ => return segs,
     };
     let mut out = segs;
     out.push(REPEAT.to_string());
@@ -514,24 +513,55 @@ pub fn spoken_segments(ev: &Event, priors: &[&Event]) -> Vec<String> {
     out
 }
 
-/// 「繰り返します」で 2 回読むか。津波は避難を呼びかける (警報・大津波警報がある) ときだけ
-fn repeats(ev: &Event, segs: &[String]) -> bool {
-    !segs.is_empty()
-        && match &ev.body {
-            EventBody::Quake(q) => q.info_type == QuakeInfoType::DetailScale,
-            EventBody::Tsunami(_) => segs.iter().any(|s| s == EVACUATE),
-            _ => false,
+/// 津波の繰り返しで、見出しごとに読む地名の数。超えたら「ほかの地域。」
+const REPEAT_AREA_LIMIT: usize = 3;
+
+/// 津波の報の 2 回目。見出しごとに、震源に近そうな地名 (ただちに来襲・到達済み・到達予想の早い順) を
+/// REPEAT_AREA_LIMIT まで読み、残りは「ほかの地域。」で切り上げる。長い報でも 1 本の上限に収まる
+fn tsunami_again(t: &Tsunami, segs: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut names: Vec<&str> = Vec::new();
+    let mut more = false;
+    let flush = |out: &mut Vec<String>, names: &mut Vec<&str>, more: &mut bool| {
+        names.sort_by_key(|n| {
+            t.areas
+                .iter()
+                .position(|a| a.name == *n)
+                .map(|i| (arrival_rank(&t.areas[i]), i))
+        });
+        out.extend(names.iter().take(REPEAT_AREA_LIMIT).map(|n| format!("{n}。")));
+        if *more || names.len() > REPEAT_AREA_LIMIT {
+            out.push(TSUNAMI_MORE.to_string());
         }
+        names.clear();
+        *more = false;
+    };
+    for s in segs {
+        if s == TSUNAMI_MORE {
+            more = true;
+        } else if s.ends_with("ました。") || s == EVACUATE {
+            flush(&mut out, &mut names, &mut more);
+            out.push(s.clone());
+        } else {
+            names.push(s.strip_suffix('。').unwrap_or(s));
+        }
+    }
+    flush(&mut out, &mut names, &mut more);
+    out
 }
 
-/// これより部品が多い報は、繰り返しで地名を読まない。全文を 2 回読むと 1 本の上限
-/// (cache::MAX_ANNOUNCE_SEGMENTS・MAX_ANNOUNCE_SAMPLES) を超え、大津波警報が読めなくなる
-const REPEAT_FULL_MAX: usize = 40;
-
-/// 津波の報の地名の部品か (「{地名}。」)。見出しの文は「〜ました。」「ほかの地域。」など決まった形
-fn is_area_name(s: &str) -> bool {
-    !(s.ends_with("ました。") || s == TSUNAMI_MORE || s == EVACUATE || s == FOLLOW_UP)
+/// 震源に近そうな順の鍵。ただちに来襲 → 到達中・到達を確認 (時刻でない状況) → 到達予想時刻の早い順 → 不明
+fn arrival_rank(a: &crate::quake::model::TsunamiArea) -> (u8, Option<&str>) {
+    if a.immediate {
+        return (0, None);
+    }
+    match a.first_height.as_deref() {
+        Some(f) if !f.starts_with(|c: char| c.is_ascii_digit()) => (1, None),
+        Some(f) => (2, Some(f)),
+        None => (3, None),
+    }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -705,7 +735,43 @@ mod tests {
     }
 
     #[test]
-    fn a_long_tsunami_warning_repeats_only_the_headlines_and_stays_within_the_limit() {
+    fn the_repeated_areas_are_those_the_tsunami_reaches_first() {
+        let at = |name: &str, grade, immediate, first: Option<&str>| TsunamiArea {
+            first_height: first.map(String::from),
+            immediate,
+            ..area(name, grade)
+        };
+        use TsunamiGrade::{MajorWarning, Warning};
+        let t = tsunami_ev(
+            false,
+            vec![
+                at("遠い", MajorWarning, false, None),
+                at("16時30分", MajorWarning, false, Some("2024/01/01 16:30:00")),
+                at("16時20分", MajorWarning, false, Some("2024/01/01 16:20:00")),
+                at("到達", MajorWarning, false, Some("第1波の到達を確認")),
+                at("ただちに", MajorWarning, true, None),
+                at("警報", Warning, false, None),
+            ],
+        );
+        let got = spoken_segments(&t, &[]);
+        let again = &got[got.iter().position(|x| x == REPEAT).unwrap() + 1..];
+        assert_eq!(
+            again,
+            s(&[
+                "大津波警報を発表しました。",
+                "ただちに。",
+                "到達。",
+                "16時20分。",
+                TSUNAMI_MORE,
+                "津波警報を発表しました。",
+                "警報。",
+                EVACUATE,
+            ])
+        );
+    }
+
+    #[test]
+    fn a_long_tsunami_warning_repeats_three_areas_per_grade_and_stays_within_the_limit() {
         // 大津波警報で全 66 予報区: 地名まで 2 回読むと部品の上限 (128) を超えて読めなくなる
         let areas = (0..66)
             .map(|i| area(&format!("予報区{i}"), TsunamiGrade::MajorWarning))
@@ -714,7 +780,17 @@ mod tests {
         let got = spoken_segments(&major, &[]);
         assert!(got.len() <= crate::tts::cache::MAX_ANNOUNCE_SEGMENTS, "{}", got.len());
         let again = &got[got.iter().position(|x| x == REPEAT).unwrap() + 1..];
-        assert_eq!(again, s(&["大津波警報を発表しました。", EVACUATE]));
+        assert_eq!(
+            again,
+            s(&[
+                "大津波警報を発表しました。",
+                "予報区0。",
+                "予報区1。",
+                "予報区2。",
+                TSUNAMI_MORE,
+                EVACUATE
+            ])
+        );
     }
 
     #[test]
