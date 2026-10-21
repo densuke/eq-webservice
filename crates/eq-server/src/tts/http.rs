@@ -195,7 +195,7 @@ async fn event<S: Synth>(
         events.push((*ev).clone());
     }
     let priors = priors_of(&ev, &events);
-    let segs = phrase::announce_segments(&ev, &priors);
+    let segs = phrase::spoken_segments(&ev, &priors);
     if segs.is_empty() {
         return StatusCode::NOT_FOUND.into_response();
     }
@@ -259,7 +259,7 @@ async fn announce<S: Synth>(
     // 位置で順序を決められるよう、対象を末尾に置く
     priors.push(event.clone());
     let p = priors_of(&event, &priors);
-    let segs = phrase::announce_segments(&event, &p);
+    let segs = phrase::spoken_segments(&event, &p);
     if segs.is_empty() {
         return StatusCode::NOT_FOUND.into_response();
     }
@@ -886,7 +886,7 @@ mod tests {
 
     /// 報が読む部品をすべてキャッシュに置く (合成器は fake)
     async fn warm(e: &Env, ev: &Event) {
-        for seg in phrase::announce_segments(ev, &[]) {
+        for seg in phrase::spoken_segments(ev, &[]) {
             e.cache.segment(&seg, None).await.unwrap();
         }
     }
@@ -1205,7 +1205,7 @@ mod tests {
     #[tokio::test]
     async fn two_stalled_receivers_do_not_keep_announce_at_503() {
         use tokio::io::AsyncWriteExt;
-        // 大きな WAV (約 12MB) を要求したまま読まない接続を 2 本。期限後に枠が戻り、続く正常な要求が 200 になる
+        // 大きな WAV (約 16MB) を要求したまま読まない接続を 2 本 (警報だと 2 回読んで上限を超えるので注意報)。期限後に枠が戻り、続く正常な要求が 200 になる
         let e = env_with(
             100_000_000,
             Fake {
@@ -1213,7 +1213,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        let ev = tsunami_event(&area_names(3), TsunamiGrade::Warning);
+        let ev = tsunami_event(&area_names(3), TsunamiGrade::Watch);
         warm(&e, &ev).await;
         let slots = Arc::new(Semaphore::new(2));
         let app = router_with_slots(
@@ -1250,14 +1250,14 @@ mod tests {
         wait_for_permits(&slots, 0).await;
         let (parts, _) = post_announce(
             app.clone(),
-            announce_json(tsunami_event(&area_names(3), TsunamiGrade::Warning), vec![]),
+            announce_json(tsunami_event(&area_names(3), TsunamiGrade::Watch), vec![]),
         )
         .await;
         assert_eq!(parts.status, StatusCode::SERVICE_UNAVAILABLE);
         wait_for_permits(&slots, 2).await; // 期限後に枠が戻る
         let (parts, body) = post_announce(
             app.clone(),
-            announce_json(tsunami_event(&area_names(3), TsunamiGrade::Warning), vec![]),
+            announce_json(tsunami_event(&area_names(3), TsunamiGrade::Watch), vec![]),
         )
         .await;
         assert_wav(&parts, &body);
