@@ -20,6 +20,7 @@ const TSUNAMI_MORE: &str = "ほかの地域。";
 const EVACUATE: &str = "海岸から離れ、高台に避難してください。";
 const WATCH_AREA_LIMIT: usize = 10;
 const USERQUAKE_REPORTED: &str = "揺れを感じたという報告が集まっています。";
+const REPEAT: &str = "繰り返します。";
 
 /// 震度の種類 (不明を除く)。46 は 5弱以上と推定。
 const SCALES: [Scale; 10] = [
@@ -224,6 +225,7 @@ pub fn fixed_segments() -> Vec<String> {
         TSUNAMI_MORE,
         EVACUATE,
         USERQUAKE_REPORTED,
+        REPEAT,
     ]
     .map(String::from);
     let scales = SCALES.iter().flat_map(|s| [max_sentence(*s), expected_sentence(*s)]);
@@ -493,6 +495,73 @@ pub fn announce_segments(ev: &Event, priors: &[&Event]) -> Vec<String> {
     }
 }
 
+/// 実際に読む部品。announce_segments に、地震情報の最終報 (各地の震度) と、
+/// 津波警報・大津波警報の入った津波の報だけ「繰り返します」と 2 回目を足す。docs/tts.md S13
+pub fn spoken_segments(ev: &Event, priors: &[&Event]) -> Vec<String> {
+    let segs = announce_segments(ev, priors);
+    if segs.is_empty() {
+        return segs;
+    }
+    let again = match &ev.body {
+        EventBody::Quake(q) if q.info_type == QuakeInfoType::DetailScale => segs.clone(),
+        EventBody::Tsunami(t) if segs.iter().any(|s| s == EVACUATE) => tsunami_again(t, &segs),
+        _ => return segs,
+    };
+    let mut out = segs;
+    out.push(REPEAT.to_string());
+    out.extend(again);
+    out
+}
+
+/// 津波の繰り返しで、見出しごとに読む地名の数。超えたら「ほかの地域。」
+const REPEAT_AREA_LIMIT: usize = 3;
+
+/// 津波の報の 2 回目。見出しごとに、震源に近そうな地名 (ただちに来襲・到達済み・到達予想の早い順) を
+/// REPEAT_AREA_LIMIT まで読み、残りは「ほかの地域。」で切り上げる。長い報でも 1 本の上限に収まる
+fn tsunami_again(t: &Tsunami, segs: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut names: Vec<&str> = Vec::new();
+    let mut more = false;
+    let flush = |out: &mut Vec<String>, names: &mut Vec<&str>, more: &mut bool| {
+        names.sort_by_key(|n| {
+            t.areas
+                .iter()
+                .position(|a| a.name == *n)
+                .map(|i| (arrival_rank(&t.areas[i]), i))
+        });
+        out.extend(names.iter().take(REPEAT_AREA_LIMIT).map(|n| format!("{n}。")));
+        if *more || names.len() > REPEAT_AREA_LIMIT {
+            out.push(TSUNAMI_MORE.to_string());
+        }
+        names.clear();
+        *more = false;
+    };
+    for s in segs {
+        if s == TSUNAMI_MORE {
+            more = true;
+        } else if s.ends_with("ました。") || s == EVACUATE {
+            flush(&mut out, &mut names, &mut more);
+            out.push(s.clone());
+        } else {
+            names.push(s.strip_suffix('。').unwrap_or(s));
+        }
+    }
+    flush(&mut out, &mut names, &mut more);
+    out
+}
+
+/// 震源に近そうな順の鍵。ただちに来襲 → 到達中・到達を確認 (時刻でない状況) → 到達予想時刻の早い順 → 不明
+fn arrival_rank(a: &crate::quake::model::TsunamiArea) -> (u8, Option<&str>) {
+    if a.immediate {
+        return (0, None);
+    }
+    match a.first_height.as_deref() {
+        Some(f) if !f.starts_with(|c: char| c.is_ascii_digit()) => (1, None),
+        Some(f) => (2, Some(f)),
+        None => (3, None),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -614,6 +683,114 @@ mod tests {
         assert!(segments(&ev("p2pquake", body.clone())).is_empty());
         assert!(!segments(&ev("replay", body.clone())).is_empty());
         assert!(!segments(&ev("demo", body)).is_empty());
+    }
+
+    #[test]
+    fn only_the_final_quake_report_is_repeated() {
+        // 2026-10-21 10:04 千葉県北西部: 各地の震度に関する情報 (最終報) は「繰り返します」で 2 回
+        let detail = quake_ev(quake(
+            QuakeInfoType::DetailScale,
+            "千葉県北西部",
+            Some(4.0),
+            Scale(20),
+            "None",
+        ));
+        let once = announce_segments(&detail, &[]);
+        let mut twice = once.clone();
+        twice.push(REPEAT.to_string());
+        twice.extend(once.clone());
+        assert_eq!(spoken_segments(&detail, &[]), twice);
+        // 続報の差分も、最終報なら 2 回
+        let prompt = quake_ev(quake(QuakeInfoType::ScalePrompt, "", None, Scale(20), "Unknown"));
+        let diff = spoken_segments(&detail, &[&prompt]);
+        assert_eq!(diff.iter().filter(|x| *x == REPEAT).count(), 1);
+        // 震度速報・震源に関する情報・緊急地震速報は 1 回
+        assert_eq!(spoken_segments(&prompt, &[]), announce_segments(&prompt, &[]));
+        let dest = quake_ev(quake(
+            QuakeInfoType::Destination,
+            "千葉県北西部",
+            Some(4.0),
+            Scale(20),
+            "None",
+        ));
+        assert!(!spoken_segments(&dest, &[]).contains(&REPEAT.to_string()));
+        let e = ev("p2pquake", EventBody::Eew(eew(true, false, false, Scale(55))));
+        assert!(!spoken_segments(&e, &[]).contains(&REPEAT.to_string()));
+    }
+
+    #[test]
+    fn tsunami_warnings_are_repeated_but_a_watch_alone_is_not() {
+        let warn = tsunami_ev(
+            false,
+            vec![area("A", TsunamiGrade::Warning), area("B", TsunamiGrade::Watch)],
+        );
+        let once = announce_segments(&warn, &[]);
+        let got = spoken_segments(&warn, &[]);
+        assert_eq!(got.len(), once.len() * 2 + 1);
+        assert_eq!(got[once.len()], REPEAT);
+        let watch = tsunami_ev(false, vec![area("B", TsunamiGrade::Watch)]);
+        assert_eq!(spoken_segments(&watch, &[]), announce_segments(&watch, &[]));
+        let cancelled = tsunami_ev(true, vec![]);
+        assert_eq!(spoken_segments(&cancelled, &[]), announce_segments(&cancelled, &[]));
+    }
+
+    #[test]
+    fn the_repeated_areas_are_those_the_tsunami_reaches_first() {
+        let at = |name: &str, grade, immediate, first: Option<&str>| TsunamiArea {
+            first_height: first.map(String::from),
+            immediate,
+            ..area(name, grade)
+        };
+        use TsunamiGrade::{MajorWarning, Warning};
+        let t = tsunami_ev(
+            false,
+            vec![
+                at("遠い", MajorWarning, false, None),
+                at("16時30分", MajorWarning, false, Some("2024/01/01 16:30:00")),
+                at("16時20分", MajorWarning, false, Some("2024/01/01 16:20:00")),
+                at("到達", MajorWarning, false, Some("第1波の到達を確認")),
+                at("ただちに", MajorWarning, true, None),
+                at("警報", Warning, false, None),
+            ],
+        );
+        let got = spoken_segments(&t, &[]);
+        let again = &got[got.iter().position(|x| x == REPEAT).unwrap() + 1..];
+        assert_eq!(
+            again,
+            s(&[
+                "大津波警報を発表しました。",
+                "ただちに。",
+                "到達。",
+                "16時20分。",
+                TSUNAMI_MORE,
+                "津波警報を発表しました。",
+                "警報。",
+                EVACUATE,
+            ])
+        );
+    }
+
+    #[test]
+    fn a_long_tsunami_warning_repeats_three_areas_per_grade_and_stays_within_the_limit() {
+        // 大津波警報で全 66 予報区: 地名まで 2 回読むと部品の上限 (128) を超えて読めなくなる
+        let areas = (0..66)
+            .map(|i| area(&format!("予報区{i}"), TsunamiGrade::MajorWarning))
+            .collect();
+        let major = tsunami_ev(false, areas);
+        let got = spoken_segments(&major, &[]);
+        assert!(got.len() <= crate::tts::cache::MAX_ANNOUNCE_SEGMENTS, "{}", got.len());
+        let again = &got[got.iter().position(|x| x == REPEAT).unwrap() + 1..];
+        assert_eq!(
+            again,
+            s(&[
+                "大津波警報を発表しました。",
+                "予報区0。",
+                "予報区1。",
+                "予報区2。",
+                TSUNAMI_MORE,
+                EVACUATE
+            ])
+        );
     }
 
     #[test]
