@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { makePlan } from "./demo.ts";
 import { GroupStore } from "./groups.ts";
-import { HISTORY_LEAD_MS, gatherEvents, hindsightOf, historyStart, sameQuakeEvents, skipRanges } from "./history.ts";
+import { HISTORY_LEAD_MS, gatherEvents, hindsightOf, historyStart, sameQuakeEvents, skipLabel, skipRanges } from "./history.ts";
 import { groupPlace } from "./quakes.ts";
 import { app } from "./state.ts";
 import type { EewEvent, EqEvent, QuakeEvent } from "./types.ts";
@@ -132,4 +132,10 @@ test("the hindsight origin is the eew second when there is one, else the minute 
   assert.equal(hindsightOf([quake("q", 5, 0), eew("e", "1", 1)])?.originMs, at(14, 0, 37));
   assert.equal(hindsightOf([quake("q", 5, 0)])?.originMs, at(14, 0, 0));
   assert.deepEqual(hindsightOf([quake("q", 5, 0, 24.4, 123)]), { lat: 24.4, lon: 123, depth: 10, originMs: at(14, 0, 0) });
+});
+
+test("the skip label says how much time was skipped", () => {
+  assert.equal(skipLabel(271_000), "4分31秒後");
+  assert.equal(skipLabel(60_000), "1分0秒後");
+  assert.equal(skipLabel(25_400), "25秒後");
 });

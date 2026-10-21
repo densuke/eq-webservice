@@ -68,6 +68,13 @@ export function skipRanges(ats: number[]): { from: number; to: number }[] {
   });
 }
 
+/** 時計を飛ばした長さの札 ("4分31秒後")。1 分未満は秒だけ */
+export function skipLabel(ms: number): string {
+  const sec = Math.round(ms / 1000);
+  const m = Math.floor(sec / 60);
+  return m > 0 ? `${m}分${sec % 60}秒後` : `${sec}秒後`;
+}
+
 /** 再生の始まりから出す、後の報で分かった震源と発生時刻 */
 export interface Hindsight extends Center {
   originMs: number;

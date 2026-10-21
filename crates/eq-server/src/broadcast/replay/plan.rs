@@ -32,6 +32,8 @@ pub struct Frame {
     pub applied: usize,
     /// 時計を飛ばした直後 (「早送り」を出す)
     pub fast_forward: bool,
+    /// このコマで時計を飛ばした (前のコマから続いていない)
+    pub jumped: bool,
     /// このコマで薄い ✕ と波を出す、のちに分かった震源 (始まっている地震のうち、いちばん新しいもの)
     pub hindsight: Option<Hindsight>,
 }
@@ -226,6 +228,7 @@ pub fn build(series: &Series, fps: u32) -> Option<Plan> {
             now_ms: now,
             applied,
             fast_forward,
+            jumped,
             hindsight,
         });
         // 最後の報のあと、地震の画面も波も無くなってから、数秒で終える
