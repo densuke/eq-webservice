@@ -366,7 +366,7 @@ v0.18.3 を本番で使った利用者の要望。
   - 待機中の枠が無ければ戻らない。そのときは利用者が YouTube Studio で枠を作る。
     - 枠を作る操作 (`liveBroadcasts.insert`・`transition`) は公開の操作なので、自動ではしない。
 - 置き方 (e2)
-  - `youtube_live_check.py` と `youtube-live-watch.sh` を `~/work/eq-e2cast/tools/` に置く。
+  - `youtube_live_check.py`・`youtube-live-watch.sh`・`restart-broadcast.sh`・`notify-discord.sh` を `~/work/eq-e2cast/tools/` に置く (つなぎ直しと Discord への知らせは `restart-broadcast.sh`。2026-10-21 から。Webhook は `~/.config/eq-notify` の `DISCORD_WEBHOOK_URL`、無ければ知らせない)。
   - `.service`・`.timer` を `~/.config/systemd/user/` に置き、`systemctl --user enable --now youtube-live-watch.timer`。
 - e2 全体が詰まっている間 (`/proc/pressure/io` か `/proc/pressure/memory` の full の 60 秒平均が 20% を超えるとき) は、つなぎ直しを見送る。2026-10-01 07:00 の詰まりで、つなぎ直しの連発が悪化させたため。
 - YouTube Studio の枠の設定で「自動終了」を切っておくと、短い途切れで枠が閉じにくくなる (利用者の操作)。
