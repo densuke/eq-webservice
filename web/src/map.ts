@@ -342,6 +342,8 @@ export class JapanMap {
     for (const name of this.areaColors.keys()) {
       this.areas.get(name)!.classList.toggle("forecast", this.areaForecast.has(name));
     }
+    // 細分区域の予測があれば、寄ったときは県の塗りを点滅させない (破線の区域だけが点滅する)
+    this.svg.classList.toggle("area-forecast", [...this.areaColors.keys()].some((n) => this.areaForecast.has(n)));
     // 観測点の点 (震度の大きいものほど上に)。下に黒い縁取りを敷く
     const paths = dotPaths(
       [...dots].sort((a, b) => a.scale - b.scale).map((d) => ({ ...d, color: scaleColor(d.scale) })),
