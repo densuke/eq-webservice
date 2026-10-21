@@ -30,7 +30,10 @@ bgm_url = ""
 
 # 送り先 (ffmpeg の引数)。$VAR は環境変数に置き換え、ログでは伏せる。
 # -progress は送り出しの様子を 1 秒ごとに書く。SD カードを削らないよう tmpfs (/run/user/<uid>) に書く
-output = ["-progress", "/run/user/1000/eq-progress.txt", "-f", "flv", "rtmps://a.rtmps.youtube.com/live2/$YOUTUBE_LIVE_API_KEY"]
+# YouTube だけなら: output = ["-progress", "/run/user/1000/eq-progress.txt", "-f", "flv", "rtmps://a.rtmps.youtube.com/live2/$YOUTUBE_LIVE_API_KEY"]
+# 2026-10-21: YouTube と Twitch へ同時に (ffmpeg の tee。1 回の圧縮で両方へ。片方が落ちても続く)。
+# tee では -map と FLV の codec tag (7 = H.264、10 = AAC) が要る (無いと「Output file does not contain any stream」「Tag [27] incompatible」で止まる)
+output = ["-progress", "/run/user/1000/eq-progress.txt", "-map", "0:v", "-map", "0:a", "-tag:v", "7", "-tag:a", "10", "-f", "tee", "[f=flv:onfail=ignore]rtmps://a.rtmps.youtube.com/live2/$YOUTUBE_LIVE_API_KEY|[f=flv:onfail=ignore]rtmps://ingest.global-contribute.live-video.net/app/$TWITCH_STREAM_KEY"]
 
 # 直近 15 分の録画 (ring) と、地震のときの切り出し (archive)。書き込みが多いので SSD に置く (microSD に書かない)
 [record]

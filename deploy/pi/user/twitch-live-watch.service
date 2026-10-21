@@ -1,0 +1,9 @@
+# ~/.config/systemd/user/twitch-live-watch.service に置く。タイマーは deploy/twitch-live-watch.timer
+[Unit]
+Description=eq-webservice Twitch のライブ配信の見張り (止まっていれば記録に残す。つなぎ直しはしない)
+
+[Service]
+Type=oneshot
+Slice=eq.slice
+# 認証情報 (TWITCH_CLIENT_ID・TWITCH_CLIENT_SECRET、権限 600) とチャンネルのログイン名は環境に合わせる
+ExecStart=%h/work/eq-e2cast/tools/twitch-live-watch.sh %h/.config/twitch-live-watch fugahogeds

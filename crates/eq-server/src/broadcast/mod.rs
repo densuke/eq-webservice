@@ -586,7 +586,14 @@ mod tests {
         let cfg: BroadcastConfig = toml::from_str(include_str!("../../../../deploy/broadcast.pi.toml")).unwrap();
         assert_eq!((cfg.source, cfg.fps, cfg.fps_calm), (Source::Native, 15, Some(10)));
         assert!(cfg.mixer && cfg.zoom && !cfg.mixes_bgm());
-        assert!(cfg.output.iter().any(|x| x.ends_with("$YOUTUBE_LIVE_API_KEY")));
+        // YouTube と Twitch へ tee で同時に送る (片方が落ちても続く)
+        let tee = cfg.output.iter().find(|x| x.contains('|')).unwrap();
+        assert!(
+            tee.contains("$YOUTUBE_LIVE_API_KEY")
+                && tee.contains("$TWITCH_STREAM_KEY")
+                && tee.contains("onfail=ignore")
+        );
+        assert!(cfg.output.windows(2).any(|w| w == ["-tag:v", "7"]));
         assert!(cfg.record.unwrap().ring_dir.starts_with("/opt/eq-cast"));
     }
 
