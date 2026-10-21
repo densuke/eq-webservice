@@ -169,9 +169,39 @@ impl SocialSink {
             .map_err(reqwest::Error::without_url)?;
         // キー (ヘッダ) を別の送り先へ転送しないよう、リダイレクトは追わずに失敗として扱う
         anyhow::ensure!(res.status().is_success(), "social: HTTP {}", res.status());
-        tracing::info!(targets = ?self.cfg.targets, "social: posted");
+        // 一部の投稿先だけ失敗しても HTTP 200 で返る (X の月の上限など)。中身の results を見る
+        let body: serde_json::Value = res.json().await.unwrap_or_default();
+        let (total, failed) = failures(&body);
+        if !failed.is_empty() {
+            tracing::warn!(
+                failed = failed.len(),
+                total,
+                "social: some targets failed: {}",
+                failed.join(" / ")
+            );
+        }
+        anyhow::ensure!(total == 0 || failed.len() < total, "social: all targets failed");
+        tracing::info!(targets = ?self.cfg.targets, ok = total - failed.len(), "social: posted");
         Ok(())
     }
+}
+
+/// 応答の results の数と、失敗したものの理由 (長いものは切る)。results の並びは頼んだ投稿先の順と限らない
+fn failures(body: &serde_json::Value) -> (usize, Vec<String>) {
+    let results = body["results"].as_array().map(Vec::as_slice).unwrap_or_default();
+    let failed = results
+        .iter()
+        .filter(|r| r["success"] != true)
+        .map(|r| {
+            r["error_message"]
+                .as_str()
+                .unwrap_or("理由なし")
+                .chars()
+                .take(200)
+                .collect()
+        })
+        .collect();
+    (results.len(), failed)
 }
 
 #[cfg(test)]
@@ -267,6 +297,21 @@ mod tests {
             post_text(1_792_544_684_399, &unknown, &[]),
             "緊急地震速報を検知しました: 2026/10/21 10:04:44\n発生源: 調査中\n予測最大震度: 5弱 (警報)"
         );
+    }
+
+    #[test]
+    fn reads_which_targets_failed_from_a_200_response() {
+        // 2026-10-21 に bluesky と x へ送ったときの実際の応答 (x は月の上限で失敗、並びは頼んだ順の逆)
+        let body = json!({"success": false, "results": [
+            {"success": false, "post_id": null, "error_message": "HTTP 403 Forbidden: {\"detail\":\"Your monthly spend cap has been reached.\"}"},
+            {"success": true, "post_id": "at://did:plc:x/app.bsky.feed.post/y", "error_message": null}
+        ]});
+        let (total, failed) = failures(&body);
+        assert_eq!(total, 2);
+        assert_eq!(failed.len(), 1);
+        assert!(failed[0].contains("spend cap"));
+        assert_eq!(failures(&json!({"success": true, "results": []})), (0, vec![]));
+        assert_eq!(failures(&serde_json::Value::Null), (0, vec![]));
     }
 
     #[tokio::test]
