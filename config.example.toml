@@ -79,6 +79,20 @@ enabled = false
 url = "http://127.0.0.1:9000/hook"
 # headers = { Authorization = "Bearer xxx" }
 
+# 自作の投稿ツール (複数の SNS へまとめて投稿する API) へ、緊急地震速報を投稿する。
+# 警報か予測最大震度が min_forecast 以上の最初の報で地震ごとに 1 回、投稿した地震が取り消されたら取り消しを 1 回。
+# テストの報・記録の再生は投稿しない。API キーは環境変数から読む (X-Api-Key ヘッダ)。
+# min_scale (共通キー) は使わない (取り消しの報は予測震度が不明なので、落とされてしまう)
+[[sinks]]
+type = "social"
+enabled = false
+kinds = ["eew"]
+url = "https://post.example.com/api/post"
+api_key_env = "SOCIAL_POST_API_KEY"
+targets = ["bluesky"]
+min_forecast = "3"
+footer = ["YouTube: https://youtube.com/@example/live", "Twitch: https://www.twitch.tv/example"]
+
 # 気象警報・注意報 (平時の地図に出す)。気象庁防災情報XML の集約通報を定期的に取得する
 [weather]
 enabled = true

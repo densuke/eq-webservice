@@ -10,6 +10,7 @@
 mod discord;
 mod jsonl;
 mod rss;
+mod social;
 mod webhook;
 
 use std::sync::Arc;
@@ -28,6 +29,7 @@ pub enum Sink {
     Discord(discord::DiscordSink),
     Jsonl(jsonl::JsonlSink),
     Webhook(webhook::WebhookSink),
+    Social(social::SocialSink),
 }
 
 impl Sink {
@@ -46,6 +48,7 @@ impl Sink {
             Sink::Discord(s) => s.handle(ev).await,
             Sink::Jsonl(s) => s.handle(ev).await,
             Sink::Webhook(s) => s.handle(ev).await,
+            Sink::Social(s) => s.handle(ev).await,
         }
     }
 
@@ -136,6 +139,7 @@ pub fn build(table: &toml::Table) -> anyhow::Result<Option<Loaded>> {
         "discord" => Sink::Discord(discord::DiscordSink::new(own.try_into().context("discord config")?)?),
         "jsonl" => Sink::Jsonl(jsonl::JsonlSink::new(own.try_into().context("jsonl config")?)),
         "webhook" => Sink::Webhook(webhook::WebhookSink::new(own.try_into().context("webhook config")?)?),
+        "social" => Sink::Social(social::SocialSink::new(own.try_into().context("social config")?)?),
         other => anyhow::bail!("unknown sink type {other:?}"),
     };
     Ok(Some(Loaded {
