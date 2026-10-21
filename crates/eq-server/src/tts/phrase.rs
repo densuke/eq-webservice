@@ -37,14 +37,15 @@ const SCALES: [Scale; 10] = [
 ];
 
 /// 津波の有無ごとの文 (地名を含まない)。
-const DOMESTIC_TSUNAMI: [(&[&str], &str); 4] = [
+const DOMESTIC_TSUNAMI: [(&[&str], &str); 5] = [
     (&["None"], "この地震による津波の心配はありません。"),
     (&["Checking"], "津波の有無は現在調査中です。"),
     (
         &["NonEffective"],
         "若干の海面変動があるかもしれませんが、被害の心配はありません。",
     ),
-    (&["Watch", "Warning"], "津波警報などが発表されています。"),
+    (&["Watch"], "津波注意報が発表されています。"),
+    (&["Warning"], "津波警報などが発表されています。"),
 ];
 
 /// 津波の grade を重い順に。
@@ -867,7 +868,7 @@ mod tests {
                 "NonEffective",
                 Some("若干の海面変動があるかもしれませんが、被害の心配はありません。"),
             ),
-            ("Watch", Some("津波警報などが発表されています。")),
+            ("Watch", Some("津波注意報が発表されています。")),
             ("Warning", Some("津波警報などが発表されています。")),
             ("Unknown", None),
         ];
