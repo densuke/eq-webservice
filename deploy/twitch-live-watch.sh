@@ -1,6 +1,6 @@
 #!/bin/bash
-# Twitch のライブ配信が配信中かを見張り、2 回続けて止まっていたら記録 (journal) に残す。つなぎ直しはしない
-# (YouTube と同じ ffmpeg (tee) で送っているので、つなぎ直すと YouTube も数秒途切れる。人が決める)。
+# Twitch のライブ配信が配信中かを見張り、2 回続けて止まっていたら配信をつなぎ直す (Discord にも知らせる。restart-broadcast.sh)。
+# YouTube と同じ ffmpeg (tee) で送っているので、つなぎ直すと YouTube も数秒途切れる。
 # 1 回の見張りでは、NG なら 1 分おきに 3 回まで確かめ、3 回とも NG のときだけ NG と数える (youtube-live-watch.sh と同じ)。
 # 使い方: twitch-live-watch.sh <認証情報のファイル> <チャンネルのログイン名>  (systemd のタイマーから 5 分ごと)
 set -u
@@ -23,4 +23,4 @@ if [ ! -f "$state/ng" ]; then
   touch "$state/ng"
   exit 0
 fi
-echo "WARN 2 回続けて Twitch が配信中でない。つなぎ直すなら: systemctl --user restart eq-broadcast (YouTube も数秒途切れる)"
+"$here/restart-broadcast.sh" "Twitch が 2 回続けて配信中でない" && rm -f "$state/ng"

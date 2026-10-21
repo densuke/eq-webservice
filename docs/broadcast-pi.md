@@ -12,7 +12,8 @@ YouTube のライブ配信 (`eq-server broadcast`、native) を、n2 (GCE) か�
 - `deploy/pi/user/` → `~/.config/systemd/user/`。
   - `eq-broadcast.service`: `Slice=eq.slice`・`CPUWeight=1000`。CPU とメモリの上限は付けない。`After=network-online.target` だけで、`PartOf` / `After=eq-server.service` は付けない (eq-server を動かさないため)。
   - `youtube-live-watch.service`: `Slice=eq.slice`。タイマーは `deploy/youtube-live-watch.timer` のまま。
-  - `twitch-live-watch.service`: `Slice=eq.slice`。タイマーは `deploy/twitch-live-watch.timer`。Twitch へも同時に送るとき (cast.toml の `output` を ffmpeg の `tee` にする。`-map 0:v -map 0:a -tag:v 7 -tag:a 10` が要る) に、Helix の Get Streams で 5 分ごとに配信中かを見て、2 回続けて止まっていれば journal に WARN を残す。つなぎ直しはしない (同じ ffmpeg なので YouTube も途切れる)。認証は `~/.config/twitch-live-watch` (600) の `TWITCH_CLIENT_ID`・`TWITCH_CLIENT_SECRET` (dev.twitch.tv のアプリ。名前に「twitch」は使えない)。`twitch_live_check.py` と `twitch-live-watch.sh` を `~/work/eq-e2cast/tools/` に置く。
+  - `twitch-live-watch.service`: `Slice=eq.slice`。タイマーは `deploy/twitch-live-watch.timer`。Twitch へも同時に送るとき (cast.toml の `output` を ffmpeg の `tee` にする。`-map 0:v -map 0:a -tag:v 7 -tag:a 10` が要る) に、Helix の Get Streams で 5 分ごとに配信中かを見て、2 回続けて止まっていれば配信をつなぎ直す (同じ ffmpeg なので YouTube も数秒途切れる)。認証は `~/.config/twitch-live-watch` (600) の `TWITCH_CLIENT_ID`・`TWITCH_CLIENT_SECRET` (dev.twitch.tv のアプリ。名前に「twitch」は使えない)。
+  - つなぎ直しは YouTube・Twitch の見張りとも `restart-broadcast.sh` (配信が詰まっている間は見送る・15 分に 1 回まで、記録は両方で共有)。つなぎ直す前に `notify-discord.sh` が Discord に知らせる (Webhook は `~/.config/eq-notify` (600) の `DISCORD_WEBHOOK_URL`。無ければ知らせない)。`*_live_check.py`・`*-live-watch.sh`・`restart-broadcast.sh`・`notify-discord.sh` を `~/work/eq-e2cast/tools/` に置く。
   - `eq-replay-worker.service`: `Slice=eq.slice`・`CPUQuota=10%`・`MemoryMax=100M`。
   - `eq.slice.d/50-eq.conf`: `CPUWeight=1000`・`MemoryLow=512M`。
   - `app.slice.d/50-desktop-cap.conf`: 配信するユーザー自身のデスクトップの上限。`session.slice.d/` にも同じものを置く。

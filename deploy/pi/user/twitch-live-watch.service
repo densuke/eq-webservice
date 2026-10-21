@@ -1,6 +1,6 @@
 # ~/.config/systemd/user/twitch-live-watch.service に置く。タイマーは deploy/twitch-live-watch.timer
 [Unit]
-Description=eq-webservice Twitch のライブ配信の見張り (止まっていれば記録に残す。つなぎ直しはしない)
+Description=eq-webservice Twitch のライブ配信の見張り (止まっていれば配信をつなぎ直す)
 
 [Service]
 Type=oneshot
