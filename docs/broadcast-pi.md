@@ -7,7 +7,7 @@ YouTube のライブ配信 (`eq-server broadcast`、native) を、n2 (GCE) か�
 
 ## 1. ファイル
 
-- `deploy/broadcast.pi.toml` → `~/work/eq-e2cast/cast.toml`。broadcast.e2.toml との違いは、`server = "https://eq.fuga.jp"`、`fps = 15` (地震)・`fps_calm = 10`、`zoom = true`、`encode` の `-threads 2`、`mixer = true`・`voice = true`、`audio_bitrate = "64k"`、`bgm_url = ""`、`[record]` を SSD に、`-progress` を tmpfs (`/run/user/<uid>`) に書くこと。
+- `deploy/broadcast.pi.toml` → `~/work/eq-e2cast/cast.toml`。broadcast.e2.toml との違いは、`server = "https://eq.fuga.jp"`、`fps = 15` (地震)・`fps_calm = 10`、`zoom = true`、`encode` の `-threads 2`、`mixer = true`・`voice = true`、`audio_bitrate = "64k"`、`bgm_url = ""`、`[record]` を SSD に置くこと。`-progress` は付けない (ffmpeg が書き足し続け、tmpfs で 1 日 約 30MB 増える。2026-10-23)。
 - `deploy/replay.pi.toml` → `~/work/eq-e2cast/replay.toml`。replay.e2.toml との違いは、`events = "https://eq.fuga.jp"`、`cpu_quota = "100%"`、`memory_max = "1G"`、作業場所を SSD に置くこと。
 - `deploy/pi/user/` → `~/.config/systemd/user/`。
   - `eq-broadcast.service`: `Slice=eq.slice`・`CPUWeight=1000`。CPU とメモリの上限は付けない。`After=network-online.target` だけで、`PartOf` / `After=eq-server.service` は付けない (eq-server を動かさないため)。
