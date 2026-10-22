@@ -20,6 +20,7 @@ mod quake;
 mod source;
 mod telop;
 mod tts;
+mod twitch_viewers;
 mod weather;
 mod ws_guard;
 mod youtube;
@@ -125,7 +126,8 @@ async fn main() -> anyhow::Result<()> {
                         "viewers: interval_sec は 10〜300 秒に収めます"
                     );
                 }
-                youtube_viewers::spawn(cfg.viewers.clone(), viewers.clone())
+                youtube_viewers::spawn(cfg.viewers.clone(), viewers.clone());
+                twitch_viewers::spawn(cfg.viewers.clone(), viewers.clone())
             }
             Err(e) => tracing::warn!("{e}"),
         }
