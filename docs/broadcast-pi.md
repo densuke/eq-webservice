@@ -14,6 +14,8 @@ YouTube のライブ配信 (`eq-server broadcast`、native) を、n2 (GCE) か�
   - `youtube-live-watch.service`: `Slice=eq.slice`。タイマーは `deploy/youtube-live-watch.timer` のまま。
   - `twitch-live-watch.service`: `Slice=eq.slice`。タイマーは `deploy/twitch-live-watch.timer`。Twitch へも同時に送るとき (cast.toml の `output` を ffmpeg の `tee` にする。`-map 0:v -map 0:a -tag:v 7 -tag:a 10` が要る) に、Helix の Get Streams で 5 分ごとに配信中かを見て、2 回続けて止まっていれば配信をつなぎ直す (同じ ffmpeg なので YouTube も数秒途切れる)。認証は `~/.config/twitch-live-watch` (600) の `TWITCH_CLIENT_ID`・`TWITCH_CLIENT_SECRET` (dev.twitch.tv のアプリ。名前に「twitch」は使えない)。
   - つなぎ直しは YouTube・Twitch の見張りとも `restart-broadcast.sh` (配信が詰まっている間は見送る・15 分に 1 回まで、記録は両方で共有)。つなぎ直す前に `notify-discord.sh` が Discord に知らせる (Webhook は `~/.config/eq-notify` (600) の `DISCORD_WEBHOOK_URL`。無ければ知らせない)。`*_live_check.py`・`*-live-watch.sh`・`restart-broadcast.sh`・`notify-discord.sh` を `~/work/eq-e2cast/tools/` に置く。
+  - `weekly-restart.service`・`weekly-restart.timer`: 週 1 回、土曜 04:05 (n2 のメンテナンスのお断り 04:00〜04:15 の中) に配信をつなぎ直す。地震の対応中 (配信の状態のファイルが古い・平時になってから 30 分未満も同じ) なら日曜 04:05 に回し、日曜も対応中ならその週はあきらめて Discord に知らせる。つなぎ直しは `restart-broadcast.sh` (Discord に知らせる)。`weekly-restart.sh` を `~/work/eq-e2cast/tools/` に置く。
+  - Ubuntu 26.04 の date は uutils で、`%3N` (ミリ秒) が効かない (ナノ秒の 19 桁が出る)。ミリ秒は `$(( $(date +%s%N) / 1000000 ))` で出す。
   - `eq-replay-worker.service`: `Slice=eq.slice`・`CPUQuota=10%`・`MemoryMax=100M`。
   - `eq.slice.d/50-eq.conf`: `CPUWeight=1000`・`MemoryLow=512M`。
   - `app.slice.d/50-desktop-cap.conf`: 配信するユーザー自身のデスクトップの上限。`session.slice.d/` にも同じものを置く。
