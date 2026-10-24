@@ -11,6 +11,7 @@ use super::hindsight::{self, Hindsight};
 use super::icon::Icons;
 use super::model::same_quake;
 use super::notice::Notices;
+use super::replay_info::ReplayInfo;
 use super::shaken::Point;
 use super::spread::{self, Spread};
 use super::{eew, model, quake_band, yuv, HISTORY};
@@ -37,6 +38,8 @@ pub struct Input<'a> {
     pub flip_s: u64,
     /// 記録から描き直すとき、のちの報で分かった震源 (ライブは None)
     pub hindsight: Option<&'a Hindsight>,
+    /// 記録から描き直すときだけの情報 (最初の円に合わせて灯す観測点・あらまし)。ライブは None
+    pub replay: Option<&'a ReplayInfo<'a>>,
     /// 記録から描き直すとき、時計を飛ばした直後か (ライブは false)
     pub fast_forward: bool,
     /// 状態の札 (ライブだけが入れる。再現動画は None)
@@ -279,8 +282,12 @@ impl Stepper {
         let pending = hindsight::pending(i.hindsight, &groups, &eews);
         let view = self.aim_camera(current, &eews, pending, now, i.fast_forward);
         self.aim_sub(current, &eews);
-        // 揺れの広がりの再現は、地震の画面の地震が観測点の値の入った地震情報のときだけ
-        let spread = quake.and_then(|q| spread::spread_of(i.events, q, self.renderer.zones(), now));
+        // 揺れの広がりの再現は、地震の画面の地震が観測点の値の入った地震情報のときだけ。
+        // 記録から描き直すときは、最初の円に合わせて観測点を灯しているので、描き直さない (その時刻にまた揺れたように見えるため)
+        let spread = match i.replay.and_then(|r| r.foresight.as_ref()) {
+            Some(_) => None,
+            None => quake.and_then(|q| spread::spread_of(i.events, q, self.renderer.zones(), now)),
+        };
         // 地震波は地震の画面のときだけ描く (のちに分かった震源の波は、平時の画面でも描く)
         // 円は寄りの地震の揺れた範囲で止める。shortcut: 同時に起きた別の地震の円も同じ半径で止める、重なる地震が増えたら地震ごとに
         let cap = wave_cap_km(aim_of(&self.renderer, current, &eews, pending).as_ref());
@@ -334,6 +341,7 @@ impl Stepper {
                 viewers: i.viewers,
                 notices: i.notices,
                 spread,
+                replay: i.replay,
             };
             let still = if layered {
                 Still::Layered(self.renderer.render_layers(&scene))

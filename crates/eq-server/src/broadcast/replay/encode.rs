@@ -13,7 +13,7 @@ use super::plan::{duration_ms, Frame, Plan};
 use super::voice::{self, Clip};
 use super::Options;
 use crate::broadcast::mixer::{AudioMixer, Notice, RATE};
-use crate::broadcast::native::{Icons, Input, Stepper};
+use crate::broadcast::native::{foresight_of, intro_lines, Icons, Input, ReplayInfo, Stepper};
 use crate::broadcast::psi::Throttle;
 use crate::quake::Event;
 
@@ -152,7 +152,14 @@ pub async fn encode_audio(
 }
 
 /// 1 コマの描画の入力。配信の状態の札 (混雑中・途切れ) は、手元で描き直す動画には出さないので、必ず None
-fn frame_input<'a>(label: &'a str, events: &'a [Event], f: &'a Frame, icons: &'a Icons, check_ms: u64) -> Input<'a> {
+fn frame_input<'a>(
+    label: &'a str,
+    events: &'a [Event],
+    f: &'a Frame,
+    icons: &'a Icons,
+    check_ms: u64,
+    replay: Option<&'a ReplayInfo<'a>>,
+) -> Input<'a> {
     Input {
         events: &events[..f.applied],
         now: f.now_ms,
@@ -167,6 +174,7 @@ fn frame_input<'a>(label: &'a str, events: &'a [Event], f: &'a Frame, icons: &'a
         check_ms,
         flip_s: 0,
         hindsight: f.hindsight.as_ref(),
+        replay,
         fast_forward: f.fast_forward,
         status: None,
         viewers: None,
@@ -189,9 +197,18 @@ pub async fn encode_video(
     let check_ms = 1000 / u64::from(o.fps);
     let mut last: Vec<u8> = Vec::new();
     let mut dissolve = Dissolve::new(o.transition, o.transition_ms, o.fps);
+    // あらましは地震 (のちに分かった発生時刻) ごとに 1 度だけ作る
+    let mut intros: std::collections::HashMap<i64, Vec<String>> = std::collections::HashMap::new();
     for (i, f) in plan.frames.iter().enumerate() {
         throttle.wait().await?;
-        let input = frame_input(&o.label, events, f, &icons, check_ms);
+        if let Some(h) = &f.hindsight {
+            intros.entry(h.origin_ms).or_insert_with(|| intro_lines(events, h));
+        }
+        let info = f.hindsight.as_ref().map(|h| ReplayInfo {
+            foresight: foresight_of(events, h),
+            intro: intros.get(&h.origin_ms).map_or(&[][..], Vec::as_slice),
+        });
+        let input = frame_input(&o.label, events, f, &icons, check_ms, info.as_ref());
         // 前のコマと同じなら、描き直さずに同じ画面を渡す
         if let Some(out) = stepper.step(&input) {
             last = out.i420;
@@ -315,7 +332,7 @@ mod tests {
             hindsight: None,
         };
         let icons = Icons::new();
-        let input = frame_input("記録から再現", &[], &f, &icons, 200);
+        let input = frame_input("記録から再現", &[], &f, &icons, 200, None);
         assert_eq!(input.status, None);
         assert_eq!(input.notices, None);
     }

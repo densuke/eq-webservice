@@ -114,6 +114,7 @@ pub(super) fn scene<'a>(
     weather: Option<&'a CityWeather>,
 ) -> Scene<'a> {
     Scene {
+        replay: None,
         icons: &NO_ICONS,
         flip_s: 0,
         quake,
@@ -934,6 +935,7 @@ fn eew_event(origin_ms: u64, at: (f64, f64)) -> Event {
 
 fn input<'a>(events: &'a [Event], now: u64, h: Option<&'a Hindsight>) -> Input<'a> {
     Input {
+        replay: None,
         events,
         now,
         rev: events.len() as u64,

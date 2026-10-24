@@ -25,6 +25,7 @@ use super::panel;
 use super::placed::Placed;
 use super::pref_list;
 use super::quake_band;
+use super::replay_info::{Foresight, ReplayInfo};
 use super::shaken::{Stations, Zones};
 use super::spread::{self, Spread};
 use super::test_mark;
@@ -77,6 +78,8 @@ pub struct Scene<'a> {
     pub notices: Option<&'a Notices>,
     /// 揺れの広がりの再現の最中なら、その再現 (S 波が届いた観測点だけを灯す)
     pub spread: Option<Spread>,
+    /// 記録から描き直すときだけの情報 (最初の円に合わせて灯す観測点・あらまし)。ライブは None
+    pub replay: Option<&'a ReplayInfo<'a>>,
 }
 
 /// 波の円を挟んで描くための絵: 札・時計・凡例まで重ねた 1 枚と、そのうち札などが塗っている画素 (波はそこを塗らない)。
@@ -370,14 +373,21 @@ impl Renderer {
                 }
             }
             tsunami_coast::draw(t.low(), f, &self.coast, scene.tsunami);
+            if let Some(fs) = foresight_shown(scene) {
+                draw_foresight(&mut t, &self.zones, f, &fs, scene.now_ms);
+            }
             if let Some(h) = scene.hindsight {
                 draw_hindsight(t.top(), &mut self.text, f, h);
             }
         }
-        if scene.spread.is_some() && self.text.enabled() {
+        let label = match foresight_shown(scene) {
+            Some(fs) if fs.waving(scene.now_ms) => Some(FORESIGHT_LABEL),
+            _ => scene.spread.map(|_| SPREAD_LABEL),
+        };
+        if let (Some(label), true) = (label, self.text.enabled()) {
             // 右上 (左上は南西諸島の別枠と重なる)
             self.text
-                .draw_right(t.top(), SPREAD_LABEL, main.right() - 12.0, main.y + 22.0, 13.0, TEXT);
+                .draw_right(t.top(), label, main.right() - 12.0, main.y + 22.0, 13.0, TEXT);
         }
         panel::draw_dynamic(t.top(), &mut self.text, scene, &placed);
         if let (Some(f), Some(at), true) = (&self.sub, placed.sub, scene.quake.is_some() || scene.eew.is_some()) {
@@ -557,6 +567,31 @@ fn draw_hindsight(pm: &mut Pixmap, text: &mut Text, frame: &Frame, h: &Hindsight
 
 /// 揺れの広がりの再現の最中に、本図の右上に出す案内
 const SPREAD_LABEL: &str = "揺れの広がり (再現)";
+/// 記録から描き直すとき、最初の円に合わせてのちの観測点を灯している間の案内
+const FORESIGHT_LABEL: &str = "揺れの広がり (のちの観測値で再現)";
+
+/// 最初の円に合わせて灯す観測点を出すか。本物の観測点 (各地の震度) が地震の画面に出たら、そちらに任せる
+fn foresight_shown<'a>(scene: &Scene<'a>) -> Option<Foresight<'a>> {
+    let fs = scene.replay?.foresight?;
+    let real = scene.quake.is_some_and(|q| q.points.iter().any(|p| !p.is_area));
+    (!real).then_some(fs)
+}
+
+/// のちの観測点のうち、最初の円の S 波が届いた点を描く (draw_shake の点と同じ見た目)
+fn draw_foresight(t: &mut Target, zones: &Zones, frame: &Frame, fs: &Foresight, now_ms: u64) {
+    let s = fs.spread();
+    let r = frame.dot_radius();
+    let points: Vec<_> = fs.points.iter().map(super::model::to_point).collect();
+    for (lon, lat, sc) in zones.dots(&points) {
+        if !spread::lit(&s, now_ms, lon, lat) {
+            continue;
+        }
+        if let Some((x, y)) = frame.dot_at(lon, lat) {
+            circle(t.low(), x, y, r + 0.7, LAND_EDGE, 0.8);
+            circle(t.low(), x, y, r, scale_color(sc), 1.0);
+        }
+    }
+}
 
 /// 地震の画面に描く揺れ (地震情報の観測、または緊急地震速報の予測)
 struct Shake<'a> {
