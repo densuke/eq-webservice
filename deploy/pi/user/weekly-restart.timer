@@ -1,0 +1,10 @@
+[Unit]
+Description=eq-webservice 週 1 回の配信のつなぎ直し (土曜・日曜の 04:05。n2 のメンテナンスのお断りの時間)
+
+[Timer]
+OnCalendar=Sat,Sun *-*-* 04:05:00
+# 時間を過ぎてから (電源が戻ったときなど) まとめて動かさない。メンテナンスの時間の外でつなぎ直さないため
+Persistent=false
+
+[Install]
+WantedBy=timers.target
