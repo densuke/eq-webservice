@@ -1,19 +1,21 @@
 //! ブラウザ向け HTTP / WebSocket。
 //!
-//! - `GET /ws`         : 接続時に `hello` (サーバ時刻 + 直近イベント)、以後 `event` を push
+//! - `GET /ws`         : 接続時に `hello` (サーバ時刻 + 直近イベント)、以後 `event` を push。
+//!   `?broadcast=1` は配信の接続で、web の同接 (`web_clients`) に数えない
 //! - `GET /api/events` : 直近イベントの JSON (WebSocket を使えないクライアント向け)
 //! - `GET /api/source` : 取得元の種類 (`p2pquake` | `replay`)
 //! - `GET /api/archive`: 過去の情報 (jsonl の sink があるときだけ。archive.rs)
 //! - `GET /healthz`   : 死活監視
 //! - それ以外          : `static_dir` の静的ファイル
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use crate::quake::Event;
 use axum::extract::ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade};
 use axum::extract::{ConnectInfo, State};
-use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
+use axum::http::{header, HeaderMap, HeaderValue, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
@@ -54,6 +56,34 @@ const MAX_CLIENT_MESSAGE: usize = 16 * 1024;
 /// 同時につなげるブラウザの数。つなぎっぱなしで大量に開かれてもメモリを使い切らないように (e2 はメモリ 1GB)
 const MAX_CLIENTS: usize = 500;
 static CLIENTS: Semaphore = Semaphore::const_new(MAX_CLIENTS);
+
+/// 今つないでいるブラウザの数 (配信の接続は除く)。/api/viewers の web に出す
+static WEB_CLIENTS: AtomicUsize = AtomicUsize::new(0);
+
+pub fn web_clients() -> u64 {
+    WEB_CLIENTS.load(Ordering::Relaxed) as u64
+}
+
+/// つないでいる間、web の同接に 1 足す (切れたら戻す)
+struct WebViewer;
+
+impl WebViewer {
+    fn new() -> Self {
+        WEB_CLIENTS.fetch_add(1, Ordering::Relaxed);
+        WebViewer
+    }
+}
+
+impl Drop for WebViewer {
+    fn drop(&mut self) {
+        WEB_CLIENTS.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+/// 配信 (native・chrome) の接続か。クエリに `broadcast` があれば配信
+fn is_broadcast(query: Option<&str>) -> bool {
+    query.is_some_and(|q| q.split('&').any(|kv| kv.split('=').next() == Some("broadcast")))
+}
 
 /// `GET /api/source` : 情報の取得元の種類 (`p2pquake` | `replay`)。配信が、記録の再生をテスト表示なしで流さないための確認に使う
 pub fn source_router(kind: &'static str) -> Router {
@@ -107,6 +137,7 @@ async fn ws_handler(
     State((hub, guard)): State<(Arc<Hub>, Arc<WsGuard>)>,
     peer: Option<axum::Extension<ConnectInfo<std::net::SocketAddr>>>,
     headers: HeaderMap,
+    uri: Uri,
 ) -> Response {
     let text = |name| headers.get(name).and_then(|v| v.to_str().ok());
     // 他サイトのページから、閲覧者のブラウザを使って接続枠を消費させない
@@ -128,8 +159,10 @@ async fn ws_handler(
         tracing::debug!("too many WebSocket clients");
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
+    let counted = !is_broadcast(uri.query());
     ws.max_message_size(MAX_CLIENT_MESSAGE)
         .on_upgrade(move |socket| async move {
+            let _viewer = counted.then(WebViewer::new);
             client(socket, hub, guard, ip_permit).await;
             drop(permit);
         })
@@ -201,6 +234,15 @@ mod tests {
     use axum::body::{to_bytes, Body};
     use axum::http::Request;
     use tower::ServiceExt;
+
+    #[test]
+    fn broadcast_query_is_not_a_web_viewer() {
+        assert!(is_broadcast(Some("broadcast=1")));
+        assert!(is_broadcast(Some("a=b&broadcast")));
+        assert!(!is_broadcast(None));
+        assert!(!is_broadcast(Some("")));
+        assert!(!is_broadcast(Some("notbroadcast=1&layout=x")));
+    }
 
     fn test_guard() -> Arc<WsGuard> {
         WsGuard::new(crate::ws_guard::WsLimits::new(32, 30), vec![], vec![])

@@ -1,5 +1,6 @@
-//! YouTube ライブの同時視聴者数。設定で有効なときだけ、一定間隔で YouTube Data API (videos.list) から取って保持し、
-//! `GET /api/viewers` で返す (外の API を呼ぶのはここだけ)。取れない・ライブでない・非表示のときは viewers が null。
+//! 同時視聴者数。設定で有効なときだけ、一定間隔で YouTube Data API (videos.list) から取って保持し、
+//! `GET /api/viewers` で返す。viewers は YouTube・Twitch (twitch_viewers.rs)・web (/ws の接続数) の合計で、
+//! 内訳も youtube・twitch・web に載せる。取れない・ライブでない・非表示の配信は null (合計に入れない)。
 //!
 //! 認証は API キー (`api_key`) か、OAuth の資格情報 JSON (`token_file`。refresh_token でアクセストークンを取り直す)。
 //! 動画は `video_id` で固定するか、`channel_id` で今の live を探す (見つけたら覚え、ライブでなくなったときだけ探し直す)。
@@ -36,6 +37,10 @@ pub struct ViewersConfig {
     pub video_id: String,
     /// その時の live の動画を探す
     pub channel_id: String,
+    /// Twitch のアプリの Client ID (秘密は環境変数 TWITCH_CLIENT_SECRET)。空なら Twitch は取らない
+    pub twitch_client_id: String,
+    /// Twitch のチャンネル名 (ログイン名)
+    pub twitch_login: String,
 }
 
 impl Default for ViewersConfig {
@@ -47,6 +52,8 @@ impl Default for ViewersConfig {
             token_file: String::new(),
             video_id: String::new(),
             channel_id: String::new(),
+            twitch_client_id: String::new(),
+            twitch_login: String::new(),
         }
     }
 }
@@ -61,6 +68,8 @@ impl std::fmt::Debug for ViewersConfig {
             .field("token_file", &self.token_file)
             .field("video_id", &self.video_id)
             .field("channel_id", &self.channel_id)
+            .field("twitch_client_id", &self.twitch_client_id)
+            .field("twitch_login", &self.twitch_login)
             .finish()
     }
 }
@@ -79,15 +88,44 @@ impl ViewersConfig {
         if self.video_id.is_empty() == self.channel_id.is_empty() {
             return Err("viewers: video_id か channel_id のどちらか 1 つを指定してください");
         }
+        if self.twitch_client_id.is_empty() != self.twitch_login.is_empty() {
+            return Err("viewers: Twitch は twitch_client_id と twitch_login を両方指定してください");
+        }
+        // URL にそのまま載せるので、Twitch のログイン名に使える文字だけにする
+        if !self
+            .twitch_login
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        {
+            return Err("viewers: twitch_login は英数字と _ だけです");
+        }
         Ok(())
     }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct Viewers {
+    /// 合計 (応答を作るときに answer が入れる)
     pub viewers: Option<u64>,
+    pub youtube: Option<u64>,
+    pub twitch: Option<u64>,
+    /// /ws の接続数 (応答を作るときに answer が入れる)
+    pub web: Option<u64>,
     pub video_id: String,
     pub updated_ms: i64,
+}
+
+/// 保持している値と今の web の接続数から応答を作る。無効 (updated_ms 0) なら web も出さない
+pub fn answer(held: &Viewers, web: u64) -> Viewers {
+    if held.updated_ms == 0 {
+        return held.clone();
+    }
+    let web = Some(web);
+    Viewers {
+        viewers: Some([held.youtube, held.twitch, web].into_iter().flatten().sum()),
+        web,
+        ..held.clone()
+    }
 }
 
 pub type Shared = Arc<RwLock<Viewers>>;
@@ -176,11 +214,17 @@ fn now_ms() -> i64 {
 }
 
 fn set(shared: &Shared, viewers: Option<u64>, video: &str) {
-    *shared.write().unwrap() = Viewers {
-        viewers,
-        video_id: video.to_string(),
-        updated_ms: now_ms(),
-    };
+    let mut v = shared.write().unwrap();
+    v.youtube = viewers;
+    v.video_id = video.to_string();
+    v.updated_ms = now_ms();
+}
+
+/// Twitch の値を入れる (YouTube の値はそのまま)
+pub fn set_twitch(shared: &Shared, viewers: Option<u64>) {
+    let mut v = shared.write().unwrap();
+    v.twitch = viewers;
+    v.updated_ms = now_ms();
 }
 
 /// 取得の状態 (覚えた動画 ID・前回の状態・最後に探した時刻)
@@ -251,7 +295,7 @@ pub fn spawn(cfg: ViewersConfig, shared: Shared) {
 pub fn router(shared: Shared) -> Router {
     Router::new().route(
         "/api/viewers",
-        get(move || async move { Json(shared.read().unwrap().clone()) }),
+        get(move || async move { Json(answer(&shared.read().unwrap(), crate::http::web_clients())) }),
     )
 }
 
@@ -310,6 +354,36 @@ mod tests {
     }
 
     #[test]
+    fn answer_sums_youtube_twitch_and_web() {
+        let held = Viewers {
+            youtube: Some(10),
+            twitch: Some(3),
+            video_id: "v".into(),
+            updated_ms: 5,
+            ..Default::default()
+        };
+        let a = answer(&held, 2);
+        assert_eq!(
+            (a.viewers, a.youtube, a.twitch, a.web),
+            (Some(15), Some(10), Some(3), Some(2))
+        );
+        assert_eq!((a.video_id.as_str(), a.updated_ms), ("v", 5));
+        // 配信が取れていなくても web の分は出す
+        let web_only = Viewers {
+            updated_ms: 5,
+            ..Default::default()
+        };
+        assert_eq!(answer(&web_only, 4).viewers, Some(4));
+    }
+
+    #[test]
+    fn answer_is_empty_while_disabled() {
+        // 無効 (updated_ms 0) なら web の分も出さない (web は 0 を見て取りに行かなくなる)
+        let a = answer(&Viewers::default(), 7);
+        assert_eq!((a.viewers, a.web, a.updated_ms), (None, None, 0));
+    }
+
+    #[test]
     fn config_needs_one_auth_and_one_target() {
         let ok = ViewersConfig {
             api_key: "k".into(),
@@ -336,6 +410,15 @@ mod tests {
             ..Default::default()
         };
         assert!(both.check().is_err());
+        let twitch = |id: &str, login: &str| ViewersConfig {
+            twitch_client_id: id.into(),
+            twitch_login: login.into(),
+            ..ok.clone()
+        };
+        assert!(twitch("c", "some_user1").check().is_ok());
+        assert!(twitch("c", "").check().is_err());
+        assert!(twitch("", "u").check().is_err());
+        assert!(twitch("c", "a/b?x").check().is_err());
     }
 
     #[test]

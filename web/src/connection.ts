@@ -1,6 +1,7 @@
 // サーバとの WebSocket 接続。切断時は自動で再接続し、サーバ時刻との差を保持する。
 
 import type { EqEvent, ServerMessage } from "./types.ts";
+import { wsUrl } from "./ws-url.ts";
 
 export type Status = "connecting" | "open" | "closed";
 
@@ -23,9 +24,7 @@ export class Connection {
 
   /** ページの場所からの相対パスで ws URL を作る (リバースプロキシのサブパス配下でも動く) */
   static defaultUrl(): string {
-    const u = new URL("ws", location.href);
-    u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
-    return u.toString();
+    return wsUrl(location.href);
   }
 
   now(): number {
