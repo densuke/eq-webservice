@@ -74,6 +74,7 @@ fn station_dots_cost() {
                     end_ms: now + 60_000,
                 });
             let scene = Scene {
+                replay: None,
                 quake,
                 eew: None,
                 history: &groups,

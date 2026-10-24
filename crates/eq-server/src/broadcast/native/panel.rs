@@ -106,13 +106,20 @@ pub fn draw_dynamic(pm: &mut Pixmap, text: &mut Text, scene: &Scene, p: &Placed)
     if let (false, Some(legend)) = (shaking, p.legend) {
         draw_warn_legend(pm, text, legend);
     }
-    if let Some(d) = p.detail {
+    // 記録から描き直すとき、最初の報が届くまでは、右の欄にあらまし (この動画で再現する地震) を出す
+    let intro = scene
+        .replay
+        .map(|r| r.intro)
+        .filter(|l| !l.is_empty() && !shaking && scene.history.is_empty());
+    if let (Some(lines), Some(d), Some(h)) = (intro, p.detail, p.history) {
+        draw_intro(pm, text, lines, d, h);
+    } else if let Some(d) = p.detail {
         match (scene.quake, scene.eew) {
             (None, Some(e)) => draw_eew_detail(pm, text, e, d),
             (q, _) => draw_detail(pm, text, q.or(scene.history.first()), q.is_some(), d),
         }
     }
-    if let Some(h) = p.history {
+    if let (None, Some(h)) = (intro, p.history) {
         // 重大な警報があるあいだは、履歴の矩形を警報の枠に置き換える (無ければ今までどおり)
         match quake_band::quake_band(scene.tsunami, scene.warnings) {
             Some(b) => alerts_panel::draw(pm, text, &b, h, scene.now_ms),
@@ -186,6 +193,38 @@ fn badge(pm: &mut Pixmap, text: &mut Text, s: Scale, x: f32, y: f32, size: f32) 
         px,
         scale_text_color(s),
     );
+}
+
+/// あらまし: 見出しと断り (lines の 1・2 行目) を詳細の矩形に、残りを履歴の矩形に。入らない行は出さない
+fn draw_intro(pm: &mut Pixmap, text: &mut Text, lines: &[String], d: Rect, h: Rect) {
+    let x = d.x + PAD;
+    let max = d.w - 2.0 * PAD;
+    if let Some(head) = lines.first() {
+        text.draw_fit(pm, head, x, d.y + 30.0, 16.0, TEXT, max);
+    }
+    if let Some(note) = lines.get(1) {
+        text.draw_fit(pm, note, x, d.y + 56.0, 13.0, [0xff, 0xb3, 0x00], max);
+    }
+    let mut y = h.y + 26.0;
+    for line in lines.iter().skip(2) {
+        if y > h.y + h.h - 8.0 {
+            break;
+        }
+        let head = line == "これから届く報";
+        if head {
+            y += 8.0;
+        }
+        text.draw_fit(
+            pm,
+            line,
+            x,
+            y,
+            if head { 14.0 } else { 13.0 },
+            if head { TEXT } else { MUTED },
+            max,
+        );
+        y += 22.0;
+    }
 }
 
 /// 右パネルの上: 地震の詳細 (地震の画面のときはその地震、平時は最新の地震)

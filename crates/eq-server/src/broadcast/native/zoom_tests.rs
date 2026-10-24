@@ -74,6 +74,7 @@ pub(super) fn chiba_events() -> Vec<Event> {
 
 pub(super) fn input<'a>(events: &'a [Event], now: u64, icons: &'a Icons) -> Input<'a> {
     Input {
+        replay: None,
         events,
         now,
         rev: 1,
@@ -182,6 +183,7 @@ fn the_insets_are_not_drawn_while_zoomed_and_come_back_at_home() {
     let e = eew::latest_eews(&chiba_events()).remove(0);
     let icons = Icons::new();
     let scene = Scene {
+        replay: None,
         quake: None,
         eew: Some(&e),
         history: &[],
@@ -432,6 +434,7 @@ fn write_zoomed_png_when_asked() {
     let e = eew::latest_eews(&chiba_events()).remove(0);
     let icons = Icons::new();
     let scene = Scene {
+        replay: None,
         quake: None,
         eew: Some(&e),
         history: &[],
@@ -475,6 +478,7 @@ fn write_zoomed_png_when_asked() {
 
 pub(super) fn eew_scene<'a>(e: &'a eew::EewSummary, icons: &'a Icons, now_ms: u64) -> Scene<'a> {
     Scene {
+        replay: None,
         quake: None,
         eew: Some(e),
         history: &[],
@@ -776,6 +780,7 @@ fn sub_map_cost() {
                     None => (None, None),
                 };
                 let scene = Scene {
+                    replay: None,
                     quake,
                     eew: shown,
                     history: &groups,

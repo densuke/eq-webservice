@@ -30,6 +30,7 @@ mod pref_list;
 #[cfg(test)]
 mod pref_tests;
 mod quake_band;
+mod replay_info;
 mod shaken;
 mod spread;
 mod step;
@@ -66,6 +67,7 @@ pub(super) use eew::{eew_place, latest_eews, quake_place, EEW_ACTIVE_MS};
 pub(super) use hindsight::{hindsight_of, Hindsight};
 pub(super) use icon::Icons;
 pub(super) use model::{distance_km, event_place, group_quakes, same_quake, Place};
+pub(super) use replay_info::{foresight_of, intro_lines, ReplayInfo};
 pub(super) use step::{look, Input, Output, Stepper};
 
 const RECONNECT_AFTER: Duration = Duration::from_secs(5);
@@ -361,6 +363,7 @@ async fn render_loop(renderer: Renderer, st: Shared, out: Out, notices: Option<U
                 check_ms: out.check_ms,
                 flip_s: out.flip_s,
                 hindsight: None,
+                replay: None,
                 fast_forward: false,
                 status,
                 viewers: viewers::visible(s.viewers, model::server_now(local_now_ms(), s.offset), local_now_ms()),

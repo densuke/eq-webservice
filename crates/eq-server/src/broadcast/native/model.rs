@@ -144,7 +144,7 @@ fn summarize(g: &[(u64, &Quake)]) -> QuakeSummary {
 }
 
 /// 地震情報の観測点を、配信の観測点 (寄り・点) に直す
-fn to_point(p: &ObservationPoint) -> Point {
+pub(super) fn to_point(p: &ObservationPoint) -> Point {
     Point {
         addr: p.addr.clone(),
         is_area: p.is_area,
