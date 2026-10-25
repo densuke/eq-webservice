@@ -10,7 +10,7 @@ import mapCss from "./map.css";
 import { esc } from "./html.ts";
 import { baseId } from "./map-ids.ts";
 import { thinCityLayer } from "./thin.ts";
-import { INSET_MARGIN_DEG, INSET_PAD_PX, insetMarkerPos } from "./inset.ts";
+import { INSET_MARGIN_DEG, INSET_PAD_PX, insetMarkerPos, mainlandFirst } from "./inset.ts";
 import { clusterMarkers, edgePoint, labelSize, type Cluster, type Marker } from "./cluster.ts";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -36,6 +36,13 @@ const INSETS = [
   { id: "okinawa", title: "南西諸島", lonMin: 122.5, lonMax: 131.5, latMin: 24.0, latMax: 31.0, always: true },
   { id: "ogasawara", title: "小笠原", lonMin: 140.8, lonMax: 142.5, latMin: 24.0, latMax: 27.9, always: false },
 ];
+
+/** 離島の別枠の範囲 (地図座標)。寄る範囲を決めるとき、ここの揺れは別枠に任せる */
+const ISLAND_BOXES: Box[] = INSETS.map((i) => {
+  const [x0, y0] = project(i.lonMin, i.latMax);
+  const [x1, y1] = project(i.lonMax, i.latMin);
+  return { x0, y0, x1, y1 };
+});
 
 interface View {
   x: number;
@@ -172,6 +179,8 @@ export class JapanMap {
   private feels: SVGGElement[] = [];
   private feelSig = "[]";
   private epicenterSig = "";
+  /** 本図の図形の束 (別枠は <use> でこれを映す)。寄ったときの描き分けのクラス detail はここに付ける */
+  private base!: SVGGElement;
   private insets: ((typeof INSETS)[number] & { box: HTMLDivElement; svg: SVGSVGElement; markers: SVGGElement; bounds: Box })[] = [];
   private markerItems: { key: string; x: number; y: number; label: number | null; primary: boolean; scale: number; note?: string; ghost?: boolean }[] = [];
   /** 画面外の地震の方向を示す矢印 (地図の上に重ねる HTML) */
@@ -197,7 +206,8 @@ export class JapanMap {
     this.svg = el("svg", { class: "map", preserveAspectRatio: "xMidYMid meet" });
     // 別枠には塗り分け・津波予報・観測点の点・地震波だけを映す (震央の印は縮尺に合わせて別に描く)
     const id = baseId(++mapCount);
-    const base = el("g", { id });
+    const base = el("g", { id, class: "base" });
+    this.base = base;
     // 外部の CSS は <use> の複製に効かないので、図形のスタイルは SVG の中に置く
     const style = el("style");
     style.textContent = mapCss;
@@ -397,13 +407,16 @@ export class JapanMap {
     this.updateInsets();
   }
 
-  /** 別枠の表示。日本全体を見ているときだけ出し、always でないものはその範囲に何かあるときだけ */
+  /**
+   * 別枠の表示。日本全体を見ているときは、always のものはいつも、ほかはその範囲に何かあるときだけ。
+   * 寄っているときは、その範囲に何かあり、それが寄った本図に映っていないときだけ (離島の揺れは別枠に任せ、二重には出さない)
+   */
   private updateInsets(): void {
-    // 細分区域で塗っている (寄っている) ときは出さない。別枠の複製は .map の下に無いので
-    // .map.zoomed で都道府県の塗りを消すなどの CSS が効かず、塗りが二重になるため
     const overview = !this.svg.classList.contains("zoomed") && this.view.h >= this.homeView().h * 0.8;
+    const v = this.view;
+    const view = overview ? null : { x0: v.x, y0: v.y, x1: v.x + v.w, y1: v.y + v.h };
     for (const ins of this.insets) {
-      ins.box.hidden = !overview || !(ins.always || this.hasContentIn(ins.bounds));
+      ins.box.hidden = overview ? !(ins.always || this.hasContentIn(ins.bounds, null)) : !this.hasContentIn(ins.bounds, view);
       if (!ins.box.hidden) this.renderInsetMarkers(ins);
     }
   }
@@ -451,11 +464,14 @@ export class JapanMap {
   }
 
   /** 範囲内に塗り分け・津波予報・震央があるか */
-  private hasContentIn(b: Box): boolean {
-    const inBox = (x: number, y: number) => x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1;
+  /** 範囲 b に震央・震度の塗り・津波予報があるか。view があれば、その中 (寄った本図に映っている所) のものは数えない */
+  private hasContentIn(b: Box, view: Box | null): boolean {
+    const within = (r: Box, x: number, y: number) => x >= r.x0 && x <= r.x1 && y >= r.y0 && y <= r.y1;
+    const inBox = (x: number, y: number) => within(b, x, y) && !(view && within(view, x, y));
     const boxHits = (p: SVGGraphicsElement) => {
       const r = p.getBBox();
-      return r.x <= b.x1 && r.x + r.width >= b.x0 && r.y <= b.y1 && r.y + r.height >= b.y0;
+      const seen = view && within(view, r.x + r.width / 2, r.y + r.height / 2);
+      return !seen && r.x <= b.x1 && r.x + r.width >= b.x0 && r.y <= b.y1 && r.y + r.height >= b.y0;
     };
     return (
       this.markerItems.some((m) => inBox(m.x, m.y)) ||
@@ -686,7 +702,7 @@ export class JapanMap {
 
   /** 都道府県の本土の外接矩形 (地図座標)。離島の地震は震央の点と合わせて映す */
   prefBox(names: string[]): Box | null {
-    return names.reduce<Box | null>((box, n) => union(box, this.mainBoxes.get(n) ?? null), null);
+    return mainlandFirst(names.flatMap((n) => this.mainBoxes.get(n) ?? []), ISLAND_BOXES);
   }
 
   /** 気象警報の区域 (市町村等のコード) の外接矩形の和 (地図座標)。区域が読めていなければ null */
@@ -697,9 +713,10 @@ export class JapanMap {
     }, null);
   }
 
-  /** 揺れた地震情報細分区域の外接矩形の和 (地図座標)。区域が読めていない・名前が引けないときは null */
+  /** 揺れた地震情報細分区域の外接矩形の和 (地図座標)。区域が読めていない・名前が引けないときは null。
+   *  離島の別枠の範囲の区域は、本土側にもあれば外す (別枠に任せる) */
   areaBox(names: string[]): Box | null {
-    return names.reduce<Box | null>((box, n) => union(box, this.areaBoxes.get(n) ?? null), null);
+    return mainlandFirst(names.flatMap((n) => this.areaBoxes.get(n) ?? []), ISLAND_BOXES);
   }
 
   /** 目標へ指数的に近づける (目標が毎フレーム動いても滑らかに追う) */
@@ -756,7 +773,10 @@ export class JapanMap {
     // 地図が動いたらツールチップの位置がずれるので消す
     this.tip.hidden = true;
     this.svg.setAttribute("viewBox", `${v.x} ${v.y} ${v.w} ${v.h}`);
-    this.svg.classList.toggle("zoomed", this.areas.size > 0 && (this.alwaysDetail || v.h < DETAIL_MAX_H));
+    const detail = this.areas.size > 0 && (this.alwaysDetail || v.h < DETAIL_MAX_H);
+    this.svg.classList.toggle("zoomed", detail);
+    // 別枠の複製にも同じ描き分けが効くよう、図形の束にも付ける (map.css の .base.detail)
+    this.base.classList.toggle("detail", detail);
     this.renderLabels();
     this.updateInsets();
     this.renderMarkers();

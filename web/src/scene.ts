@@ -1,6 +1,6 @@
 // 地図の場面: 自動カメラの目標、P波・S波の円、震央の印。
 
-import { type Box, DEFAULT_STOP_KM, followRadiusKm, pad, pointBox, stopRadiusKm, union } from "./camera.ts";
+import { type Box, DEFAULT_STOP_KM, FAR_EPICENTER_KM, distanceToBoxKm, followRadiusKm, pad, pointBox, stopRadiusKm, union } from "./camera.ts";
 import { project } from "./map.ts";
 import { type Center, type WaveSource, currentGroup, setWaveReach, geoOf, groupPlace, groupScale, pendingHindsight, recentQuakes, relatedQuake, shakenGeo, unsettledGroups, waveSources } from "./quakes.ts";
 import { sameQuake } from "./priority.ts";
@@ -134,7 +134,9 @@ export function renderScene(sc: Scene | null): { box: Box | null; waving: boolea
   const s = sc.t == null ? null : surfaceRadiusKm(VS_KM_S, c.depth, sc.t);
   // 波は S 波が揺れた範囲の端に届くまで (waveLifeSec)。再生は揺れた地域を覆い終えたら打ち切る (早回しでも 180 秒分は長い)
   const waving = sc.t != null && sc.t < waveLifeSec(c.depth, stop) && !(sc.replay && (s ?? 0) > stop);
-  if (!waving) return { box: pad(union(sc.shaken, pointBox(x, y, 0))!), waving, wave: null };
+  // 震央が揺れた範囲から遠い (FAR_EPICENTER_KM) ときは、震央を入れずに揺れた範囲だけを映す (波の円は外から入ってくる)
+  const far = sc.shaken && distanceToBoxKm(x, y, sc.shaken) > FAR_EPICENTER_KM ? pad(sc.shaken) : null;
+  if (!waving) return { box: far ?? pad(union(sc.shaken, pointBox(x, y, 0))!), waving, wave: null };
   // 円は寄りが引く上限 (揺れた範囲の一番遠い角) で止める。ほかの地震は揺れた範囲を持たないので既定の上限
   const wave = (w: Center, t: number, maxKm: number) => ({ ...w, pKm: capKm(surfaceRadiusKm(VP_KM_S, w.depth, t), maxKm), sKm: capKm(surfaceRadiusKm(VS_KM_S, w.depth, t), maxKm) });
   const main = wave(c, sc.t!, stop);
@@ -142,5 +144,5 @@ export function renderScene(sc: Scene | null): { box: Box | null; waving: boolea
   $("#wave-info").textContent = sc.replay ? `再生中 ${sc.t!.toFixed(0)}秒 (×${REPLAY_SPEED})` : `発生から${sc.t!.toFixed(0)}秒`;
   const follow = pointBox(x, y, followRadiusKm(s, stop));
   const sub = sc.key ? { key: sc.key, lat: main.lat, lon: main.lon, pKm: main.pKm, sKm: main.sKm } : null;
-  return { box: pad(sc.forecast ? union(follow, sc.shaken)! : follow), waving, wave: sub };
+  return { box: far ?? pad(sc.forecast ? union(follow, sc.shaken)! : follow), waving, wave: sub };
 }

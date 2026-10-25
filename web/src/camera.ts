@@ -42,6 +42,16 @@ export function stopRadiusKm(x: number, y: number, shaken: Box | null): number {
   return Math.max(MIN_RADIUS_KM, Math.hypot(dx, dy) / KM_TO_UNITS);
 }
 
+/** 震央が揺れた範囲からこれより離れていたら、震央を入れずに揺れた範囲だけを見せる (native の camera::FAR_EPICENTER_KM) */
+export const FAR_EPICENTER_KM = 500;
+
+/** 点 (x, y) から矩形 b までの距離 (km。中なら 0) */
+export function distanceToBoxKm(x: number, y: number, b: Box): number {
+  const dx = Math.max(b.x0 - x, x - b.x1, 0);
+  const dy = Math.max(b.y0 - y, y - b.y1, 0);
+  return Math.hypot(dx, dy) / KM_TO_UNITS;
+}
+
 /** S波の半径 sKm のときに見せる半径 */
 export function followRadiusKm(sKm: number | null, stopKm: number): number {
   return Math.min(Math.max(sKm ?? 0, MIN_RADIUS_KM), stopKm);

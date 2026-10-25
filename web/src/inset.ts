@@ -12,3 +12,17 @@ export function insetMarkerPos(x: number, y: number, b: Box, mx: number, my: num
   const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo + pad), hi - pad);
   return [clamp(x, b.x0, b.x1), clamp(y, b.y0, b.y1)];
 }
+
+/**
+ * 外接矩形の和。離島の別枠の範囲 (islands) に中心があるものは、本土側に 1 つでもあれば外す (別枠に任せる)。
+ * 離島だけが揺れたときは、その離島の範囲 (native の shaken::mainland_first と同じ)
+ */
+export function mainlandFirst(boxes: Box[], islands: Box[]): Box | null {
+  const inIsland = (b: Box) => {
+    const [cx, cy] = [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2];
+    return islands.some((i) => cx >= i.x0 && cx <= i.x1 && cy >= i.y0 && cy <= i.y1);
+  };
+  const main = boxes.filter((b) => !inIsland(b));
+  const use = main.length ? main : boxes;
+  return use.reduce<Box | null>((a, b) => (a ? { x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1) } : b), null);
+}

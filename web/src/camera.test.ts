@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { DEFAULT_STOP_KM, followRadiusKm, KM_TO_UNITS, MIN_RADIUS_KM, pad, pointBox, ringsBox, stopRadiusKm, union } from "./camera.ts";
+import { DEFAULT_STOP_KM, FAR_EPICENTER_KM, distanceToBoxKm, followRadiusKm, KM_TO_UNITS, MIN_RADIUS_KM, pad, pointBox, ringsBox, stopRadiusKm, union } from "./camera.ts";
 
 test("follow radius starts at the minimum, grows with the S wave and stops", () => {
   assert.equal(followRadiusKm(null, 400), MIN_RADIUS_KM);
@@ -32,4 +32,11 @@ test("rings box covers every ring, so an area of many islands is framed whole", 
   const islandA: [number, number][] = [[0, 0], [1, 0], [1, 1]];
   const islandB: [number, number][] = [[10, -5], [12, -4]];
   assert.deepEqual(ringsBox([islandA, islandB]), { x0: 0, y0: -5, x1: 12, y1: 1 });
+});
+
+test("a far offshore epicenter is measured to the nearest edge of the shaken box", () => {
+  const box = { x0: 0, y0: 0, x1: 100, y1: 100 };
+  assert.equal(distanceToBoxKm(50, 50, box), 0);
+  assert.ok(Math.abs(distanceToBoxKm(50, 100 + 500 * KM_TO_UNITS, box) - 500) < 1e-9);
+  assert.ok(FAR_EPICENTER_KM === 500);
 });
