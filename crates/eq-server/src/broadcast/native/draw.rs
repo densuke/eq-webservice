@@ -7,7 +7,7 @@ use tiny_skia::{Path, Pixmap};
 
 use super::banner;
 use super::calm;
-use super::camera::Fit;
+use super::camera::{Fit, MapBox};
 use super::cards::CardCache;
 use super::data::{CityWeather, Warnings};
 use super::eew::{forecast_tag, EewSummary, Wave};
@@ -31,6 +31,8 @@ use super::spread::{self, Spread};
 use super::test_mark;
 use super::text::Text;
 use super::tsunami_coast;
+use super::warn_card;
+use super::warn_focus::{self, WarnFocus};
 use crate::broadcast::status::Notice;
 use crate::quake::model::TsunamiArea;
 use crate::quake::{Hypocenter, Scale};
@@ -277,6 +279,30 @@ impl Renderer {
         self.clip.is_some()
     }
 
+    /// 気象警報の区域 (市町村等のコード) の外接矩形の和 (地図の座標)。区域が分からなければ None
+    pub fn warn_box(&self, codes: &[String]) -> Option<MapBox> {
+        codes
+            .iter()
+            .filter_map(|c| self.areas.get(c).map(|s| s.bounds))
+            .map(Some)
+            .reduce(MapBox::union)
+            .flatten()
+    }
+
+    /// 平時に今寄せる危険警報以上の区域 (warn_focus。毎分の後ろ 15 秒)。無ければ None
+    pub fn warn_focus(&self, w: Option<&Warnings>, now_ms: u64) -> Option<WarnFocus> {
+        let w = w?;
+        let fs = warn_focus::merge_focuses(
+            warn_focus::warn_focuses(w),
+            w,
+            |c| self.warn_box(c),
+            warn_focus::MERGE_KM,
+        );
+        warn_focus::focus_at(&fs, now_ms)
+            .filter(|f| self.warn_box(&f.codes).is_some())
+            .cloned()
+    }
+
     /// 寄りの範囲を求める表 (細分区域・観測点・県)
     pub fn zones(&self) -> &Zones {
         &self.zones
@@ -345,6 +371,16 @@ impl Renderer {
             .placed
             .for_screen(self.sub.is_some() && (scene.quake.is_some() || scene.eew.is_some()));
         let main = placed.main;
+        let calm = scene.quake.is_none() && scene.eew.is_none();
+        // 平時に危険警報以上の区域へ寄せている間 (寄りの最中も含む): 天気の札の代わりに札と矢印で示す
+        let focus = self
+            .zoomed
+            .as_ref()
+            .filter(|_| calm)
+            .and_then(|_| self.warn_focus(scene.warnings, scene.now_ms));
+        let focus_line = focus
+            .as_ref()
+            .map(|f| format!("{}: {}", f.items[0].name, f.items[0].places(3)));
         if let Some(z) = &self.zoomed {
             // 日本全体の地図 (と別枠) を海で隠し、寄った地図を描き直す (隠した凡例と別枠の題は上の絵からも消す)
             rect(t.low(), main.x, main.y, main.w, main.h, SEA, 1.0);
@@ -362,6 +398,7 @@ impl Renderer {
                         fixed: &fixed,
                         bounds,
                         info: calm::info_window(placed.main),
+                        focus_line: focus_line.as_deref(),
                     };
                     calm::draw(&mut t, &mut self.text, &self.areas, f, scene, &env, &mut self.cards)
                 }
@@ -383,6 +420,21 @@ impl Renderer {
             self.text
                 .draw_right(t.top(), label, main.right() - 12.0, main.y + 22.0, 13.0, TEXT);
         }
+        if let (Some(f), Some(z)) = (&focus, &self.zoomed) {
+            if let Some(b) = self.warn_box(&f.codes) {
+                let (x0, y0) = z.view.map_px(b.x0, b.y0);
+                let (x1, y1) = z.view.map_px(b.x1, b.y1);
+                // 左下の凡例 (と上に積む注意報などの凡例)・時計に重ねない
+                let avoid: Vec<BoxRect> = [
+                    placed.legend.map(|l| (l.x, l.y - 90.0, l.w + 40.0, l.h + 90.0)),
+                    placed.clock.map(Rect::tuple),
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
+                warn_card::draw(t.top(), &mut self.text, f, (x0, y0, x1, y1), main.tuple(), &avoid);
+            }
+        }
         panel::draw_dynamic(t.top(), &mut self.text, scene, &placed);
         if let (Some(f), Some(at), true) = (&self.sub, placed.sub, scene.quake.is_some() || scene.eew.is_some()) {
             draw_sub_map(
@@ -398,7 +450,6 @@ impl Renderer {
         }
         // お知らせは平時だけ (右パネルの下半分。地震の画面では出さない)
         // 気象警報が出ているあいだは、同じ矩形を県ごとの一覧に置き換える (告知は一覧の最後のページ)
-        let calm = scene.quake.is_none() && scene.eew.is_none();
         let rows = scene.warnings.map(pref_list::pref_rows).unwrap_or_default();
         let list_shown = calm && !rows.is_empty() && placed.notice.is_some();
         if let (true, Some(area)) = (calm, placed.notice) {

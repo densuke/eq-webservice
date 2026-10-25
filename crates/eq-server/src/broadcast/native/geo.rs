@@ -77,6 +77,11 @@ impl View {
         )
     }
 
+    /// 地図の座標 (project の値) の画面の座標
+    pub fn map_px(&self, x: f64, y: f64) -> (f32, f32) {
+        ((x * self.scale + self.ox) as f32, (y * self.scale + self.oy) as f32)
+    }
+
     /// 経度・緯度の画面の座標
     pub fn px(&self, lon: f64, lat: f64) -> (f32, f32) {
         let (x, y) = project(lon, lat);

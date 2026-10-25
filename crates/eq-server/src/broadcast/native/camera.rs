@@ -49,11 +49,15 @@ impl MapBox {
 
     /// 周囲に余白を付け、小さすぎる範囲は 2 x MIN_RADIUS_KM 四方まで広げる
     pub fn pad(self) -> MapBox {
-        const RATIO: f64 = 0.15;
-        let min = 2.0 * MIN_RADIUS_KM * KM_TO_UNITS;
+        self.pad_by(0.15, 2.0 * MIN_RADIUS_KM)
+    }
+
+    /// 周囲に ratio の余白を付け、小さすぎる範囲は min_km 四方まで広げる
+    pub fn pad_by(self, ratio: f64, min_km: f64) -> MapBox {
+        let min = min_km * KM_TO_UNITS;
         let (cx, cy) = ((self.x0 + self.x1) / 2.0, (self.y0 + self.y1) / 2.0);
-        let hw = ((self.x1 - self.x0) * (1.0 + RATIO)).max(min) / 2.0;
-        let hh = ((self.y1 - self.y0) * (1.0 + RATIO)).max(min) / 2.0;
+        let hw = ((self.x1 - self.x0) * (1.0 + ratio)).max(min) / 2.0;
+        let hh = ((self.y1 - self.y0) * (1.0 + ratio)).max(min) / 2.0;
         MapBox {
             x0: cx - hw,
             y0: cy - hh,

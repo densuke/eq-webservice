@@ -39,6 +39,8 @@ mod test_mark;
 mod text;
 mod tsunami_coast;
 mod viewers;
+mod warn_card;
+mod warn_focus;
 mod yuv;
 
 use std::sync::{Arc, Mutex};
@@ -649,6 +651,8 @@ mod sound_tests;
 mod spread_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod warn_zoom_tests;
 #[cfg(test)]
 mod wave_layer_tests;
 #[cfg(test)]
