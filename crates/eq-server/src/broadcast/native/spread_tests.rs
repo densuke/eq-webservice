@@ -70,9 +70,9 @@ fn the_spread_wave_replaces_the_quake_wave() {
     let groups = group_quakes(&events);
     let now = R1 + LEAD_MS + 5_000;
     // 発生から 3 分を過ぎているので、地震情報の発生時刻からの波は無い
-    assert!(frame_waves(&groups, &[], true, None, None, now).is_empty());
+    assert!(frame_waves(&groups, &[], true, None, None, &|_, _| 0.0, now).is_empty());
     let s = spread_now(&events, now);
-    let waves = frame_waves(&groups, &[], true, None, Some(&s), now);
+    let waves = frame_waves(&groups, &[], true, None, Some(&s), &|_, _| 0.0, now);
     assert_eq!(waves, vec![spread::wave(&s, now)]);
 }
 

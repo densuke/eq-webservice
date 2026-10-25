@@ -970,7 +970,7 @@ fn a_pending_hindsight_draws_waves_in_the_calm_screen_until_a_located_report_arr
     // 震源の付いた緊急地震速報が届いたら、のちに判明する震源は退き、波はその報から描く (二重にならない)
     let events = [eew_event(NOW, (36.0, 138.0))];
     let waves_ms = t + 1_000;
-    assert!(super::eew::waves(&group_quakes(&events), &latest_eews(&events), waves_ms).len() == 1);
+    assert!(super::eew::waves(&group_quakes(&events), &latest_eews(&events), waves_ms, &|_, _| 0.0).len() == 1);
     let l = look(&events, waves_ms, Some(&h));
     assert!(!l.calm && l.waving);
     assert!(hindsight::pending(Some(&h), &group_quakes(&events), &latest_eews(&events)).is_none());

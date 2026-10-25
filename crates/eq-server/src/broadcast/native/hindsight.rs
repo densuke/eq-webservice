@@ -5,7 +5,7 @@
 use crate::quake::{Event, EventBody, Hypocenter, QuakeInfoType};
 
 use super::eew::{
-    eew_place, quake_place, surface_radius_km, EewSummary, Wave, DEFAULT_DEPTH_KM, VP_KM_S, VS_KM_S, WAVE_MAX_MS,
+    eew_place, quake_place, surface_radius_km, wave_life_ms, EewSummary, Wave, DEFAULT_DEPTH_KM, VP_KM_S, VS_KM_S,
 };
 use super::model::{same_quake, Place, QuakeSummary};
 
@@ -108,10 +108,10 @@ pub fn pending<'a>(h: Option<&'a Hindsight>, quakes: &[QuakeSummary], eews: &[Ee
     (!found).then_some(h)
 }
 
-/// 描く波。発生前と、発生から WAVE_MAX_MS を過ぎたあとは None
-pub fn wave(h: &Hindsight, now_ms: u64) -> Option<Wave> {
+/// 描く波。発生前と、発生から wave_life_ms (S 波が reach_km に届くまで) を過ぎたあとは None
+pub fn wave(h: &Hindsight, now_ms: u64, reach_km: f64) -> Option<Wave> {
     let elapsed = now_ms as i64 - h.origin_ms;
-    if !(0..=WAVE_MAX_MS).contains(&elapsed) {
+    if !(0..=wave_life_ms(h.depth_km, reach_km)).contains(&elapsed) {
         return None;
     }
     let t = elapsed as f64 / 1000.0;
@@ -236,10 +236,10 @@ mod tests {
             depth_km: 10.0,
             origin_ms: T0,
         };
-        assert_eq!(wave(&h, T0 as u64 - 1), None);
-        let w = wave(&h, T0 as u64 + 10_000).unwrap();
+        assert_eq!(wave(&h, T0 as u64 - 1, 0.0), None);
+        let w = wave(&h, T0 as u64 + 10_000, 0.0).unwrap();
         assert!((w.p_km.unwrap() - (65.0f64 * 65.0 - 100.0).sqrt()).abs() < 1e-6);
-        assert!(wave(&h, T0 as u64 + 180_000).is_some());
-        assert_eq!(wave(&h, T0 as u64 + 180_001), None);
+        assert!(wave(&h, T0 as u64 + 180_000, 0.0).is_some());
+        assert_eq!(wave(&h, T0 as u64 + 180_001, 0.0), None);
     }
 }

@@ -3,10 +3,11 @@
 
 use tiny_skia::Pixmap;
 
-use super::camera::{fit_box, target_box, wave_cap_km, Aim, Camera, Epicenter};
+use super::camera::{fit_box, stop_radius_km, target_box, Aim, Camera, Epicenter, DEFAULT_STOP_KM};
 use super::data::{CityWeather, Warnings};
 use super::draw::{self, Renderer, Scene};
 use super::eew::{eew_place, quake_place};
+use super::geo::project;
 use super::hindsight::{self, Hindsight};
 use super::icon::Icons;
 use super::model::same_quake;
@@ -66,10 +67,11 @@ pub(super) fn frame_waves(
     in_quake_screen: bool,
     hindsight: Option<&Hindsight>,
     spread: Option<&Spread>,
+    reach_km: &dyn Fn(f64, f64) -> f64,
     now: u64,
 ) -> Vec<eew::Wave> {
     let mut waves = if in_quake_screen {
-        eew::waves(groups, eews, now)
+        eew::waves(groups, eews, now, reach_km)
     } else {
         Vec::new()
     };
@@ -77,7 +79,9 @@ pub(super) fn frame_waves(
         waves.retain(|w| !spread::near(s, w));
         waves.push(spread::wave(s, now));
     }
-    waves.extend(hindsight::pending(hindsight, groups, eews).and_then(|h| hindsight::wave(h, now)));
+    waves.extend(
+        hindsight::pending(hindsight, groups, eews).and_then(|h| hindsight::wave(h, now, reach_km(h.lat, h.lon))),
+    );
     waves
 }
 
@@ -87,8 +91,19 @@ pub fn look(events: &[Event], now: u64, hindsight: Option<&Hindsight>) -> Look {
     let current = eew::current(&groups, &eews, now);
     Look {
         calm: current.is_none(),
-        // 揺れの広がりの再現は数えない (記録の描き直しでは、波の間に刻みの音を鳴らすため)
-        waving: !frame_waves(&groups, &eews, current.is_some(), hindsight, None, now).is_empty(),
+        // 揺れの広がりの再現は数えない (記録の描き直しでは、波の間に刻みの音を鳴らすため)。
+        // shortcut: 揺れた範囲 (細分区域の表) を持たないので、波を描く長さは既定の広がりで見る。深い・遠い地震では
+        // 描いている円より先に刻みの音が止まる。気になったら Zones を渡して step と同じ stop_radius_km を使う
+        waving: !frame_waves(
+            &groups,
+            &eews,
+            current.is_some(),
+            hindsight,
+            None,
+            &|_, _| DEFAULT_STOP_KM,
+            now,
+        )
+        .is_empty(),
     }
 }
 
@@ -119,7 +134,7 @@ type StillKey = (
 
 /// 地震の画面の地震から、寄りの目標の材料を作る。平時は None (日本全体)
 /// foresight (記録から描き直すときの、のちに届く各地の震度の観測点) があれば、その点も揺れた範囲に入れる。
-/// 最初の円に合わせて灯す点が画面の外に出ず、円もその点まで広がる (wave_cap_km)
+/// 最初の円に合わせて灯す点が画面の外に出ず、円もその点まで広がる (stop_radius_km)
 fn aim_of(
     renderer: &Renderer,
     current: Option<eew::Current>,
@@ -272,6 +287,19 @@ impl Stepper {
         self.renderer.set_sub_view(fit);
     }
 
+    /// 記録から描き直すとき、のちに分かった震源 h の地震波を描き終える時刻 (当時の時刻)。
+    /// S 波が、のちに届く各地の震度の一番遠い観測点に届くまで (eew::wave_life_ms)。観測点が無ければ既定の広がり
+    pub fn wave_end_ms(&self, events: &[Event], h: &Hindsight) -> u64 {
+        let zones = self.renderer.zones();
+        let reach = super::replay_info::foresight_of(events, h)
+            .into_iter()
+            .flat_map(|f| f.points.iter())
+            .filter_map(|p| zones.position(&p.addr))
+            .map(|(lat, lon)| model::distance_km(h.lat, h.lon, lat, lon))
+            .fold(DEFAULT_STOP_KM, f64::max);
+        (h.origin_ms + eew::wave_life_ms(h.depth_km, reach)).max(0) as u64
+    }
+
     #[cfg(test)]
     pub fn renderer_mut(&mut self) -> &mut Renderer {
         &mut self.renderer
@@ -307,18 +335,32 @@ impl Stepper {
             None => quake.and_then(|q| spread::spread_of(i.events, q, self.renderer.zones(), now)),
         };
         // 地震波は地震の画面のときだけ描く (のちに分かった震源の波は、平時の画面でも描く)
-        // 円は寄りの地震の揺れた範囲で止める。shortcut: 同時に起きた別の地震の円も同じ半径で止める、重なる地震が増えたら地震ごとに
-        let cap = wave_cap_km(aim_of(&self.renderer, current, &eews, pending, foresight).as_ref());
-        let waves: Vec<eew::Wave> = frame_waves(&groups, &eews, current.is_some(), i.hindsight, spread.as_ref(), now)
-            .into_iter()
-            .map(|w| w.capped(cap))
-            .collect();
+        // 円は、その波の震央から地震の画面の揺れた範囲の一番遠い角までで止め、S 波がそこに届くまで描く (eew::wave_life_ms)。
+        // 震源の分からない地震情報 (震度速報) の画面でも、緊急地震速報の波は揺れた範囲の端まで描く。
+        // shortcut: 同時に起きた別の地震の円も、この画面の揺れた範囲で止める。重なる地震が増えたら地震ごとに
+        let shaken = aim_of(&self.renderer, current, &eews, pending, foresight).and_then(|a| a.shaken);
+        let reach = |lat: f64, lon: f64| {
+            let (x, y) = project(lon, lat);
+            stop_radius_km(x, y, shaken)
+        };
+        let waves: Vec<eew::Wave> = frame_waves(
+            &groups,
+            &eews,
+            current.is_some(),
+            i.hindsight,
+            spread.as_ref(),
+            &reach,
+            now,
+        )
+        .into_iter()
+        .map(|w| w.capped(reach(w.lat, w.lon)))
+        .collect();
         // サブの地図の波は、サブの地図に映している地震の波だけ (保持時間・薄さは配信のサブの地図には無い)
         let sub_wave = match &spread {
             Some(s) => Some(spread::wave(s, now)),
-            None => current.and_then(|c| eew::sub_wave(c, &groups, &eews, now)),
+            None => current.and_then(|c| eew::sub_wave(c, &groups, &eews, now, &reach)),
         }
-        .map(|w| w.capped(cap));
+        .map(|w| w.capped(reach(w.lat, w.lon)));
         // 地震波以外を描き直すのは、データが変わったとき・平時と地震が切り替わったとき・秒が進んだときだけ。
         // 地震波が動いている間は、その上にコマごとに波だけを重ねる
         let still_key = (

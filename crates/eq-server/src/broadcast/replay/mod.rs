@@ -51,14 +51,18 @@ async fn make(o: &Options, audio: &std::path::Path) -> anyhow::Result<()> {
         o.quakes.clone()
     };
     let series = plan::Series::of(&all, &places).context("範囲に、動画にできる地震の報がありません")?;
-    let first = plan::build(&series, o.fps, &[]).context("筋書きを作れません")?;
+    let mut stepper = Stepper::new(native::load_renderer(&renderer_config(o))?);
+    // 地震波を描いている間は時計を飛ばさない (深い・遠い地震は S 波が揺れた範囲の端に届くまで数分かかり、その間に報が無いことがある)
+    let wave_holds = plan::wave_holds(&series, |h| stepper.wave_end_ms(&series.events, h));
+    let first = plan::build(&series, o.fps, &wave_holds).context("筋書きを作れません")?;
     // 声を取って長さを測り、声が流れている間は時計を飛ばさない筋書きに作り直す (話の途中で早送りにしない)
     let voices = fetch_voices(o, &series.events, &first).await;
     let holds = voice::holds(&voices, &first.frames, o.fps);
     let plan = if holds.is_empty() {
         first
     } else {
-        plan::build(&series, o.fps, &holds).context("筋書きを作れません")?
+        let all_holds: Vec<u64> = holds.into_iter().chain(wave_holds).collect();
+        plan::build(&series, o.fps, &all_holds).context("筋書きを作れません")?
     };
     let voices = voice::retime(voices, &voice::schedule(&series.events, &plan.frames, o.fps));
     for c in &voices {
@@ -108,7 +112,6 @@ async fn make(o: &Options, audio: &std::path::Path) -> anyhow::Result<()> {
     }
     let mut throttle = crate::broadcast::psi::Throttle::default();
     encode::encode_audio(o, &plan, &voices, audio, &mut throttle).await?;
-    let mut stepper = Stepper::new(native::load_renderer(&renderer_config(o))?);
     encode::encode_video(o, &series.events, &plan, &mut stepper, audio, &mut throttle).await?;
     tracing::info!(out = %o.out.display(), "replay-video: できました");
     Ok(())

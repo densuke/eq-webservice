@@ -469,7 +469,7 @@ fn write_zoomed_png_when_asked() {
     };
     r.set_view(camera::target_box(&aim, SHOWN_AT).map(|b| camera::fit_box(b, r.map_aspect())));
     let mut pm = r.render(&scene);
-    let waves = eew::waves(&[], std::slice::from_ref(&e), SHOWN_AT);
+    let waves = eew::waves(&[], std::slice::from_ref(&e), SHOWN_AT, &|_, _| 0.0);
     r.draw_waves(&mut pm, &waves);
     pm.save_png(std::path::Path::new(&out).join("zoomed.png")).unwrap();
 }

@@ -12,8 +12,10 @@ use super::model::{current_quake, same_quake, Place, QuakeSummary};
 pub const EEW_ACTIVE_MS: u64 = 5 * 60_000;
 /// 地震情報が届いた緊急地震速報を、その地震情報に任せるかを見る範囲 (web の FULL_MS)
 const RECENT_MS: u64 = 10 * 60_000;
-/// 発生からこの時間を過ぎた地震波は描かない (web の WAVE_MAX_SEC)
+/// 地震波を描く最短の時間 (web の WAVE_MAX_SEC)。近い地震は今までどおりこれで消える
 pub const WAVE_MAX_MS: i64 = 180_000;
+/// 地震波を描く最長の時間 (web の WAVE_LIMIT_SEC)
+pub const WAVE_LIMIT_MS: i64 = 480_000;
 pub const VP_KM_S: f64 = 6.5;
 pub const VS_KM_S: f64 = 3.75;
 /// 深さが分からないときの深さ (web の geoOf)
@@ -181,6 +183,14 @@ impl Wave {
     }
 }
 
+/// 地震波を描く長さ (ミリ秒)。S 波が地表で reach_km (震央から揺れた範囲の一番遠い角。camera::stop_radius_km) に届くまで。
+/// 深い・遠い地震は S 波が遅れて地表に出るので、3 分では揺れた範囲の端まで届かない (2026-10-25 小笠原諸島西方沖 深さ 530km)。
+/// 短くても WAVE_MAX_MS、長くても WAVE_LIMIT_MS
+pub fn wave_life_ms(depth_km: f64, reach_km: f64) -> i64 {
+    let ms = (reach_km.hypot(depth_km.max(0.0)) / VS_KM_S * 1000.0) as i64 + 5_000;
+    ms.clamp(WAVE_MAX_MS, WAVE_LIMIT_MS)
+}
+
 struct Source {
     lat: f64,
     lon: f64,
@@ -188,10 +198,10 @@ struct Source {
     origin_ms: i64,
 }
 
-fn source_of(place: &Place, h: Option<&Hypocenter>, now_ms: u64) -> Option<Source> {
+fn source_of(place: &Place, h: Option<&Hypocenter>, now_ms: u64, reach_km: &dyn Fn(f64, f64) -> f64) -> Option<Source> {
     let (lat, lon, origin_ms) = (place.lat?, place.lon?, place.origin_ms?);
     let depth_km = h.and_then(|h| h.depth_km).map_or(DEFAULT_DEPTH_KM, f64::from);
-    (now_ms as i64 - origin_ms <= WAVE_MAX_MS).then_some(Source {
+    (now_ms as i64 - origin_ms <= wave_life_ms(depth_km, reach_km(lat, lon))).then_some(Source {
         lat,
         lon,
         depth_km,
@@ -199,37 +209,57 @@ fn source_of(place: &Place, h: Option<&Hypocenter>, now_ms: u64) -> Option<Sourc
     })
 }
 
-/// 地震波を描く地震。起点は緊急地震速報 (秒単位の発生時刻) を優先し、同じ地震の地震情報 (分単位) では描かない
-pub fn waves(quakes: &[QuakeSummary], eews: &[EewSummary], now_ms: u64) -> Vec<Wave> {
-    wave_sources(quakes, eews, now_ms).into_iter().map(|(_, w)| w).collect()
+/// 地震波を描く地震。起点は緊急地震速報 (秒単位の発生時刻) を優先し、同じ地震の地震情報 (分単位) では描かない。
+/// reach_km は震央 (緯度, 経度) から、波を描き続ける広がり (wave_life_ms)
+pub fn waves(
+    quakes: &[QuakeSummary],
+    eews: &[EewSummary],
+    now_ms: u64,
+    reach_km: &dyn Fn(f64, f64) -> f64,
+) -> Vec<Wave> {
+    wave_sources(quakes, eews, now_ms, reach_km)
+        .into_iter()
+        .map(|(_, w)| w)
+        .collect()
 }
 
 /// サブの地図に映している地震 (current) の波。web の renderSubWaves と同じく、同じ地震の波だけ (別の地震の波は映さない)
-pub fn sub_wave(current: Current, quakes: &[QuakeSummary], eews: &[EewSummary], now_ms: u64) -> Option<Wave> {
+pub fn sub_wave(
+    current: Current,
+    quakes: &[QuakeSummary],
+    eews: &[EewSummary],
+    now_ms: u64,
+    reach_km: &dyn Fn(f64, f64) -> f64,
+) -> Option<Wave> {
     let place = match current {
         Current::Quake(q) => quake_place(q),
         Current::Eew(e) => eew_place(e),
     };
-    wave_sources(quakes, eews, now_ms)
+    wave_sources(quakes, eews, now_ms, reach_km)
         .into_iter()
         .find(|(p, _)| same_quake(p, &place))
         .map(|(_, w)| w)
 }
 
 /// 波と、その地震の発生時刻・震央
-fn wave_sources(quakes: &[QuakeSummary], eews: &[EewSummary], now_ms: u64) -> Vec<(Place, Wave)> {
+fn wave_sources(
+    quakes: &[QuakeSummary],
+    eews: &[EewSummary],
+    now_ms: u64,
+    reach_km: &dyn Fn(f64, f64) -> f64,
+) -> Vec<(Place, Wave)> {
     let from_eews: Vec<(Place, Source)> = eews
         .iter()
         .filter_map(|e| {
             let p = eew_place(e);
-            Some((p, source_of(&p, e.hypocenter.as_ref(), now_ms)?))
+            Some((p, source_of(&p, e.hypocenter.as_ref(), now_ms, reach_km)?))
         })
         .collect();
     let from_quakes: Vec<(Place, Source)> = quakes
         .iter()
         .filter_map(|q| {
             let p = quake_place(q);
-            Some((p, source_of(&p, q.hypocenter.as_ref(), now_ms)?))
+            Some((p, source_of(&p, q.hypocenter.as_ref(), now_ms, reach_km)?))
         })
         .filter(|(p, _)| !from_eews.iter().any(|(e, _)| same_quake(e, p)))
         .collect();
@@ -424,11 +454,11 @@ mod tests {
         let eews = latest_eews(&[eew_event("a", 1, t + 5_000, |_| {})]);
         // 地震情報の発生時刻は分単位で、EEW と数十秒ずれる。同じ地震なので描くのは EEW の 1 つ
         let same = [quake(t + 60_000, T0 - 20_000, Scale::S4, Some((35.7, 139.8)))];
-        let w = waves(&same, &eews, t + 10_000);
+        let w = waves(&same, &eews, t + 10_000, &|_, _| 0.0);
         assert_eq!(w.len(), 1);
         assert_eq!(w[0].s_km, surface_radius_km(3.75, 10.0, 10.0)); // EEW の秒単位の発生時刻 (T0) から
                                                                     // EEW が無ければ地震情報の発生時刻から
-        let only = waves(&same, &[], t + 10_000);
+        let only = waves(&same, &[], t + 10_000, &|_, _| 0.0);
         assert_eq!(only[0].s_km, surface_radius_km(3.75, 10.0, 30.0));
         // 別の地震の地震情報は、EEW の波とは別に描く
         let other = [quake(
@@ -437,8 +467,8 @@ mod tests {
             Scale::S4,
             Some((43.0, 141.3)),
         )];
-        assert_eq!(waves(&other, &eews, t + 3_600_000).len(), 1); // 1 時間後: EEW の波は 180 秒で消えている
-        let both = waves(&other, &eews, t + 10_000); // 発生前の地震情報は数に入るが、半径はまだ無い
+        assert_eq!(waves(&other, &eews, t + 3_600_000, &|_, _| 0.0).len(), 1); // 1 時間後: EEW の波は 180 秒で消えている
+        let both = waves(&other, &eews, t + 10_000, &|_, _| 0.0); // 発生前の地震情報は数に入るが、半径はまだ無い
         assert_eq!((both.len(), both[0].s_km.is_some(), both[1].s_km), (2, true, None));
     }
 
@@ -451,14 +481,32 @@ mod tests {
         let both = [tokyo, sapporo];
         let now = t + 10_000;
         // 札幌の地震を映すなら札幌の波 (先頭の東京の波ではない)
-        let w = sub_wave(Current::Quake(&both[1]), &both, &eews, now).unwrap();
+        let w = sub_wave(Current::Quake(&both[1]), &both, &eews, now, &|_, _| 0.0).unwrap();
         assert_eq!(w.lat, 43.0);
         // 東京の地震と、その緊急地震速報は、緊急地震速報の波 (秒単位の発生時刻) を映す
-        let w = sub_wave(Current::Eew(&eews[0]), &both, &eews, now).unwrap();
+        let w = sub_wave(Current::Eew(&eews[0]), &both, &eews, now, &|_, _| 0.0).unwrap();
         assert_eq!(w.s_km, surface_radius_km(3.75, 10.0, 10.0));
-        assert_eq!(sub_wave(Current::Quake(&both[0]), &both, &eews, now), Some(w));
+        assert_eq!(
+            sub_wave(Current::Quake(&both[0]), &both, &eews, now, &|_, _| 0.0),
+            Some(w)
+        );
         // 波が消えた (180 秒を過ぎた) ら映さない
-        assert_eq!(sub_wave(Current::Eew(&eews[0]), &both, &eews, t + 200_000), None);
+        assert_eq!(
+            sub_wave(Current::Eew(&eews[0]), &both, &eews, t + 200_000, &|_, _| 0.0),
+            None
+        );
+    }
+
+    #[test]
+    fn deep_or_far_waves_are_drawn_until_the_s_wave_reaches_the_shaken_area() {
+        // 浅く近い地震は今までどおり 3 分
+        assert_eq!(wave_life_ms(10.0, 300.0), WAVE_MAX_MS);
+        // 2026-10-25 小笠原諸島西方沖 (深さ 530km): 青森 (約 1400km) まで S 波が届くのは約 400 秒後
+        let life = wave_life_ms(530.0, 1400.0);
+        assert!((395_000..410_000).contains(&life), "{life}");
+        assert!(surface_radius_km(VS_KM_S, 530.0, life as f64 / 1000.0).unwrap() >= 1400.0);
+        // 長くても 8 分
+        assert_eq!(wave_life_ms(600.0, 3000.0), WAVE_LIMIT_MS);
     }
 
     #[test]
@@ -472,15 +520,15 @@ mod tests {
         assert!(surface_radius_km(VP_KM_S, -5.0, 1.0).is_some()); // 負の深さは 0
         let t = T0 as u64;
         let q = [quake(t, T0, Scale::S4, Some(TOKYO))];
-        let w = waves(&q, &[], t + 60_000);
+        let w = waves(&q, &[], t + 60_000, &|_, _| 0.0);
         assert!(w[0].p_km.unwrap() > w[0].s_km.unwrap()); // P 波の方が先へ進む
-        assert_eq!(waves(&q, &[], t + 180_000).len(), 1);
-        assert_eq!(waves(&q, &[], t + 180_001).len(), 0);
+        assert_eq!(waves(&q, &[], t + 180_000, &|_, _| 0.0).len(), 1);
+        assert_eq!(waves(&q, &[], t + 180_001, &|_, _| 0.0).len(), 0);
         // 震源や発生時刻が無い地震は描けない
-        assert!(waves(&[quake(t, T0, Scale::S4, None)], &[], t).is_empty());
+        assert!(waves(&[quake(t, T0, Scale::S4, None)], &[], t, &|_, _| 0.0).is_empty());
         let mut no_origin = quake(t, T0, Scale::S4, Some(TOKYO));
         no_origin.origin_ms = None;
-        assert!(waves(&[no_origin], &[], t).is_empty());
+        assert!(waves(&[no_origin], &[], t, &|_, _| 0.0).is_empty());
     }
 
     #[test]
@@ -488,7 +536,7 @@ mod tests {
         let t = T0 as u64;
         let mut q = quake(t, T0, Scale::S4, Some(TOKYO));
         q.hypocenter.as_mut().unwrap().depth_km = None;
-        let w = waves(&[q], &[], t + 10_000);
+        let w = waves(&[q], &[], t + 10_000, &|_, _| 0.0);
         assert_eq!(w[0].s_km, surface_radius_km(VS_KM_S, 10.0, 10.0));
     }
 
