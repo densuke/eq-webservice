@@ -11,7 +11,7 @@ use super::hindsight::{self, Hindsight};
 use super::icon::Icons;
 use super::model::same_quake;
 use super::notice::Notices;
-use super::replay_info::ReplayInfo;
+use super::replay_info::{Foresight, ReplayInfo};
 use super::shaken::Point;
 use super::spread::{self, Spread};
 use super::{eew, model, quake_band, yuv, HISTORY};
@@ -116,12 +116,17 @@ type StillKey = (
 );
 
 /// 地震の画面の地震から、寄りの目標の材料を作る。平時は None (日本全体)
+/// foresight (記録から描き直すときの、のちに届く各地の震度の観測点) があれば、その点も揺れた範囲に入れる。
+/// 最初の円に合わせて灯す点が画面の外に出ず、円もその点まで広がる (wave_cap_km)
 fn aim_of(
     renderer: &Renderer,
     current: Option<eew::Current>,
     eews: &[eew::EewSummary],
     hindsight: Option<&Hindsight>,
+    foresight: Option<&Foresight>,
 ) -> Option<Aim> {
+    let later: Vec<Point> = foresight.map_or_else(Vec::new, |f| f.points.iter().map(model::to_point).collect());
+    let with_later = |points: &[Point]| -> Vec<Point> { points.iter().chain(&later).cloned().collect() };
     let make = |h: Option<&Hypocenter>, origin_ms, areas: &[&str], points: &[Point], prefs: &[&str], forecast| Aim {
         epicenter: h.and_then(|h| {
             Some(Epicenter {
@@ -131,7 +136,7 @@ fn aim_of(
                 origin_ms,
             })
         }),
-        shaken: renderer.zones().shaken(areas, points, prefs),
+        shaken: renderer.zones().shaken(areas, &with_later(points), prefs),
         forecast,
     };
     let Some(current) = current else {
@@ -143,7 +148,7 @@ fn aim_of(
                 depth_km: h.depth_km,
                 origin_ms: None,
             }),
-            shaken: None,
+            shaken: renderer.zones().shaken(&[], &later, &[]),
             forecast: false,
         });
     };
@@ -224,13 +229,14 @@ impl Stepper {
         current: Option<eew::Current>,
         eews: &[eew::EewSummary],
         hindsight: Option<&Hindsight>,
+        foresight: Option<&Foresight>,
         now: u64,
         snap: bool,
     ) -> ViewKey {
         if !self.renderer.zoom_enabled() {
             return None;
         }
-        let target = aim_of(&self.renderer, current, eews, hindsight)
+        let target = aim_of(&self.renderer, current, eews, hindsight, foresight)
             .and_then(|a| target_box(&a, now))
             .map(|b| fit_box(b, self.renderer.map_aspect()));
         self.camera.advance(target, now, snap);
@@ -245,7 +251,7 @@ impl Stepper {
         let Some(sub_aspect) = self.renderer.sub_aspect().filter(|_| self.renderer.sub_map_enabled()) else {
             return;
         };
-        let fit = aim_of(&self.renderer, current, eews, None)
+        let fit = aim_of(&self.renderer, current, eews, None, None)
             .map(|mut a| {
                 a.epicenter = a.epicenter.map(|e| Epicenter { origin_ms: None, ..e });
                 a
@@ -280,7 +286,8 @@ impl Stepper {
             None => (None, None),
         };
         let pending = hindsight::pending(i.hindsight, &groups, &eews);
-        let view = self.aim_camera(current, &eews, pending, now, i.fast_forward);
+        let foresight = i.replay.and_then(|r| r.foresight.as_ref());
+        let view = self.aim_camera(current, &eews, pending, foresight, now, i.fast_forward);
         self.aim_sub(current, &eews);
         // 揺れの広がりの再現は、地震の画面の地震が観測点の値の入った地震情報のときだけ。
         // 記録から描き直すときは、最初の円に合わせて観測点を灯しているので、描き直さない (その時刻にまた揺れたように見えるため)
@@ -290,7 +297,7 @@ impl Stepper {
         };
         // 地震波は地震の画面のときだけ描く (のちに分かった震源の波は、平時の画面でも描く)
         // 円は寄りの地震の揺れた範囲で止める。shortcut: 同時に起きた別の地震の円も同じ半径で止める、重なる地震が増えたら地震ごとに
-        let cap = wave_cap_km(aim_of(&self.renderer, current, &eews, pending).as_ref());
+        let cap = wave_cap_km(aim_of(&self.renderer, current, &eews, pending, foresight).as_ref());
         let waves: Vec<eew::Wave> = frame_waves(&groups, &eews, current.is_some(), i.hindsight, spread.as_ref(), now)
             .into_iter()
             .map(|w| w.capped(cap))

@@ -906,3 +906,46 @@ fn write_big_wave_pngs_when_asked() {
             .unwrap();
     }
 }
+
+/// 再現動画: のちに届く各地の震度の観測点も揺れた範囲に入れて寄る (灯す点が画面の外に出ないように)
+#[test]
+fn the_later_stations_of_a_replay_stay_in_the_view() {
+    use crate::quake::{ObservationPoint, StationPos};
+    let ev = chiba_events();
+    // 震源 (35.7N 140.8E) から北へ約 280km の観測点 (仙台のあたり)
+    let points = vec![ObservationPoint {
+        pref: "宮城県".into(),
+        addr: "仙台のあたり".into(),
+        is_area: false,
+        scale: Scale::S2,
+        station: Some(StationPos {
+            lat: 38.2,
+            lon: 140.9,
+            area: "宮城県南部".into(),
+        }),
+    }];
+    let info = ReplayInfo {
+        foresight: Some(replay_info::Foresight {
+            lat: 35.7,
+            lon: 140.8,
+            depth_km: 40.0,
+            origin_ms: T0,
+            points: &points,
+        }),
+        intro: &[],
+    };
+    let icons = Icons::new();
+    let width = |replay: Option<&ReplayInfo>| {
+        let mut st = Stepper::new(load_renderer(&config(true)).unwrap());
+        for k in 0..60 {
+            st.step(&Input {
+                replay,
+                ..input(&ev, SHOWN_AT + k * 200, &icons)
+            });
+        }
+        st.zoom_fit().h
+    };
+    let live = width(None);
+    let replay = width(Some(&info));
+    assert!(replay > live * 1.3, "{live} -> {replay}");
+}
