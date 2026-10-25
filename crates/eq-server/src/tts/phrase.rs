@@ -499,7 +499,11 @@ pub fn announce_segments(ev: &Event, priors: &[&Event]) -> Vec<String> {
 /// 実際に読む部品。announce_segments に、地震情報の最終報 (各地の震度) と、
 /// 津波警報・大津波警報の入った津波の報だけ「繰り返します」と 2 回目を足す。docs/tts.md S13
 pub fn spoken_segments(ev: &Event, priors: &[&Event]) -> Vec<String> {
-    let segs = announce_segments(ev, priors);
+    let segs = match &ev.body {
+        // 最終報は差分ではなく、まとめを全部読む (差分だと、震度速報・震源の情報で出そろっていれば何も読まない)
+        EventBody::Quake(q) if q.info_type == QuakeInfoType::DetailScale => final_segments(ev, q),
+        _ => announce_segments(ev, priors),
+    };
     if segs.is_empty() {
         return segs;
     }
@@ -511,6 +515,30 @@ pub fn spoken_segments(ev: &Event, priors: &[&Event]) -> Vec<String> {
     let mut out = segs;
     out.push(REPEAT.to_string());
     out.extend(again);
+    out
+}
+
+/// 最終報 (各地の震度) のまとめ: 初報の形 (震源・最大震度・M・津波) に、5弱以上を観測した都道府県 (強い順に 3 つまで) を足す
+fn final_segments(ev: &Event, q: &crate::quake::model::Quake) -> Vec<String> {
+    let mut out = segments(ev);
+    if out.is_empty() {
+        return out;
+    }
+    let mut prefs: Vec<_> = q
+        .pref_max
+        .iter()
+        .filter(|p| p.scale >= PREF_MIN && readable(p.scale))
+        .collect();
+    prefs.sort_by_key(|p| std::cmp::Reverse(p.scale));
+    out.extend(
+        prefs
+            .iter()
+            .take(PREF_LIST_LIMIT)
+            .map(|p| pref_sentence(&p.pref, p.scale)),
+    );
+    if prefs.len() > PREF_LIST_LIMIT {
+        out.push(TSUNAMI_MORE.to_string());
+    }
     out
 }
 
@@ -701,10 +729,18 @@ mod tests {
         twice.push(REPEAT.to_string());
         twice.extend(once.clone());
         assert_eq!(spoken_segments(&detail, &[]), twice);
-        // 続報の差分も、最終報なら 2 回
+        // 震度速報・震源の情報のあとでも、最終報は差分ではなく、まとめを全部読んで 2 回
+        // (2026-10-25 08:59 日向灘: 差分が空で、最終報が無音だった)
         let prompt = quake_ev(quake(QuakeInfoType::ScalePrompt, "", None, Scale(20), "Unknown"));
-        let diff = spoken_segments(&detail, &[&prompt]);
-        assert_eq!(diff.iter().filter(|x| *x == REPEAT).count(), 1);
+        let dest = quake_ev(quake(
+            QuakeInfoType::Destination,
+            "千葉県北西部",
+            Some(4.0),
+            Scale(20),
+            "None",
+        ));
+        assert!(announce_segments(&detail, &[&prompt, &dest]).is_empty());
+        assert_eq!(spoken_segments(&detail, &[&prompt, &dest]), twice);
         // 震度速報・震源に関する情報・緊急地震速報は 1 回
         assert_eq!(spoken_segments(&prompt, &[]), announce_segments(&prompt, &[]));
         let dest = quake_ev(quake(
@@ -976,6 +1012,48 @@ mod tests {
             })
             .collect();
         quake_ev(q)
+    }
+
+    #[test]
+    fn the_final_report_reads_the_whole_summary_with_the_prefectures_of_5_lower_or_more() {
+        let d = pq(
+            QuakeInfoType::DetailScale,
+            "能登半島",
+            Some(7.6),
+            Scale(70),
+            "Warning",
+            &[
+                ("石川県", 70),
+                ("新潟県", 60),
+                ("富山県", 55),
+                ("福井県", 50),
+                ("長野県", 40),
+            ],
+        );
+        let p = pq(
+            QuakeInfoType::ScalePrompt,
+            "",
+            None,
+            Scale(70),
+            "Checking",
+            &[("石川県", 70)],
+        );
+        let got = spoken_segments(&d, &[&p]);
+        let once = &got[..got.iter().position(|x| x == REPEAT).unwrap()];
+        assert_eq!(
+            once,
+            s(&[
+                "地震情報。",
+                "震源は能登半島。",
+                "最大震度7。",
+                "マグニチュード7.6。",
+                "津波警報などが発表されています。",
+                "石川県で震度7を観測しました。",
+                "新潟県で震度6強を観測しました。",
+                "富山県で震度6弱を観測しました。",
+                "ほかの地域。",
+            ])
+        );
     }
 
     fn ts(cancelled: bool, areas: &[(&str, TsunamiGrade)]) -> Event {
