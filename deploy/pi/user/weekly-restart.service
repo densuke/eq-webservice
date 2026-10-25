@@ -1,0 +1,8 @@
+# ~/.config/systemd/user/weekly-restart.service に置く。タイマーは deploy/pi/user/weekly-restart.timer
+[Unit]
+Description=eq-webservice 週 1 回の配信のつなぎ直し (土曜、地震の対応中なら日曜)
+
+[Service]
+Type=oneshot
+Slice=eq.slice
+ExecStart=%h/work/eq-e2cast/tools/weekly-restart.sh
