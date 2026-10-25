@@ -158,45 +158,67 @@ pub struct WarnSummary {
     pub lines: Vec<String>,
 }
 
-/// 警報以上 (警報・危険警報・特別警報) を種類ごとの文にする。注意報は含めない。
-/// 1 県 per_pref 市町村までで、残りは「ほかN」
-pub fn warning_summary(w: &Warnings, per_pref: usize) -> Option<WarnSummary> {
-    type Prefs<'a> = Vec<(&'static str, Vec<&'a str>)>;
-    let mut by_kind: BTreeMap<&str, (WarningLevel, Prefs)> = BTreeMap::new();
+/// 警報以上の 1 種類 (web/src/warnings.ts の WarnItem)。prefs は県ごとの市町村 (県の番号順)
+#[derive(Debug, Clone, PartialEq)]
+pub struct WarnItem {
+    pub level: WarningLevel,
+    pub name: String,
+    pub prefs: Vec<(&'static str, Vec<String>)>,
+}
+
+impl WarnItem {
+    /// 「岡山県 岡山市・倉敷市、広島県 福山市」。1 県 per_pref 市町村までで、残りは「ほかN」
+    pub fn places(&self, per_pref: usize) -> String {
+        let parts: Vec<String> = self
+            .prefs
+            .iter()
+            .map(|(pref, ms)| {
+                let shown = ms[..ms.len().min(per_pref)].join("・");
+                match ms.len().checked_sub(per_pref).filter(|n| *n > 0) {
+                    Some(n) => format!("{pref} {shown} ほか{n}"),
+                    None => format!("{pref} {shown}"),
+                }
+            })
+            .collect();
+        parts.join("、")
+    }
+}
+
+/// 警報以上 (警報・危険警報・特別警報) を種類ごとにまとめる。注意報は含めない。段階の高い順、同じなら名前順
+pub fn warning_items(w: &Warnings) -> Vec<WarnItem> {
+    let mut by_kind: BTreeMap<&str, WarnItem> = BTreeMap::new();
     for (code, kinds) in &w.areas {
         for k in kinds {
             let level = warning_level(&k.name);
             if level == WarningLevel::Advisory {
                 continue;
             }
-            let (_, prefs) = by_kind.entry(&k.name).or_insert((level, Vec::new()));
+            let item = by_kind.entry(&k.name).or_insert_with(|| WarnItem {
+                level,
+                name: k.name.clone(),
+                prefs: Vec::new(),
+            });
             let pref = pref_of(code);
-            let name = w.names.get(code).map_or(code.as_str(), String::as_str);
-            match prefs.iter_mut().find(|(p, _)| *p == pref) {
+            let name = w.names.get(code).cloned().unwrap_or_else(|| code.clone());
+            match item.prefs.iter_mut().find(|(p, _)| *p == pref) {
                 Some((_, names)) => names.push(name),
-                None => prefs.push((pref, vec![name])),
+                None => item.prefs.push((pref, vec![name])),
             }
         }
     }
-    let mut kinds: Vec<_> = by_kind.into_iter().collect();
+    let mut items: Vec<WarnItem> = by_kind.into_values().collect();
     // BTreeMap は名前順なので、安定な並べ替えで段階の高い順だけ足す
-    kinds.sort_by_key(|k| std::cmp::Reverse(k.1 .0));
-    let top = kinds.first()?.1 .0;
-    let lines = kinds
-        .into_iter()
-        .map(|(name, (_, prefs))| {
-            let parts: Vec<String> = prefs
-                .iter()
-                .map(|(pref, ms)| {
-                    let shown = ms[..ms.len().min(per_pref)].join("・");
-                    match ms.len().checked_sub(per_pref).filter(|n| *n > 0) {
-                        Some(n) => format!("{pref} {shown} ほか{n}"),
-                        None => format!("{pref} {shown}"),
-                    }
-                })
-                .collect();
-            format!("{name}: {}", parts.join("、"))
-        })
+    items.sort_by_key(|i| std::cmp::Reverse(i.level));
+    items
+}
+
+/// 警報以上を種類ごとの文にする (「レベル３大雨警報: 岡山県 岡山市・倉敷市」)。1 県 per_pref 市町村まで
+pub fn warning_summary(w: &Warnings, per_pref: usize) -> Option<WarnSummary> {
+    let items = warning_items(w);
+    let top = items.first()?.level;
+    let lines = items
+        .iter()
+        .map(|i| format!("{}: {}", i.name, i.places(per_pref)))
         .collect();
     Some(WarnSummary { top, lines })
 }

@@ -224,20 +224,29 @@ impl Stepper {
     }
 
     /// コマの時刻 now で寄りを進め、描く面に渡す。寄っているときの表示範囲の判定を返す
+    #[allow(clippy::too_many_arguments)]
     fn aim_camera(
         &mut self,
         current: Option<eew::Current>,
         eews: &[eew::EewSummary],
         hindsight: Option<&Hindsight>,
         foresight: Option<&Foresight>,
+        warnings: Option<&Warnings>,
         now: u64,
         snap: bool,
     ) -> ViewKey {
         if !self.renderer.zoom_enabled() {
             return None;
         }
+        // 平時は、危険警報以上が出ている県へ毎分の終わりに寄せる。どこか分かるよう、狭い区域でも 400 km 四方は映す
+        let calm_focus = || {
+            current.is_none().then_some(())?;
+            let f = self.renderer.warn_focus(warnings, now)?;
+            Some(self.renderer.warn_box(&f.codes)?.pad_by(0.5, 400.0))
+        };
         let target = aim_of(&self.renderer, current, eews, hindsight, foresight)
             .and_then(|a| target_box(&a, now))
+            .or_else(calm_focus)
             .map(|b| fit_box(b, self.renderer.map_aspect()));
         self.camera.advance(target, now, snap);
         let zoomed = (!self.camera.is_home()).then(|| self.camera.fit());
@@ -287,7 +296,7 @@ impl Stepper {
         };
         let pending = hindsight::pending(i.hindsight, &groups, &eews);
         let foresight = i.replay.and_then(|r| r.foresight.as_ref());
-        let view = self.aim_camera(current, &eews, pending, foresight, now, i.fast_forward);
+        let view = self.aim_camera(current, &eews, pending, foresight, i.warnings, now, i.fast_forward);
         self.aim_sub(current, &eews);
         // 揺れの広がりの再現は、地震の画面の地震が観測点の値の入った地震情報のときだけ。
         // 記録から描き直すときは、最初の円に合わせて観測点を灯しているので、描き直さない (その時刻にまた揺れたように見えるため)

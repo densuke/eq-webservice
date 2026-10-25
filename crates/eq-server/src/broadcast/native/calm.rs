@@ -30,6 +30,8 @@ pub struct CardEnv<'a> {
     pub bounds: BoxRect,
     /// 情報の窓の枠 (info_window)。本図だけが描く
     pub info: BoxRect,
+    /// 危険警報以上の区域へ寄せている間の案内 (その間は天気の札を出さず、情報の窓にこれを出す)
+    pub focus_line: Option<&'a str>,
 }
 
 /// 札を置いてよい範囲 (本図 = 定義の main の矩形)。警報の帯は main の外 (定義の banners) なので、
@@ -68,6 +70,12 @@ pub fn draw(
     for &[lat, lon, mm] in rain {
         let (x, y) = frame.view.px(lon, lat);
         circle(pm, x, y, 2.5, rain_color(mm), 1.0);
+    }
+    if let Some(l) = env.focus_line {
+        if !frame.is_inset() {
+            draw_info_window(pm, text, env.info, l);
+        }
+        return;
     }
     let view = w.view(scene.now_ms, scene.flip_s);
     let tomorrow = view == WeatherView::Tomorrow;
