@@ -1,6 +1,6 @@
 # Twitch のチャットに再現動画を案内する (設計メモ)
 
-2026-10-25 時点の調査と設計案。実装・本番の変更・Twitch への投稿はまだしていない。
+2026-10-25 時点の調査と設計案。実装は `deploy/twitch_chat_archive.py` (案内)・`deploy/twitch_chat_authorize.py` (許可)・`deploy/pi/user/twitch-chat-archive.service`・`deploy/twitch-chat-archive.timer`。置き方は docs/broadcast-pi.md。
 
 ## ねらい
 
@@ -133,10 +133,10 @@ Authorization Code Grant でも取れるが、アプリにリダイレクト URI
 ### 許可の手順 (配信者本人がブラウザで行う)
 
 1. (確認) dev.twitch.tv の Console で、登録済みのアプリの「クライアントの種類」(Confidential / Public) を見る。Device Code の交換で `client_secret` を付けるかがこれで決まる。
-2. Pi で許可用の小さなスクリプト (実装時に `deploy/twitch_chat_authorize.py` として作る) を実行する。表示されるのは `verification_uri` と `user_code` だけ。
+2. Pi で `python3 ~/work/eq-e2cast/tools/twitch_chat_authorize.py ~/.config/twitch-live-watch` を実行する。表示されるのは `verification_uri` と `user_code` だけ。
 3. 手元のブラウザで `verification_uri` を開き、fugahogeds でログインして `user_code` を確かめ、3 つのスコープ (`user:write:chat`・`user:bot`・`channel:bot`) を許可する。
 4. スクリプトが許可を確認して終わる。B の案ならトークンは保存しない。
-5. テスト: 平時・配信中に本番のスクリプトを 1 回手で動かし、チャットに 1 通出ること、`is_sent: true` を確かめる。
+5. テスト: 平時・配信中に `twitch_chat_archive.py ... --dry-run` で文面を確かめ、続けて `--dry-run` なしで 1 回手で動かし、チャットに 1 通出ること (`OK new ...`) を確かめる。
 
 許可を取り消したくなったら、Twitch の設定の「接続」からアプリの連携を外す。
 

@@ -1,0 +1,9 @@
+[Unit]
+Description=eq-webservice Twitch のチャットに再現動画を案内する (5 分ごと)
+
+[Timer]
+OnBootSec=7min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target
