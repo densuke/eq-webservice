@@ -146,6 +146,7 @@ body {
   background: rgba(13, 17, 23, 0.8); padding: 6px 7px; border-radius: 6px; font-size: 10px; color: var(--muted);
 }
 .scale { display: flex; gap: 5px; }
+.legend-unit { margin-bottom: 3px; }
 .gauge, .gauge-labels { display: flex; flex-direction: column-reverse; }
 .gauge { width: 7px; border-radius: 3px; overflow: hidden; }
 .gauge i { height: 15px; }
