@@ -1,5 +1,7 @@
 // 気象警報・注意報 (平時の地図)。気象庁防災情報XML の集約通報をサーバがまとめたもの。
 
+import type { Box } from "./camera.ts";
+
 interface WarningKind {
   code: string;
   name: string;
@@ -42,11 +44,15 @@ export function prefOf(code: string): string {
   return PREFS[Number(code.slice(0, 2)) - 1] ?? "";
 }
 
-/**
- * 警報以上 (警報・危険警報・特別警報) を種類ごとの文にする。注意報は含めない。
- * 「レベル３大雨警報: 岡山県 岡山市・倉敷市、広島県 福山市」。1 県 perPref 市町村までで、残りは「ほかN」
- */
-export function warningSummary(w: Warnings & { names?: Record<string, string> }, perPref = 5): { top: WarningLevel; lines: string[] } | null {
+/** 警報以上の 1 種類: 「レベル３大雨警報」と「岡山県 岡山市・倉敷市、広島県 福山市」 */
+export interface WarnItem {
+  level: WarningLevel;
+  name: string;
+  places: string;
+}
+
+/** 警報以上 (警報・危険警報・特別警報) を種類ごとにまとめる。注意報は含めない。段階の高い順。1 県 perPref 市町村までで、残りは「ほかN」 */
+export function warningItems(w: Warnings, perPref = 5): WarnItem[] {
   const byKind = new Map<string, { level: WarningLevel; prefs: Map<string, string[]> }>();
   for (const code of Object.keys(w.areas).sort()) {
     for (const k of w.areas[code]) {
@@ -59,25 +65,40 @@ export function warningSummary(w: Warnings & { names?: Record<string, string> },
       entry.prefs.set(pref, [...names, w.names?.[code] ?? code]);
     }
   }
-  if (byKind.size === 0) return null;
-  const kinds = [...byKind].sort(([a, x], [b, y]) => ORDER.indexOf(y.level) - ORDER.indexOf(x.level) || a.localeCompare(b));
-  const lines = kinds.map(([name, { prefs }]) => {
-    const parts = [...prefs].map(([pref, ms]) => `${pref} ${ms.slice(0, perPref).join("・")}${ms.length > perPref ? ` ほか${ms.length - perPref}` : ""}`);
-    return `${name}: ${parts.join("、")}`;
-  });
-  return { top: kinds[0][1].level, lines };
+  return [...byKind]
+    .sort(([a, x], [b, y]) => ORDER.indexOf(y.level) - ORDER.indexOf(x.level) || a.localeCompare(b))
+    .map(([name, { level, prefs }]) => ({
+      level,
+      name,
+      places: [...prefs].map(([pref, ms]) => `${pref} ${ms.slice(0, perPref).join("・")}${ms.length > perPref ? ` ほか${ms.length - perPref}` : ""}`).join("、"),
+    }));
 }
 
-/** 平時に地図を寄せて見せる、危険警報以上の区域 (1 県ずつ)。lines はその県の危険警報以上だけの文 */
+/** 警報以上を種類ごとの文にする。「レベル３大雨警報: 岡山県 岡山市・倉敷市、広島県 福山市」 */
+export function warningSummary(w: Warnings, perPref = 5): { top: WarningLevel; lines: string[] } | null {
+  const items = warningItems(w, perPref);
+  return items.length ? { top: items[0].level, lines: items.map((i) => `${i.name}: ${i.places}`) } : null;
+}
+
+/** 平時に地図を寄せて見せる、危険警報以上の区域 (1 県、または隣り合う数県)。items (札、市町村は全部) と lines (案内、1 県 3 市町村まで) はその県の危険警報以上だけ */
 export interface WarnFocus {
-  pref: string;
+  prefs: string[];
   codes: string[];
+  items: WarnItem[];
   lines: string[];
+  top: WarningLevel;
 }
 
 const FOCUSED: WarningLevel[] = ["danger", "emergency"];
+/** この数の県に危険警報以上が出ていたら寄せない (全国の地図のほうが分かり、巡回も長くなりすぎる) */
+const MAX_FOCUS_PREFS = 6;
+function focusOf(prefs: string[], areas: Record<string, WarningKind[]>, names: Warnings["names"]): WarnFocus {
+  const w = { reported_at: "", areas, names };
+  const items = warningItems(w, Infinity);
+  return { prefs, codes: Object.keys(areas).sort(), items, lines: warningSummary(w, 3)!.lines, top: items[0].level };
+}
 
-/** 危険警報以上の区域を県ごとにまとめる。段階の高い県から、同じなら県の番号順 */
+/** 危険警報以上の区域を県ごとにまとめる。特別警報の県があればその県だけ。段階の高い県から、同じなら県の番号順 */
 export function warnFocuses(w: Warnings | null): WarnFocus[] {
   if (!w) return [];
   const byPref = new Map<string, Record<string, WarningKind[]>>();
@@ -87,13 +108,37 @@ export function warnFocuses(w: Warnings | null): WarnFocus[] {
     const pref = prefOf(code);
     byPref.set(pref, { ...byPref.get(pref), [code]: kinds });
   }
-  return [...byPref]
-    .map(([pref, areas]) => ({ pref, areas, top: ORDER.indexOf(warningSummary({ reported_at: "", areas })!.top) }))
-    .sort((a, b) => b.top - a.top)
-    .map(({ pref, areas }) => ({ pref, codes: Object.keys(areas), lines: warningSummary({ reported_at: w.reported_at, areas, names: w.names }, 3)!.lines }));
+  const all = [...byPref].map(([pref, areas]) => focusOf([pref], areas, w.names));
+  const emergency = all.filter((f) => f.top === "emergency");
+  const fs = emergency.length ? emergency : all;
+  return fs.length >= MAX_FOCUS_PREFS ? [] : fs;
 }
 
-/** 1 分のうち地図を寄せる秒数 (毎分の後ろ)。県が複数なら 1 分ごとに次の県へ */
+/**
+ * 1 画面に収まる (外接矩形の幅・高さが maxUnits 以下) 県どうしを、段階の高い順にまとめる。
+ * boxOf は区域のコードの外接矩形 (地図座標)。区域が読めていなければ null で、まとめない
+ */
+export function mergeFocuses(fs: WarnFocus[], w: Warnings, boxOf: (codes: string[]) => Box | null, maxUnits: number): WarnFocus[] {
+  const fits = (codes: string[]) => {
+    const b = boxOf(codes);
+    return b != null && b.x1 - b.x0 <= maxUnits && b.y1 - b.y0 <= maxUnits;
+  };
+  const groups = fs.reduce<WarnFocus[][]>((gs, f) => {
+    const i = gs.findIndex((g) => fits([...g.flatMap((x) => x.codes), ...f.codes]));
+    return i < 0 ? [...gs, [f]] : gs.map((g, j) => (j === i ? [...g, f] : g));
+  }, []);
+  return groups.map((g) =>
+    g.length === 1
+      ? g[0]
+      : focusOf(
+          g.flatMap((f) => f.prefs),
+          Object.fromEntries(g.flatMap((f) => f.codes).map((c) => [c, w.areas[c].filter((k) => FOCUSED.includes(warningLevel(k.name)))])),
+          w.names,
+        ),
+  );
+}
+
+/** 1 分のうち地図を寄せる秒数 (毎分の後ろ)。寄せる先が複数なら 1 分ごとに次へ */
 const FOCUS_SEC = 15;
 
 export function warnFocusAt(fs: WarnFocus[], now: number): WarnFocus | null {

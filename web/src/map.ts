@@ -5,6 +5,7 @@ import { scaleColor, scaleLabel, scaleTextColor } from "./scale.ts";
 import { interiorPoint, labelPx, mainRing, pickLabels } from "./labels.ts";
 import { geoCircle } from "./waves.ts";
 import { ringsBox, union, type Box } from "./camera.ts";
+import { placeCard } from "./warn-card.ts";
 import mapCss from "./map.css";
 import { esc } from "./html.ts";
 import { baseId } from "./map-ids.ts";
@@ -175,6 +176,9 @@ export class JapanMap {
   private markerItems: { key: string; x: number; y: number; label: number | null; primary: boolean; scale: number; note?: string; ghost?: boolean }[] = [];
   /** 画面外の地震の方向を示す矢印 (地図の上に重ねる HTML) */
   private offscreen: HTMLDivElement | null = null;
+  /** 平時に寄せた危険警報以上の区域の札と矢印 (本図だけ) */
+  private warnCardLayer: HTMLDivElement | null = null;
+  private warnCard: { codes: string[]; html: string; level: string } | null = null;
   /** 画面外の矢印が押されたとき (グループのキー) */
   onSelect: ((key: string) => void) | null = null;
   private pWave = el("path", { class: "wave wave-p" });
@@ -232,6 +236,13 @@ export class JapanMap {
       });
       container.append(layer);
       this.offscreen = layer;
+      const cards = document.createElement("div");
+      cards.className = "warn-card-layer";
+      cards.hidden = true;
+      cards.setAttribute("aria-hidden", "true");
+      cards.innerHTML = `<svg class="wc-arrow"><defs><marker id="wc-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0L10 5L0 10z"/></marker></defs><line marker-end="url(#wc-head)"/></svg><div class="warn-card"></div>`;
+      container.append(cards);
+      this.warnCardLayer = cards;
     }
     this.view = this.homeView();
     this.applyView();
@@ -751,6 +762,38 @@ export class JapanMap {
     this.renderMarkers();
     this.updateMarkerScale();
     this.thinCities();
+    this.renderWarnCard();
+  }
+
+  /** 平時に寄せた区域の札。null で消す。html は中身、level は枠と矢印の色 */
+  setWarnCard(card: { codes: string[]; html: string; level: string } | null): void {
+    this.warnCard = card;
+    this.renderWarnCard();
+  }
+
+  private renderWarnCard(): void {
+    const layer = this.warnCardLayer;
+    if (!layer) return;
+    const c = this.warnCard;
+    const box = c && this.warnBox(c.codes);
+    layer.hidden = !box;
+    if (!c || !box) return;
+    const card = layer.querySelector<HTMLDivElement>(".warn-card")!;
+    if (card.dataset.html !== c.html) {
+      card.dataset.html = c.html;
+      card.innerHTML = c.html;
+    }
+    layer.dataset.level = c.level;
+    const r = this.svg.getBoundingClientRect();
+    const k = this.unitsPerPixel();
+    const ox = this.view.x - (r.width * k - this.view.w) / 2;
+    const oy = this.view.y - (r.height * k - this.view.h) / 2;
+    const region = { x0: (box.x0 - ox) / k, y0: (box.y0 - oy) / k, x1: (box.x1 - ox) / k, y1: (box.y1 - oy) / k };
+    const p = placeCard(region, { w: card.offsetWidth, h: card.offsetHeight }, { w: r.width, h: r.height });
+    card.style.left = `${p.x.toFixed(0)}px`;
+    card.style.top = `${p.y.toFixed(0)}px`;
+    const line = layer.querySelector("line")!;
+    for (const [a, v] of [["x1", p.fromX], ["y1", p.fromY], ["x2", p.toX], ["y2", p.toY]] as const) line.setAttribute(a, v.toFixed(0));
   }
 
   /** 1 画面ピクセルあたりの地図座標 */

@@ -17,13 +17,14 @@ import { pipSlot } from "./replay-sound.ts";
 import { play, soundEnabled } from "./sound.ts";
 import { $, map, subMap } from "./dom.ts";
 import { mainMapTarget } from "./hold.ts";
-import { pad } from "./camera.ts";
+import { KM_TO_UNITS, pad } from "./camera.ts";
+import { warnCardHtml } from "./warn-card.ts";
 import { invalidateSubMap, renderSubMap, renderSubWaves, subMapShown } from "./sub-map.ts";
 import { type World, app, hooks, liveWorld, now, now as serverNow } from "./state.ts";
 import { activeAreas, latestTsunami, tsunamiAlert } from "./tsunami.ts";
 import type { EewEvent, EqEvent, UserquakeEvent } from "./types.ts";
 import { type UserquakeRead, confidenceGrade, latestUserquake, userquakeReadable, userquakeShown } from "./userquake.ts";
-import { type Warnings, topLevel, warnFocusAt, warnFocuses, warningSummary } from "./warnings.ts";
+import { type Warnings, mergeFocuses, topLevel, warnFocusAt, warnFocuses, warningSummary } from "./warnings.ts";
 import { notifyVoice, mixerAudio } from "./broadcast.ts";
 import { enqueueAnnounce, enqueueVoice, isPriorityTsunami, tsunamiHistory, voiceRoute, voiceUrl } from "./voice.ts";
 import { loadBgmConfig, updateBgm } from "./bgm.ts";
@@ -113,11 +114,13 @@ export function tick(): void {
   }
   // 平時は地震の塗り分けを消して気象警報・注意報を塗る。BGM は地震・津波・揺れの報告の間とデモ中は止める
   const { calm, quiet } = renderWarnings(now, renderUserquake(now));
-  // 平時に危険警報以上が出ていれば、毎分の終わりにその県へ寄せる (全国の地図だと小さな区域が埋もれるため)。
-  // どこか分かるよう、狭い区域でも 400 km 四方は映す
-  const focus = calm && app.selectedKey == null ? warnFocusAt(warnFocuses(app.warnings), now) : null;
+  // 平時に危険警報以上が出ていれば、毎分の終わりにその県 (隣り合う県はまとめて) へ寄せ、札と矢印で示す
+  // (全国の地図だと小さな区域が埋もれるため)。どこか分かるよう、狭い区域でも 400 km 四方は映す
+  const fs = calm && app.selectedKey == null && app.warnings ? mergeFocuses(warnFocuses(app.warnings), app.warnings, (c) => map.warnBox(c), 600 * KM_TO_UNITS) : [];
+  const focus = warnFocusAt(fs, now);
   const focusBox = focus && map.warnBox(focus.codes);
   map.setTarget(focusBox ? pad(focusBox, 0.5, 400) : mainMapTarget(box, subMapShown(), app.selectedKey != null));
+  map.setWarnCard(focusBox ? { codes: focus.codes, html: warnCardHtml(focus), level: focus.top } : null);
   updateBgm(quiet);
   updateBanner(quiet);
   renderCityWeather(calm, now, focusBox ? focus.lines : null);
