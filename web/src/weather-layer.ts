@@ -37,6 +37,9 @@ export function renderCityWeather(show: boolean, now: number): void {
   // 雨の強い地点ほど上に
   const rain = w ? [...w.rain].sort((a, b) => a[2] - b[2]).map(([lat, lon, mm]) => ({ lat, lon, color: rainColor(mm) })) : [];
   map.rainLayer.replaceChildren(...dotPaths(rain, "rain-dot"));
+  // 雨の点の色は震度の配色と似るので、点がある間は凡例を雨に替える
+  $("#legend-scale").hidden = rain.length > 0;
+  $("#legend-rain").hidden = rain.length === 0;
   map.cityLayer.replaceChildren(...(badges ? [...badges.cities].sort((a, b) => rank(a.name) - rank(b.name)).map((c) => cityMarker(c, night, tomorrow)) : []));
   map.refreshCities();
 }
