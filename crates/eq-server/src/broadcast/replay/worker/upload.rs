@@ -72,7 +72,7 @@ impl<A: Api> Publisher<A> {
             let why = format!("動画のファイルがありません ({})", file.display());
             return self.save(queue::upload_rejected(job, &why, now_ms));
         }
-        let meta = youtube_meta::build(&job.quakes, &job.chapters);
+        let meta = youtube_meta::build(&job.quakes, &job.chapters, job.title_prefix.as_deref());
         let insert = Insert {
             title: meta.title,
             description: meta.description,

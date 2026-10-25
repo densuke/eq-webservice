@@ -176,6 +176,20 @@ fn active_hindsight(members: &[Member], now_ms: u64) -> Option<Hindsight> {
         .max_by_key(|h| h.origin_ms)
 }
 
+/// 地震波を描いている間の、時計を飛ばさない時刻 (当時の時刻)。各地震の発生から wave_end (eew::wave_life_ms) まで 10 秒ごと。
+/// 飛ばす区間は報と holds の間が MAX_GAP_MS を超えたところなので、10 秒ごとに置けば波の間は飛ばない
+pub fn wave_holds(series: &Series, wave_end: impl Fn(&Hindsight) -> u64) -> Vec<u64> {
+    series
+        .members
+        .iter()
+        .filter_map(|m| m.hindsight)
+        .flat_map(|h| {
+            let (from, to) = (h.origin_ms.max(0) as u64, wave_end(&h));
+            (from..to).step_by(10_000).chain([to])
+        })
+        .collect()
+}
+
 /// 動画の筋書きを作る。コマは固定の fps で埋める。
 /// holds は時計を飛ばさない時刻 (当時の時刻。読み上げの声が流れている間など。voice::holds)。報と同じく、飛ばす区間の端になる
 pub fn build(series: &Series, fps: u32, holds: &[u64]) -> Option<Plan> {

@@ -4,8 +4,10 @@
 // 地表での到達半径 r = √(R² − 深さ²) を求める。
 // 気象庁の走時表 (JMA2001) を使うとより正確になる (将来の改善点)。
 
-/** 発生からこの秒数を過ぎたら P波・S波の表示を止める */
+/** P波・S波を描く最短の秒数。近い地震は今までどおりこれで止める */
 export const WAVE_MAX_SEC = 180;
+/** P波・S波を描く最長の秒数 */
+export const WAVE_LIMIT_SEC = 480;
 
 export const VP_KM_S = 6.5;
 export const VS_KM_S = 3.75;
@@ -27,6 +29,14 @@ export function surfaceRadiusKm(velocity: number, depthKm: number, elapsedSec: n
 /** 震央距離 distKm の地点に波が届くまでの秒数 */
 export function arrivalSec(velocity: number, depthKm: number, distKm: number): number {
   return Math.hypot(distKm, Math.max(depthKm, 0)) / velocity;
+}
+
+/**
+ * P波・S波を描く秒数。S 波が地表で reachKm (揺れた範囲の一番遠い所) に届くまで。短くても WAVE_MAX_SEC、長くても WAVE_LIMIT_SEC。
+ * 深い・遠い地震は S 波が遅れて地表に出るので、3 分では揺れた範囲の端まで届かない (native の eew::wave_life_ms と同じ)
+ */
+export function waveLifeSec(depthKm: number, reachKm: number): number {
+  return Math.min(Math.max(arrivalSec(VS_KM_S, depthKm, reachKm) + 5, WAVE_MAX_SEC), WAVE_LIMIT_SEC);
 }
 
 const EARTH_RADIUS_KM = 6371;

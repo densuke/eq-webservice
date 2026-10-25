@@ -2,7 +2,7 @@
 //! 観測点の値が入った地震情報が届いたら、発生時刻から波を描き直し、S 波が届いた観測点から灯す。
 //! 状態は持たない: 届いた報と今の時刻だけで決める (ライブも記録からの描き直しも同じに動く)。
 
-use super::eew::{quake_place, surface_radius_km, Wave, DEFAULT_DEPTH_KM, VP_KM_S, VS_KM_S, WAVE_MAX_MS};
+use super::eew::{quake_place, surface_radius_km, Wave, DEFAULT_DEPTH_KM, VP_KM_S, VS_KM_S, WAVE_LIMIT_MS};
 use super::model::{distance_km, event_place, same_quake, QuakeSummary, SAME_QUAKE_KM};
 use super::shaken::Zones;
 use crate::quake::{Event, EventBody, ObservationPoint, Scale};
@@ -40,7 +40,7 @@ pub fn spread_of(events: &[Event], current: &QuakeSummary, zones: &Zones, now_ms
         .min_by_key(|e| e.received_at_ms)?;
     let received = trigger.received_at_ms;
     // 再現の窓 (受信から LEAD_MS + 上限) の外は、ほかの計算をせずに返す (地震の画面のあいだ毎コマ呼ばれる)
-    if now_ms < received || now_ms > received + LEAD_MS + WAVE_MAX_MS as u64 {
+    if now_ms < received || now_ms > received + LEAD_MS + WAVE_LIMIT_MS as u64 {
         return None;
     }
     let points = stations(trigger)?;
@@ -89,7 +89,7 @@ pub fn spread_of(events: &[Event], current: &QuakeSummary, zones: &Zones, now_ms
         .reduce(f64::max)?;
     let start_ms = received + LEAD_MS;
     let arrive_ms = ((far * far + depth_km * depth_km).sqrt() / VS_KM_S * 1000.0).ceil() as u64;
-    let end_ms = start_ms + (arrive_ms + HOLD_MS).min(WAVE_MAX_MS as u64);
+    let end_ms = start_ms + (arrive_ms + HOLD_MS).min(WAVE_LIMIT_MS as u64);
     (now_ms <= end_ms).then_some(Spread {
         lat,
         lon,
@@ -320,7 +320,7 @@ mod tests {
         let EventBody::Quake(q) = &mut ev[1].body else { panic!() };
         q.points.push(point("とても遠い", false, Scale::S1));
         let s = spread_at(&ev, &z, R1).unwrap();
-        assert_eq!(s.end_ms, s.start_ms + WAVE_MAX_MS as u64);
+        assert_eq!(s.end_ms, s.start_ms + WAVE_LIMIT_MS as u64);
     }
 
     #[test]
@@ -388,12 +388,12 @@ mod tests {
 
     #[test]
     fn the_window_ends_at_lead_plus_the_wave_limit() {
-        // とても遠い点で、終わりが上限 (受信 + LEAD_MS + WAVE_MAX_MS) にかかる
+        // とても遠い点で、終わりが上限 (受信 + LEAD_MS + WAVE_LIMIT_MS) にかかる
         let z = zones(&[("とても遠い", (35.0 + 2000.0 / 111.2, 139.0))]);
         let mut ev = base(Scale::S3);
         let EventBody::Quake(q) = &mut ev[1].body else { panic!() };
         q.points.push(point("とても遠い", false, Scale::S1));
-        let edge = R1 + LEAD_MS + WAVE_MAX_MS as u64;
+        let edge = R1 + LEAD_MS + WAVE_LIMIT_MS as u64;
         assert!(spread_at(&ev, &z, edge - 1).is_some());
         assert_eq!(spread_at(&ev, &z, edge).map(|s| s.end_ms), Some(edge));
         assert_eq!(spread_at(&ev, &z, edge + 1), None);

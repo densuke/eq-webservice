@@ -2,14 +2,14 @@
 
 import { type Box, DEFAULT_STOP_KM, followRadiusKm, pad, pointBox, stopRadiusKm, union } from "./camera.ts";
 import { project } from "./map.ts";
-import { type Center, type WaveSource, currentGroup, geoOf, groupPlace, groupScale, pendingHindsight, recentQuakes, relatedQuake, shakenGeo, unsettledGroups, waveSources } from "./quakes.ts";
+import { type Center, type WaveSource, currentGroup, setWaveReach, geoOf, groupPlace, groupScale, pendingHindsight, recentQuakes, relatedQuake, shakenGeo, unsettledGroups, waveSources } from "./quakes.ts";
 import { sameQuake } from "./priority.ts";
 import { forecastTag } from "./detail.ts";
 import { heldEew } from "./groups.ts";
 import { $, map } from "./dom.ts";
-import { REPLAY_SPEED, WAVE_MAX_SEC, app, now } from "./state.ts";
+import { REPLAY_SPEED, app, now } from "./state.ts";
 import { activeAreas } from "./tsunami.ts";
-import { VP_KM_S, VS_KM_S, capKm, surfaceRadiusKm } from "./waves.ts";
+import { VP_KM_S, VS_KM_S, capKm, surfaceRadiusKm, waveLifeSec } from "./waves.ts";
 
 /** 震央の印。番号ごとに 1 つ (同じ地震の EEW と地震情報は地震情報の震源を使う) */
 export function renderMarkers(now: number): void {
@@ -56,6 +56,15 @@ interface Scene {
 function shakenBox(geo: { prefs: string[]; areas: string[] }): Box | null {
   return map.areaBox(geo.areas) ?? map.prefBox(geo.prefs);
 }
+
+// 波は、その地震の揺れた範囲の一番遠い角まで S 波が届くまで描く。緊急地震速報の波は、同じ地震の地震情報
+// (震度速報など、震源の分からないものも) の揺れた範囲も見る。震源だけのときは既定の上限
+setWaveReach((s) => {
+  const [x, y] = project(s.lon, s.lat);
+  const g = s.group;
+  const mine = g ? [g, ...app.world.store.list().filter((q) => q.kind === "quake" && q !== g && sameQuake(groupPlace(q), groupPlace(g)))] : [];
+  return stopRadiusKm(x, y, mine.map((m) => shakenBox(shakenGeo(m))).reduce<Box | null>((a, b) => union(a, b), null));
+});
 
 /** いま地図で見せる地震。null なら日本全体 */
 export function scene(now: number): Scene | null {
@@ -123,8 +132,8 @@ export function renderScene(sc: Scene | null): { box: Box | null; waving: boolea
   const [x, y] = project(c.lon, c.lat);
   const stop = stopRadiusKm(x, y, sc.shaken);
   const s = sc.t == null ? null : surfaceRadiusKm(VS_KM_S, c.depth, sc.t);
-  // 再生は揺れた地域を覆い終えたら打ち切る (早回しでも 180 秒分は長い)
-  const waving = sc.t != null && sc.t < WAVE_MAX_SEC && !(sc.replay && (s ?? 0) > stop);
+  // 波は S 波が揺れた範囲の端に届くまで (waveLifeSec)。再生は揺れた地域を覆い終えたら打ち切る (早回しでも 180 秒分は長い)
+  const waving = sc.t != null && sc.t < waveLifeSec(c.depth, stop) && !(sc.replay && (s ?? 0) > stop);
   if (!waving) return { box: pad(union(sc.shaken, pointBox(x, y, 0))!), waving, wave: null };
   // 円は寄りが引く上限 (揺れた範囲の一番遠い角) で止める。ほかの地震は揺れた範囲を持たないので既定の上限
   const wave = (w: Center, t: number, maxKm: number) => ({ ...w, pKm: capKm(surfaceRadiusKm(VP_KM_S, w.depth, t), maxKm), sKm: capKm(surfaceRadiusKm(VS_KM_S, w.depth, t), maxKm) });

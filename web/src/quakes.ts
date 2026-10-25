@@ -6,7 +6,9 @@ import type { Hindsight } from "./history.ts";
 import { type Group, heldEew, latestEew, summarizeQuake } from "./groups.ts";
 import { assignNumbers } from "./numbering.ts";
 import { type Place, byPriority, sameQuake, settleMs } from "./priority.ts";
-import { EEW_BANNER_MS, WAVE_MAX_SEC, app, now } from "./state.ts";
+import { DEFAULT_STOP_KM } from "./camera.ts";
+import { EEW_BANNER_MS, app, now } from "./state.ts";
+import { waveLifeSec } from "./waves.ts";
 import { tourIndex, worthTouring } from "./tour.ts";
 import { activeAreas } from "./tsunami.ts";
 import type { EewEvent, Hypocenter, Scale } from "./types.ts";
@@ -152,6 +154,15 @@ export function shakenGeo(g: Group): { prefs: string[]; areas: string[] } {
 /** group は本物の報から描く地震。後の報で分かった震源 (再生の始まり) から描くものは無い */
 export type WaveSource = Center & { origin: number; group?: Group };
 
+/**
+ * 波を描き続ける広がり (km)。揺れた範囲の一番遠い所までの距離で、地図を持つ scene.ts が setWaveReach で入れる。
+ * 入れる前 (テスト) は既定の上限 (DEFAULT_STOP_KM)
+ */
+let waveReach: (s: WaveSource) => number = () => DEFAULT_STOP_KM;
+export function setWaveReach(f: (s: WaveSource) => number): void {
+  waveReach = f;
+}
+
 /** 後の報で分かった震源のうち、まだ本物の震源 (同じ地震の報で震源の付いたもの) が届いていないもの */
 export function pendingHindsight(h: Hindsight | null, groups: Group[]): Hindsight | null {
   const p = h && { originMs: h.originMs, lat: h.lat, lon: h.lon };
@@ -159,7 +170,7 @@ export function pendingHindsight(h: Hindsight | null, groups: Group[]): Hindsigh
 }
 
 /**
- * P波・S波を描く地震 (優先度順)。同じ地震の EEW と地震情報は EEW を使う
+ * P波・S波を描く地震 (優先度順。S 波が揺れた範囲の端に届くまで: waveLifeSec)。同じ地震の EEW と地震情報は EEW を使う
  * (地震情報の発生時刻は分単位なので、円が遅れて見える)
  */
 export function waveSources(now: number): WaveSource[] {
@@ -167,14 +178,17 @@ export function waveSources(now: number): WaveSource[] {
   const groups = app.world.store.list().filter((g) => g.kind === "eew" || g.kind === "quake");
   for (const g of [...groups.filter((g) => g.kind === "eew"), ...groups.filter((g) => g.kind === "quake")]) {
     const geo = geoOf(g);
-    if (!geo?.center || geo.origin == null || now - geo.origin > WAVE_MAX_SEC * 1000 || g.updatedAt <= app.calmSince) continue;
+    if (!geo?.center || geo.origin == null || g.updatedAt <= app.calmSince) continue;
+    const s: WaveSource = { ...geo.center, origin: geo.origin, group: g };
+    if (now - geo.origin > waveLifeSec(geo.center.depth, waveReach(s)) * 1000) continue;
     // EEW どうしは event_id で別の地震と分かっているので、重ねて消すのは地震情報だけ
     if (g.kind === "quake" && out.some((s) => s.group?.kind === "eew" && sameQuake(groupPlace(s.group), groupPlace(g)))) continue;
-    out.push({ ...geo.center, origin: geo.origin, group: g });
+    out.push(s);
   }
   // 履歴の再生: 震源が届く前から、分かっている震源と発生時刻で波を描く (発生前は描かない)
   const h = pendingHindsight(app.demo?.hindsight ?? null, groups);
-  if (h && now >= h.originMs && now - h.originMs <= WAVE_MAX_SEC * 1000) out.push({ lat: h.lat, lon: h.lon, depth: h.depth, origin: h.originMs });
+  const hs: WaveSource | null = h && { lat: h.lat, lon: h.lon, depth: h.depth, origin: h.originMs };
+  if (hs && now >= hs.origin && now - hs.origin <= waveLifeSec(hs.depth, waveReach(hs)) * 1000) out.push(hs);
   return out
     .map((s) => ({ s, scale: s.group ? groupScale(s.group) : -1, at: s.group?.updatedAt ?? 0 }))
     .sort(byPriority)
