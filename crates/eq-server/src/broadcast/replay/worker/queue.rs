@@ -59,6 +59,9 @@ pub struct Job {
     /// 上げるのを断られた回数 (4xx。通信の失敗は数えない)
     #[serde(default)]
     pub upload_failures: u32,
+    /// タイトルの頭に付ける文字 (作り直して上げ直すときに手で書く。例: 「【修正版】」)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_prefix: Option<String>,
 }
 
 impl Job {
@@ -80,6 +83,7 @@ impl Job {
             youtube_id: None,
             uploaded_ms: None,
             upload_failures: 0,
+            title_prefix: None,
         }
     }
 }

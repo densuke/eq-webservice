@@ -172,9 +172,10 @@ pub fn description(quakes: &[Quake], chapters: &[Chapter]) -> String {
     text[..end].to_string()
 }
 
-pub fn build(quakes: &[Quake], chapters: &[Chapter]) -> VideoMeta {
+/// prefix はタイトルの頭に付ける文字 (作り直した動画の「【修正版】」など)
+pub fn build(quakes: &[Quake], chapters: &[Chapter], prefix: Option<&str>) -> VideoMeta {
     VideoMeta {
-        title: title(quakes),
+        title: truncate_chars(&format!("{}{}", prefix.unwrap_or(""), title(quakes)), TITLE_MAX_CHARS),
         description: description(quakes, chapters),
     }
 }
@@ -208,6 +209,14 @@ mod tests {
             name: name.into(),
             max_scale: scale,
         }
+    }
+
+    #[test]
+    fn a_remade_video_gets_the_prefix_at_the_head_of_the_title() {
+        let q = [quake(0, "小笠原諸島西方沖", 30)];
+        let meta = build(&q, &[], Some("【修正版】"));
+        assert_eq!(meta.title, format!("【修正版】{}", title(&q)));
+        assert_eq!(build(&q, &[], None).title, title(&q));
     }
 
     #[test]
