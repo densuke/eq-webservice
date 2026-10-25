@@ -135,12 +135,15 @@ body {
 .wc-arrow line { stroke: var(--wc); stroke-width: 3; stroke-linecap: round; }
 .wc-arrow marker path { fill: var(--wc); }
 .warn-card {
-  position: absolute; max-width: min(320px, 70%); padding: 8px 12px; border: 2px solid var(--wc); border-radius: 8px;
-  background: rgba(13, 17, 23, 0.9); color: var(--text); font-size: 13px; line-height: 1.4;
+  position: absolute; max-width: min(380px, 75%); padding: 10px 14px; border: 2px solid var(--wc); border-radius: 8px;
+  background: rgba(13, 17, 23, 0.92); color: var(--text); font-size: 15px; line-height: 1.45;
 }
-.wc-item + .wc-item { margin-top: 6px; }
-.wc-name { font-weight: 700; }
-.wc-places, .wc-rest { color: var(--muted); font-size: 12px; }
+.wc-item + .wc-item { margin-top: 8px; }
+.wc-name { font-size: 17px; font-weight: 800; }
+.wc-places { font-size: 15px; font-weight: 600; }
+.wc-rest { color: var(--muted); font-size: 13px; }
+/* 市町村は 3 行まで (種類と合わせて 1 種類 4 行)。溢れたら「…」 */
+.wc-places { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
 
 /* 画面外の地震の方向 (地図の端)。色は最大震度 */
 .offscreen-layer { position: absolute; inset: 0; pointer-events: none; z-index: 1; }

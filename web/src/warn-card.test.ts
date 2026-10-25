@@ -23,11 +23,11 @@ test("on a narrow screen the card still stays on screen", () => {
 
 test("the card lists up to two kinds and counts the rest", () => {
   const item = (name: string) => ({ level: "danger" as const, name, places: "和歌山県 有田市" });
-  const html = warnCardHtml({ prefs: ["和歌山県"], codes: [], top: "danger", items: [item("A"), item("B"), item("C"), item("D")] });
+  const html = warnCardHtml({ prefs: ["和歌山県"], codes: [], lines: [], top: "danger", items: [item("A"), item("B"), item("C"), item("D")] });
   assert.match(html, /A/);
   assert.match(html, /B/);
   assert.doesNotMatch(html, />C</);
   assert.match(html, /ほか 2 件/);
   // 文字は HTML として解釈しない
-  assert.doesNotMatch(warnCardHtml({ prefs: [], codes: [], top: "danger", items: [item("<b>")] }), /<b>/);
+  assert.doesNotMatch(warnCardHtml({ prefs: [], codes: [], lines: [], top: "danger", items: [item("<b>")] }), /<b>/);
 });

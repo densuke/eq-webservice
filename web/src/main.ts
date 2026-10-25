@@ -123,7 +123,7 @@ export function tick(): void {
   map.setWarnCard(focusBox ? { codes: focus.codes, html: warnCardHtml(focus), level: focus.top } : null);
   updateBgm(quiet);
   updateBanner(quiet);
-  renderCityWeather(calm, now, focusBox ? focus.items.map((i) => `${i.name}: ${i.places}`) : null);
+  renderCityWeather(calm, now, focusBox ? focus.lines : null);
   map.setFade(app.selectedKey ? 1 : calm ? 0 : fadeOpacity(now - displayedInfoMs()));
   renderMode();
   renderSound();

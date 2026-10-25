@@ -66,6 +66,7 @@ test("only danger and emergency areas are focused, one prefecture at a time, the
   // カードの中身は寄る県の危険警報以上だけ (注意報・ほかの県は入れない)
   assert.deepEqual(fs[1].items, [{ level: "danger", name: "レベル４土砂災害危険警報", places: "和歌山県 有田市・有田川町" }]);
   assert.equal(fs[1].top, "danger");
+  assert.deepEqual(fs[1].lines, ["レベル４土砂災害危険警報: 和歌山県 有田市・有田川町"]);
   assert.deepEqual(warnFocuses({ reported_at: "", areas: { "2720000": [kind("レベル３大雨警報")] } }), []);
   assert.deepEqual(warnFocuses(null), []);
 });
@@ -118,7 +119,7 @@ test("neighboring prefectures are shown together when they fit in one view", () 
 });
 
 test("the map zooms in for the last part of each minute, visiting each focus in turn", () => {
-  const f = (pref: string) => ({ prefs: [pref], codes: [], items: [], top: "danger" as const });
+  const f = (pref: string) => ({ prefs: [pref], codes: [], items: [], lines: [], top: "danger" as const });
   const fs = [f("奈良県"), f("和歌山県")];
   assert.equal(warnFocusAt(fs, 30_000), null);
   assert.deepEqual(warnFocusAt(fs, 50_000)?.prefs, ["奈良県"]);

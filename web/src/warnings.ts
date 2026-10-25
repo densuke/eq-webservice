@@ -80,22 +80,22 @@ export function warningSummary(w: Warnings, perPref = 5): { top: WarningLevel; l
   return items.length ? { top: items[0].level, lines: items.map((i) => `${i.name}: ${i.places}`) } : null;
 }
 
-/** 平時に地図を寄せて見せる、危険警報以上の区域 (1 県、または隣り合う数県)。items はその県の危険警報以上だけ */
+/** 平時に地図を寄せて見せる、危険警報以上の区域 (1 県、または隣り合う数県)。items (札、市町村は全部) と lines (案内、1 県 3 市町村まで) はその県の危険警報以上だけ */
 export interface WarnFocus {
   prefs: string[];
   codes: string[];
   items: WarnItem[];
+  lines: string[];
   top: WarningLevel;
 }
 
 const FOCUSED: WarningLevel[] = ["danger", "emergency"];
 /** この数の県に危険警報以上が出ていたら寄せない (全国の地図のほうが分かり、巡回も長くなりすぎる) */
 const MAX_FOCUS_PREFS = 6;
-const PER_PREF = 3;
-
 function focusOf(prefs: string[], areas: Record<string, WarningKind[]>, names: Warnings["names"]): WarnFocus {
-  const items = warningItems({ reported_at: "", areas, names }, PER_PREF);
-  return { prefs, codes: Object.keys(areas).sort(), items, top: items[0].level };
+  const w = { reported_at: "", areas, names };
+  const items = warningItems(w, Infinity);
+  return { prefs, codes: Object.keys(areas).sort(), items, lines: warningSummary(w, 3)!.lines, top: items[0].level };
 }
 
 /** 危険警報以上の区域を県ごとにまとめる。特別警報の県があればその県だけ。段階の高い県から、同じなら県の番号順 */

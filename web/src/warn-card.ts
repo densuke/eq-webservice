@@ -48,7 +48,7 @@ export function placeCard(region: Rect, card: { w: number; h: number }, screen: 
 
 const MAX_ITEMS = 2;
 
-/** 札の中身。1 種類 2 行 (種類 / 県と市町村) を MAX_ITEMS まで、残りは件数 */
+/** 札の中身。1 種類ごとに種類と県・市町村 (市町村は CSS で 3 行まで) を MAX_ITEMS まで、残りは件数 */
 export function warnCardHtml(f: WarnFocus): string {
   const rows = f.items
     .slice(0, MAX_ITEMS)
