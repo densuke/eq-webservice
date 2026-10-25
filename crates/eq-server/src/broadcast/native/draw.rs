@@ -309,9 +309,6 @@ impl Renderer {
             }
         }
         panel::draw_frame(t.low(), &mut self.text, &self.placed);
-        if let Some(legend) = self.placed.legend {
-            panel::draw_legend(t.top(), &mut self.text, legend);
-        }
         t
     }
 
@@ -353,9 +350,6 @@ impl Renderer {
             rect(t.low(), main.x, main.y, main.w, main.h, SEA, 1.0);
             t.clear_over(main);
             draw_land(t.low(), z, &self.neighbors, &self.prefs);
-            if let Some(legend) = placed.legend {
-                panel::draw_legend(t.top(), &mut self.text, legend);
-            }
         }
         for (slot, f) in frames(&self.main, &self.insets, &self.zoomed).into_iter().enumerate() {
             match Shake::of(scene, Some(&self.zones)) {
