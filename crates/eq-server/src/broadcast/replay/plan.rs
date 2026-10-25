@@ -176,17 +176,20 @@ fn active_hindsight(members: &[Member], now_ms: u64) -> Option<Hindsight> {
         .max_by_key(|h| h.origin_ms)
 }
 
-/// 動画の筋書きを作る。コマは固定の fps で埋める
-pub fn build(series: &Series, fps: u32) -> Option<Plan> {
+/// 動画の筋書きを作る。コマは固定の fps で埋める。
+/// holds は時計を飛ばさない時刻 (当時の時刻。読み上げの声が流れている間など。voice::holds)。報と同じく、飛ばす区間の端になる
+pub fn build(series: &Series, fps: u32, holds: &[u64]) -> Option<Plan> {
     let events = &series.events;
     let starts: Vec<u64> = series.members.iter().map(|m| m.start_ms).collect();
     let start = *starts.iter().min()?;
     let ats: Vec<u64> = events.iter().map(|e| e.received_at_ms).collect();
-    let last_at = *ats.last()?;
+    // 声が最後の報のあとまで続くなら、その終わりまでは終えない
+    let last_at = (*ats.last()?).max(holds.iter().copied().max().unwrap_or(0));
     // 2 つ目以降の地震は、始まりの少しあとに「報が届いた」とみなして、前の地震との間を詰める
     // (詰めた先がその地震の始まりになり、薄い ✕ が出る。1 つ目は動画の始まりそのもの)
     let mut anchors = ats.clone();
     anchors.extend(starts.iter().filter(|&&s| s > start).map(|s| s + GAP_MARGIN_MS));
+    anchors.extend(holds.iter().filter(|&&h| h > start));
     anchors.sort_unstable();
     let skips = skip_ranges(&anchors);
     let mut sounds = Sounds::new(events);
@@ -355,9 +358,23 @@ mod tests {
     }
 
     #[test]
+    fn the_clock_is_not_skipped_while_a_voice_is_playing() {
+        // 6 秒の報の声が 30 秒続くとき (10 秒ごとの holds と終わりの 1 秒後)、飛ばし始めは声の終わりの 5 秒後
+        let events = forecast_then_quake();
+        let holds = [T + 7_000, T + 17_000, T + 27_000, T + 37_000 + 1_000];
+        let plan = build(&target(&events).unwrap(), 5, &holds).unwrap();
+        let f = &plan.frames;
+        let jumps: Vec<_> = f.windows(2).filter(|w| w[1].now_ms - w[0].now_ms > 200).collect();
+        assert_eq!(jumps.len(), 1);
+        // 飛ばす区間は [T + 43 秒, T + 115 秒) なので、飛ぶ前の最後のコマは T + 42.8 秒
+        assert_eq!(jumps[0][0].now_ms, T + 42_800);
+        assert_eq!(jumps[0][1].now_ms, T + 115_000);
+    }
+
+    #[test]
     fn the_plan_steps_in_fixed_frames_skips_the_quiet_gap_and_ends_after_calm() {
         let events = forecast_then_quake();
-        let plan = build(&target(&events).unwrap(), 5).unwrap();
+        let plan = build(&target(&events).unwrap(), 5, &[]).unwrap();
         let f = &plan.frames;
         // 始まりは、発生の 10 秒前。コマは 200ms ずつ進み、飛ばしたところだけ大きく進む
         assert_eq!(f[0].now_ms, T - 10_000);
@@ -382,7 +399,7 @@ mod tests {
     #[test]
     fn the_plan_plays_the_start_sound_once_and_no_ticks_while_fast_forwarding() {
         let events = forecast_then_quake();
-        let plan = build(&target(&events).unwrap(), 5).unwrap();
+        let plan = build(&target(&events).unwrap(), 5, &[]).unwrap();
         let starts: Vec<_> = plan.sounds.iter().filter(|s| s.why == "揺れの始まり").collect();
         assert_eq!(starts.len(), 1);
         // 発生 (T0) をまたいだコマ。震度 3 なのでチャイム
@@ -471,7 +488,7 @@ mod tests {
     fn the_plan_of_a_series_skips_between_quakes_lands_on_the_next_start_and_rings_each_start() {
         let events = two_quakes();
         let s = both(&events);
-        let plan = build(&s, 5).unwrap();
+        let plan = build(&s, 5, &[]).unwrap();
         let f = &plan.frames;
         let start_b = s.members[1].start_ms;
         // 東京の画面 (最後の報から 3 分) が終わるまでは、そのまま進み、そのあと大阪の始まりに飛ぶ (報の 10 秒前)
@@ -502,7 +519,7 @@ mod tests {
     fn a_single_quake_keeps_its_plan_unchanged_by_the_series_anchors() {
         // 緊急地震速報が遅れて届いても (発生の 40 秒後)、1 つだけのときは始まりの手前で飛ばない
         let events = vec![eew("E", 1, T + 40_000, T0, false, Scale::S3, TOKYO)];
-        let plan = build(&target(&events).unwrap(), 5).unwrap();
+        let plan = build(&target(&events).unwrap(), 5, &[]).unwrap();
         assert!(plan.frames.windows(2).all(|w| w[1].now_ms - w[0].now_ms <= 200));
     }
 

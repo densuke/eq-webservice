@@ -27,11 +27,46 @@ pub struct Slot {
     pub at_ms: u64,
 }
 
-/// 取れた声 (44.1kHz モノ)
+/// 取れた声 (44.1kHz モノ)。index は読む報 (Slot::index)
 #[derive(Debug, Clone, PartialEq)]
 pub struct Clip {
+    pub index: usize,
     pub at_ms: u64,
     pub pcm: Vec<i16>,
+}
+
+/// 声が流れている間を、時計を飛ばさない時刻 (当時の時刻) にする (plan::build の holds)。
+/// 声は前の声が鳴り終わってから流れる (push_due) ので、重なる声は後ろへずらして数える。
+/// 飛ばすのは報と報の間が 20 秒を超えたところなので、声の間は 10 秒ごとに置き、終わりの 1 秒後にも置く
+pub fn holds(clips: &[Clip], frames: &[Frame], fps: u32) -> Vec<u64> {
+    const STEP_MS: u64 = 10_000;
+    const AFTER_MS: u64 = 1_000;
+    let mut out = Vec::new();
+    let mut free_at = 0u64;
+    for c in clips {
+        let start = c.at_ms.max(free_at);
+        let len = c.pcm.len() as u64 * 1000 / u64::from(crate::broadcast::mixer::RATE);
+        free_at = start + len;
+        // 声の始まりの当時の時刻 (始まりは報の直後なので、まだ飛んでいない)
+        let k = (start * u64::from(fps) / 1000) as usize;
+        let Some(f) = frames.get(k.min(frames.len().saturating_sub(1))) else {
+            continue;
+        };
+        out.extend((0..=len / STEP_MS).map(|n| f.now_ms + n * STEP_MS));
+        out.push(f.now_ms + len + AFTER_MS);
+    }
+    out
+}
+
+/// 筋書きを作り直したあとの、読む報ごとの声の時刻に合わせる (取った声はそのまま使う)
+pub fn retime(clips: Vec<Clip>, slots: &[Slot]) -> Vec<Clip> {
+    clips
+        .into_iter()
+        .filter_map(|c| {
+            let at_ms = slots.iter().find(|s| s.index == c.index)?.at_ms;
+            Some(Clip { at_ms, ..c })
+        })
+        .collect()
 }
 
 /// サーバから声を取る口 (テストでは偽物にする)。Ok(None) は「読むものがない」(404)
@@ -95,7 +130,11 @@ pub async fn collect(api: &impl Announce, events: &[Event], slots: &[Slot], paus
             Err(e) => Err(e),
         };
         match reply {
-            Ok(Some(pcm)) => clips.push(Clip { at_ms: s.at_ms, pcm }),
+            Ok(Some(pcm)) => clips.push(Clip {
+                index: s.index,
+                at_ms: s.at_ms,
+                pcm,
+            }),
             Ok(None) => {}
             Err(e) => {
                 tracing::warn!("replay-video: 読み上げを取れません。声なしで続けます: {e:#}");
@@ -389,13 +428,50 @@ mod tests {
     }
 
     #[test]
+    fn holds_cover_the_voices_played_one_after_another() {
+        // 5fps の筋書き。コマ k の当時の時刻は T + k * 200 (飛ばしなし)
+        let frames: Vec<Frame> = (0..1000)
+            .map(|k| Frame {
+                now_ms: T + k * 200,
+                applied: 0,
+                fast_forward: false,
+                jumped: false,
+                hindsight: None,
+            })
+            .collect();
+        let secs = |n: usize| vec![0i16; RATE as usize * n];
+        // 2 秒から 25 秒の声。4 秒からの 3 秒の声は、前の声が終わる 27 秒から流れる
+        let clips = [
+            Clip {
+                index: 0,
+                at_ms: 2_000,
+                pcm: secs(25),
+            },
+            Clip {
+                index: 1,
+                at_ms: 4_000,
+                pcm: secs(3),
+            },
+        ];
+        assert_eq!(
+            holds(&clips, &frames, 5),
+            vec![T + 2_000, T + 12_000, T + 22_000, T + 28_000, T + 27_000, T + 31_000]
+        );
+        // 作り直した筋書きの時刻に合わせる。読む報が無くなった声は落とす
+        let moved = retime(clips.to_vec(), &[Slot { index: 1, at_ms: 9_000 }]);
+        assert_eq!((moved.len(), moved[0].at_ms, moved[0].index), (1, 9_000, 1));
+    }
+
+    #[test]
     fn voices_are_queued_one_at_a_time_and_only_when_due() {
         let clips = [
             Clip {
+                index: 0,
                 at_ms: 0,
                 pcm: vec![100; RATE as usize],
             }, // 1 秒
             Clip {
+                index: 1,
                 at_ms: 500,
                 pcm: vec![200; RATE as usize],
             }, // 1 秒 (前の声が鳴り終わってから)
@@ -518,6 +594,7 @@ mod tests {
         assert_eq!(
             clips,
             vec![Clip {
+                index: 1,
                 at_ms: 200,
                 pcm: vec![7, 7]
             }]

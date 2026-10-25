@@ -51,7 +51,23 @@ async fn make(o: &Options, audio: &std::path::Path) -> anyhow::Result<()> {
         o.quakes.clone()
     };
     let series = plan::Series::of(&all, &places).context("範囲に、動画にできる地震の報がありません")?;
-    let plan = plan::build(&series, o.fps).context("筋書きを作れません")?;
+    let first = plan::build(&series, o.fps, &[]).context("筋書きを作れません")?;
+    // 声を取って長さを測り、声が流れている間は時計を飛ばさない筋書きに作り直す (話の途中で早送りにしない)
+    let voices = fetch_voices(o, &series.events, &first).await;
+    let holds = voice::holds(&voices, &first.frames, o.fps);
+    let plan = if holds.is_empty() {
+        first
+    } else {
+        plan::build(&series, o.fps, &holds).context("筋書きを作れません")?
+    };
+    let voices = voice::retime(voices, &voice::schedule(&series.events, &plan.frames, o.fps));
+    for c in &voices {
+        tracing::info!(
+            "replay-video: 声 {:>6.1}秒 ({:.1}秒分)",
+            c.at_ms as f64 / 1000.0,
+            c.pcm.len() as f64 / f64::from(crate::broadcast::mixer::RATE)
+        );
+    }
     tracing::info!(
         quakes = series.members.len(),
         events = series.events.len(),
@@ -91,7 +107,6 @@ async fn make(o: &Options, audio: &std::path::Path) -> anyhow::Result<()> {
             .with_context(|| format!("writing {}", path.display()))?;
     }
     let mut throttle = crate::broadcast::psi::Throttle::default();
-    let voices = fetch_voices(o, &series.events, &plan).await;
     encode::encode_audio(o, &plan, &voices, audio, &mut throttle).await?;
     let mut stepper = Stepper::new(native::load_renderer(&renderer_config(o))?);
     encode::encode_video(o, &series.events, &plan, &mut stepper, audio, &mut throttle).await?;
@@ -113,13 +128,6 @@ async fn fetch_voices(o: &Options, events: &[crate::quake::Event], plan: &plan::
     };
     let slots = voice::schedule(events, &plan.frames, o.fps);
     let clips = voice::collect(&api, events, &slots, voice::PAUSE).await;
-    for c in &clips {
-        tracing::info!(
-            "replay-video: 声 {:>6.1}秒 ({:.1}秒分)",
-            c.at_ms as f64 / 1000.0,
-            c.pcm.len() as f64 / f64::from(crate::broadcast::mixer::RATE)
-        );
-    }
     tracing::info!("replay-video: 読む報 {} 件のうち、声 {} 本", slots.len(), clips.len());
     clips
 }
