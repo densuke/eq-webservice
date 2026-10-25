@@ -15,24 +15,24 @@ export async function loadCityWeather(): Promise<void> {
   if (res.ok) data = await res.json();
 }
 
-/** 平時 (show) だけ出し、地震の表示の間は消す */
-export function renderCityWeather(show: boolean, now: number): void {
+/** 平時 (show) だけ出し、地震の表示の間は消す。focus は危険警報以上の県へ寄せている間の案内 (その間は札を出さない) */
+export function renderCityWeather(show: boolean, now: number, focus: string[] | null = null): void {
   const w = show ? data : null;
   // 札だけ消す設定 (雨の点は残す)。案内も札と一緒に消す
-  const badges = w && app.settings.weatherFlipSec !== WEATHER_OFF ? w : null;
+  const badges = w && !focus && app.settings.weatherFlipSec !== WEATHER_OFF ? w : null;
   const hour = new Date(now + 9 * 3600_000).getUTCHours();
   const night = hour < 6 || hour >= 18;
   // 札を「今」と「明日」で交互に出す (明日の予報がある都市だけ。明日の予報がまだ無いうちは今のまま)。
   // 案内も同じ種類から決めて、札と同じ回に描く (切り替わった秒に描き直す)
   const view = badges?.cities.some((c) => c.tomorrow) ? weatherView(now, app.settings.weatherFlipSec) : "now";
-  const caption = badges ? weatherCaption(view, now) : "";
+  const caption = focus ? focus.join("\n") : badges ? weatherCaption(view, now) : "";
   const tomorrow = view === "tomorrow";
-  const next = w ? `${w.observed_at}|${night}|${caption}|${badges != null}` : "";
+  const next = w || focus ? `${w?.observed_at}|${night}|${caption}|${badges != null}` : "";
   // 凡例の行や時計の大きさは地図の外で変わるので、描き直さない回も間引きだけはやり直す
   if (next === sig) return map.thinCities();
   sig = next;
   const box = $("#weather-caption");
-  box.hidden = !badges;
+  box.hidden = !caption;
   box.textContent = caption;
   // 雨の強い地点ほど上に
   const rain = w ? [...w.rain].sort((a, b) => a[2] - b[2]).map(([lat, lon, mm]) => ({ lat, lon, color: rainColor(mm) })) : [];

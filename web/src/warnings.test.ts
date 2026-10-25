@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { prefOf, topLevel, warningLevel, warningSummary } from "./warnings.ts";
+import { prefOf, topLevel, warnFocusAt, warnFocuses, warningLevel, warningSummary } from "./warnings.ts";
 
 test("warning names map to levels, including ones without a level number", () => {
   assert.equal(warningLevel("レベル２大雨注意報"), "advisory");
@@ -40,4 +40,42 @@ test("warnings and above are summarized per kind, prefecture and municipality; a
   assert.deepEqual(warningSummary(w, 1)?.lines[1], "レベル３大雨警報: 岡山県 岡山市 ほか1、広島県 福山市");
   // 注意報だけなら出さない
   assert.equal(warningSummary({ reported_at: "", areas: { "0110000": [k("強風注意報")] } }), null);
+});
+
+test("only danger and emergency areas are focused, one prefecture at a time, the highest first", () => {
+  const k = (name: string) => ({ code: "", name });
+  const w = {
+    reported_at: "",
+    areas: {
+      "3020500": [k("レベル４土砂災害危険警報"), k("レベル２大雨注意報")],
+      "3036100": [k("レベル４土砂災害危険警報")],
+      "2720000": [k("レベル３大雨警報")],
+      "2920100": [k("レベル５大雨特別警報")],
+    },
+    names: { "3020500": "有田市", "3036100": "有田川町", "2920100": "奈良市" },
+  };
+  const fs = warnFocuses(w);
+  assert.deepEqual(
+    fs.map((f) => [f.pref, f.codes]),
+    [
+      ["奈良県", ["2920100"]],
+      ["和歌山県", ["3020500", "3036100"]],
+    ],
+  );
+  // 文は寄る県の危険警報以上だけ (注意報・ほかの県は入れない)
+  assert.deepEqual(fs[1].lines, ["レベル４土砂災害危険警報: 和歌山県 有田市・有田川町"]);
+  assert.deepEqual(warnFocuses({ reported_at: "", areas: { "2720000": [k("レベル３大雨警報")] } }), []);
+  assert.deepEqual(warnFocuses(null), []);
+});
+
+test("the map zooms in for the last part of each minute, visiting each prefecture in turn", () => {
+  const fs = [
+    { pref: "奈良県", codes: ["a"], lines: [] },
+    { pref: "和歌山県", codes: ["b"], lines: [] },
+  ];
+  assert.equal(warnFocusAt(fs, 30_000), null);
+  assert.equal(warnFocusAt(fs, 50_000)?.pref, "奈良県");
+  assert.equal(warnFocusAt(fs, 60_000 + 50_000)?.pref, "和歌山県");
+  assert.equal(warnFocusAt(fs, 120_000 + 50_000)?.pref, "奈良県");
+  assert.equal(warnFocusAt([], 50_000), null);
 });

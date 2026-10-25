@@ -124,7 +124,7 @@ body {
 
 /* 天気の札が今何を出しているかの案内 (南西諸島の別枠のすぐ右の日本海の上) */
 .weather-caption {
-  pointer-events: none; white-space: nowrap;
+  pointer-events: none; white-space: pre-line; max-width: min(420px, 60vw);
   background: rgba(13, 17, 23, 0.8); padding: 4px 9px; border-radius: 6px; font-size: 12px; font-weight: 600; color: var(--text);
 }
 

@@ -678,6 +678,14 @@ export class JapanMap {
     return names.reduce<Box | null>((box, n) => union(box, this.mainBoxes.get(n) ?? null), null);
   }
 
+  /** 気象警報の区域 (市町村等のコード) の外接矩形の和 (地図座標)。区域が読めていなければ null */
+  warnBox(codes: string[]): Box | null {
+    return codes.reduce<Box | null>((box, c) => {
+      const b = this.warns.get(c)?.getBBox();
+      return b ? union(box, { x0: b.x, y0: b.y, x1: b.x + b.width, y1: b.y + b.height }) : box;
+    }, null);
+  }
+
   /** 揺れた地震情報細分区域の外接矩形の和 (地図座標)。区域が読めていない・名前が引けないときは null */
   areaBox(names: string[]): Box | null {
     return names.reduce<Box | null>((box, n) => union(box, this.areaBoxes.get(n) ?? null), null);
