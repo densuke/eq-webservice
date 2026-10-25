@@ -67,3 +67,36 @@ export function warningSummary(w: Warnings & { names?: Record<string, string> },
   });
   return { top: kinds[0][1].level, lines };
 }
+
+/** 平時に地図を寄せて見せる、危険警報以上の区域 (1 県ずつ)。lines はその県の危険警報以上だけの文 */
+export interface WarnFocus {
+  pref: string;
+  codes: string[];
+  lines: string[];
+}
+
+const FOCUSED: WarningLevel[] = ["danger", "emergency"];
+
+/** 危険警報以上の区域を県ごとにまとめる。段階の高い県から、同じなら県の番号順 */
+export function warnFocuses(w: Warnings | null): WarnFocus[] {
+  if (!w) return [];
+  const byPref = new Map<string, Record<string, WarningKind[]>>();
+  for (const code of Object.keys(w.areas).sort()) {
+    const kinds = w.areas[code].filter((k) => FOCUSED.includes(warningLevel(k.name)));
+    if (kinds.length === 0) continue;
+    const pref = prefOf(code);
+    byPref.set(pref, { ...byPref.get(pref), [code]: kinds });
+  }
+  return [...byPref]
+    .map(([pref, areas]) => ({ pref, areas, top: ORDER.indexOf(warningSummary({ reported_at: "", areas })!.top) }))
+    .sort((a, b) => b.top - a.top)
+    .map(({ pref, areas }) => ({ pref, codes: Object.keys(areas), lines: warningSummary({ reported_at: w.reported_at, areas, names: w.names }, 3)!.lines }));
+}
+
+/** 1 分のうち地図を寄せる秒数 (毎分の後ろ)。県が複数なら 1 分ごとに次の県へ */
+const FOCUS_SEC = 15;
+
+export function warnFocusAt(fs: WarnFocus[], now: number): WarnFocus | null {
+  if (fs.length === 0 || (now / 1000) % 60 < 60 - FOCUS_SEC) return null;
+  return fs[Math.floor(now / 60_000) % fs.length];
+}
