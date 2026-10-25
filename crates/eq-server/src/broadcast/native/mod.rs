@@ -329,7 +329,11 @@ fn load_renderer_with(cfg: &BroadcastConfig, placed: Placed) -> anyhow::Result<R
 /// https://host → wss://host/ws
 fn ws_url(server: &str) -> String {
     let (scheme, rest) = server.split_once("://").unwrap_or(("https", server));
-    format!("{}://{rest}/ws", if scheme == "http" { "ws" } else { "wss" })
+    // ?broadcast=1: 配信の接続として名乗り、web の同接に数えさせない
+    format!(
+        "{}://{rest}/ws?broadcast=1",
+        if scheme == "http" { "ws" } else { "wss" }
+    )
 }
 
 /// render_loop の出力 (画面・平時かどうか) と、上部バーに出す名前

@@ -561,8 +561,9 @@ fn ws_messages_update_the_state_and_dedupe_events() {
 
 #[test]
 fn server_url_becomes_a_websocket_url() {
-    assert_eq!(ws_url("https://eq.fuga.jp"), "wss://eq.fuga.jp/ws");
-    assert_eq!(ws_url("http://localhost:8080"), "ws://localhost:8080/ws");
+    // 配信の接続は ?broadcast=1 で名乗り、web の同接に数えさせない
+    assert_eq!(ws_url("https://eq.fuga.jp"), "wss://eq.fuga.jp/ws?broadcast=1");
+    assert_eq!(ws_url("http://localhost:8080"), "ws://localhost:8080/ws?broadcast=1");
 }
 
 /// 札の右端 (文字の無いテストでは、曲名の幅 0 + 余白 16 のぶん、配信元の名前が無い右端 1264 から左)

@@ -222,10 +222,12 @@ interval_sec = 20   # 切り替える間隔 (秒)
 - 一覧は一巡するたびに読み直すので、ファイルはサーバを止めずにいつでも差し替えられます
 - 地震の表示 (緊急地震速報・地震情報・津波予報・揺れの報告) の間とデモ中は隠します
 
-### 同時視聴者数 (YouTube ライブ)
+### 同時視聴者数 (YouTube・Twitch・web)
 
 `config.toml` の `[viewers]` を有効にすると、サーバが YouTube Data API の `videos.list` (`liveStreamingDetails.concurrentViewers`) から同時視聴者数を取り、
-`GET /api/viewers` で返します。web はヘッダーの隅に「同接 N 人」を出します (1 分ごとに取得。値が無いときは出しません)。
+`GET /api/viewers` で返します。web はヘッダーの隅に、配信は上部バーに「同接 N 人」を出します (1 分ごとに取得。値が無いときは出しません)。
+
+N は YouTube・Twitch・web 版 (いまブラウザで開いている数) の合計です。内訳は `/api/viewers` の JSON にだけ載せます。
 
 ```toml
 [viewers]
@@ -235,9 +237,17 @@ token_file = "/home/eq/.config/pd2/youtube-upload-token.json"   # 認証: token_
 # api_key = "..."
 channel_id = "UC..."       # 動画: channel_id (今の live を探す) か video_id (固定) のどちらか 1 つ
 # video_id = "qs2MfxEgBA0"
+# twitch_client_id = "..."  # Twitch も足すときだけ。client_secret は環境変数 TWITCH_CLIENT_SECRET
+# twitch_login = "example"
 ```
 
-- 応答は `{"viewers": N | null, "video_id": "...", "updated_ms": ...}`。無効・ライブでない・視聴者数が非表示・取得に失敗したときは `viewers` が null
+- 応答は `{"viewers": 合計 | null, "youtube": N | null, "twitch": N | null, "web": N | null, "video_id": "...", "updated_ms": ...}`
+  - `youtube`・`twitch` は、ライブでない・視聴者数が非表示・取得に失敗したとき null で、合計に入れません
+  - `web` は `/ws` の接続数です。配信 (native・chrome) は `?broadcast=1` を付けてつなぐので数えません
+  - 無効のときは `viewers` も `web` も null (`updated_ms` が 0)
+- Twitch は Helix API の `streams?user_login=` (`viewer_count`) から取ります。認証は Twitch の開発者アプリの Client ID と secret
+  (client credentials のアプリトークン。取り直しは失敗したときだけ)。secret は `/etc/default/eq-server` などで `TWITCH_CLIENT_SECRET=...` として渡します。
+  無いときは警告を出して Twitch の分を取りません
 - `token_file` は OAuth の資格情報 JSON (client_id・client_secret・refresh_token・token_uri)。refresh_token でアクセストークンを取り直し、読むだけで書き戻しません
 - `channel_id` のときの動画の探し方: OAuth は `liveBroadcasts?broadcastStatus=active&broadcastType=all` (常設の配信も拾う。1 回 1 単位)、API キーは `search` (1 回 100 単位)。見つけた動画 ID は覚えて、ライブでなくなったときだけ探し直します
   (API キーの探し直しは 30 分以上あけます)
