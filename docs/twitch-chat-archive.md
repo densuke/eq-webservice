@@ -35,7 +35,7 @@ B なら、許可を 1 度もらえば、送るときのトークンは client c
 The sender must have authorized the app with the user:write:chat and user:bot scopes.
 ```
 
-送る人と配信者が同じだと、B は通らないと判断した。配信者の user access token (`user:write:chat` だけ) で送る。
+送る人と配信者が同じだと、B は通らないと判断した。配信者の user access token (`user:write:chat` だけ) で送る。同じ日に A で 1 通目 (日向灘の再現動画の新着案内) を送り、`is_sent: true` で届いた。
 
 ### 送る主体
 
