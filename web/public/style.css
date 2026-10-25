@@ -81,9 +81,7 @@ body {
 .map { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
 .map:active { cursor: grabbing; }
 
-/* 寄ったとき (.zoomed) は都道府県の塗りをやめ、細分区域と観測点で描く */
-.map:not(.zoomed) .areas, .map:not(.zoomed) .dots { display: none; }
-.map.zoomed .pref { fill: var(--land) !important; stroke: #5a6474; }
+/* 寄ったときの都道府県の塗りと細分区域の描き分けは map.css (SVG の中。別枠の複製にも効く) */
 .tsunami-banner { color: #111; background: var(--t-watch); padding: 6px 16px; font-size: 14px; }
 .tsunami-banner[data-grade="warning"] { color: #fff; background: var(--t-warning); }
 .tsunami-banner[data-grade="major_warning"] { color: #fff; background: var(--t-major); }

@@ -70,3 +70,8 @@
 .city .city-leader { stroke: rgba(240, 244, 248, 0.85); stroke-width: 1.2; }
 /* 狭い画面で置き場がなく間引いた札 (点は残す) */
 .city.thin .city-badge, .city.thin .city-leader { display: none; }
+
+/* 寄ったとき (.base.detail) は都道府県の塗りをやめ、細分区域と観測点で描く。
+   別枠は <use> の複製で、外の CSS (.map.zoomed) が効かないので、図形の束に付けたクラスで切り替える */
+.base:not(.detail) .areas, .base:not(.detail) .dots { display: none; }
+.base.detail .pref { fill: var(--land) !important; stroke: #5a6474; }
