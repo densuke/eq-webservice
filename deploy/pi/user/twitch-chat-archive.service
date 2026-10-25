@@ -1,0 +1,10 @@
+# ~/.config/systemd/user/twitch-chat-archive.service に置く。タイマーは deploy/twitch-chat-archive.timer
+# 先に twitch_chat_authorize.py で配信者の許可を 1 回もらう (docs/twitch-chat-archive.md)
+[Unit]
+Description=eq-webservice Twitch のチャットに再現動画を案内する
+
+[Service]
+Type=oneshot
+Slice=eq.slice
+# 認証情報は Twitch の見張りと同じファイル (600)。チャンネルのログイン名と queue の場所は環境に合わせる
+ExecStart=/usr/bin/python3 %h/work/eq-e2cast/tools/twitch_chat_archive.py %h/.config/twitch-live-watch fugahogeds /opt/eq-cast/replay/queue
