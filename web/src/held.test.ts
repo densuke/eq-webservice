@@ -83,3 +83,16 @@ test("a cancelled latest report clears the event", () => {
   assert.equal(h.max_scale, 0);
   assert.deepEqual(h.areas, []);
 });
+
+// 2026-10-25 小笠原諸島西方沖: 第 1〜3 報は深さ 10km・震度 2、第 4 報から深さ 200km 以上・不明
+test("a deep report without a forecast drops the shallow forecast", () => {
+  const at = (serial: number, max: number, depth_km: number) =>
+    eew(serial, max, [], [], { hypocenter: { name: "小笠原諸島西方沖", latitude: 28.4, longitude: 140.0, depth_km, magnitude: 5.8 } });
+  const shallow = [at(1, 20, 10), at(3, 20, 10)];
+  const deep = at(4, -1, 200);
+  assert.equal(heldForecast([...shallow, deep]).max_scale, -1);
+  assert.equal(heldForecast([deep, shallow[0]]).max_scale, -1);
+  assert.equal(heldForecast(shallow).max_scale, 20);
+  assert.equal(heldForecast([...shallow, deep, at(5, 30, 60)]).max_scale, 30);
+  assert.equal(heldForecast([shallow[0], at(2, -1, 10)]).max_scale, 20);
+});

@@ -3,6 +3,9 @@
 
 use crate::quake::{Eew, Scale};
 
+/// これより深い地震の緊急地震速報は予測震度を出さない (気象庁。深さ 150km の報には予測震度が付いた例がある)
+const DEEP_KM: i32 = 150;
+
 /// 同じ地震の取り消しでない報から持ち続ける値
 #[derive(Debug, Clone, PartialEq)]
 pub struct Held {
@@ -27,6 +30,19 @@ fn fold_max<'a>(items: impl Iterator<Item = (&'a str, Scale)>) -> Vec<(String, S
     out
 }
 
+/// 最新の報 (serial が最大) が深い地震で予測震度が不明なら、浅いと見ていた頃の予想は捨てる
+/// (2026-10-25 小笠原諸島西方沖: 第 1〜3 報の深さ 10km・震度 2 が、深さ 200km 以上で不明になった後も残った)
+fn deep_unknown(reports: &[&Eew]) -> bool {
+    let latest = reports.iter().max_by_key(|e| e.serial.parse::<u64>().unwrap_or(0));
+    latest.is_some_and(|e| {
+        !e.max_scale.is_known()
+            && e.hypocenter
+                .as_ref()
+                .and_then(|h| h.depth_km)
+                .is_some_and(|d| d > DEEP_KM)
+    })
+}
+
 /// 同じ地震の取り消しでない報 (届いた順は問わない) から、持ち続ける予想を作る
 pub fn hold(reports: &[&Eew]) -> Held {
     let areas = reports
@@ -39,7 +55,11 @@ pub fn hold(reports: &[&Eew]) -> Held {
         .map(|p| (p.pref.as_str(), p.scale));
     Held {
         warning: reports.iter().any(|e| e.warning),
-        max_scale: reports.iter().map(|e| e.max_scale).max().unwrap_or(Scale::UNKNOWN),
+        max_scale: if deep_unknown(reports) {
+            Scale::UNKNOWN
+        } else {
+            reports.iter().map(|e| e.max_scale).max().unwrap_or(Scale::UNKNOWN)
+        },
         pref_scales: fold_max(prefs),
         area_scales: fold_max(areas),
     }
@@ -141,6 +161,39 @@ mod tests {
         for r in [[&a, &b], [&b, &a]] {
             assert_eq!(named(&hold(&r).area_scales), [("茨城県南部", 40)]);
         }
+    }
+
+    fn at_depth(serial: u32, max: Scale, depth_km: i32) -> Eew {
+        Eew {
+            hypocenter: Some(crate::quake::Hypocenter {
+                name: "小笠原諸島西方沖".into(),
+                latitude: Some(28.4),
+                longitude: Some(140.0),
+                depth_km: Some(depth_km),
+                magnitude: Some(5.8),
+            }),
+            ..report(serial, max, vec![], &[], false)
+        }
+    }
+
+    /// 2026-10-25 小笠原諸島西方沖: 第 1〜3 報は深さ 10km・震度 2、第 4 報から深さ 200km 以上・不明
+    #[test]
+    fn a_deep_report_without_a_forecast_drops_the_shallow_forecast() {
+        let seq = [
+            at_depth(1, Scale::S2, 10),
+            at_depth(3, Scale::S2, 10),
+            at_depth(4, Scale::UNKNOWN, 200),
+        ];
+        let all: Vec<&Eew> = seq.iter().collect();
+        assert_eq!(hold(&all).max_scale, Scale::UNKNOWN);
+        assert_eq!(hold(&all[..2]).max_scale, Scale::S2);
+        // 届いた順は問わない
+        assert_eq!(hold(&[&seq[2], &seq[0]]).max_scale, Scale::UNKNOWN);
+        // 深さが浅く戻って予測が出れば、また最大で持つ
+        let back = at_depth(5, Scale::S3, 60);
+        assert_eq!(hold(&[&seq[0], &seq[2], &back]).max_scale, Scale::S3);
+        // 浅い報が不明でも、前の予想は捨てない
+        assert_eq!(hold(&[&seq[0], &at_depth(2, Scale::UNKNOWN, 10)]).max_scale, Scale::S2);
     }
 
     #[test]
