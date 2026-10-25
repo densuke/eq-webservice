@@ -99,6 +99,8 @@ pub struct Output {
     pub calm: bool,
     /// 出している地震の最大震度・警報か
     pub shown: Shown,
+    /// 寄っているか (日本全体ではない)。平時でも寄っている間は地震の画面の fps で送る (寄りの動きを滑らかに)
+    pub zoomed: bool,
 }
 
 /// 寄った表示範囲の同一判定 (日本全体は None)
@@ -379,6 +381,7 @@ impl Stepper {
             i420: yuv::rgba_to_i420(pm.data(), draw::W as usize, draw::H as usize),
             calm: current.is_none(),
             shown: eew::shown(current),
+            zoomed: view.is_some(),
         })
     }
 }

@@ -65,7 +65,7 @@ pub fn draw(
     // 雨の点と天気の札は波の円より上
     let pm = t.top();
     // 雨の強い地点ほど上に
-    let mut rain: Vec<_> = w.rain.iter().filter(|r| frame.contains(r[1], r[0])).collect();
+    let mut rain: Vec<_> = w.rain.iter().filter(|r| frame.shows(r[1], r[0])).collect();
     rain.sort_by(|a, b| a[2].total_cmp(&b[2]));
     for &[lat, lon, mm] in rain {
         let (x, y) = frame.view.px(lon, lat);
@@ -79,7 +79,7 @@ pub fn draw(
     }
     let view = w.view(scene.now_ms, scene.flip_s);
     let tomorrow = view == WeatherView::Tomorrow;
-    let cities: Vec<&City> = w.cities.iter().filter(|c| frame.contains(c.lon, c.lat)).collect();
+    let cities: Vec<&City> = w.cities.iter().filter(|c| frame.shows(c.lon, c.lat)).collect();
     let cards: Vec<Card> = cities
         .iter()
         .map(|c| card_of(text, frame, scene, c, tomorrow))

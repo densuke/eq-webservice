@@ -9,7 +9,7 @@ use super::banner;
 use super::calm;
 use super::camera::{Fit, MapBox};
 use super::cards::CardCache;
-use super::data::{CityWeather, Warnings};
+use super::data::{CityWeather, WarningLevel, Warnings};
 use super::eew::{forecast_tag, EewSummary, Wave};
 use super::frame::{BoxRect, Clip, Frame, OKINAWA};
 use super::geo::{Coast, Shape, View};
@@ -378,9 +378,14 @@ impl Renderer {
             .as_ref()
             .filter(|_| calm)
             .and_then(|_| self.warn_focus(scene.warnings, scene.now_ms));
-        let focus_line = focus
-            .as_ref()
-            .map(|f| format!("{}: {}", f.items[0].name, f.items[0].places(3)));
+        let focus_line = focus.as_ref().map(|f| {
+            let level = if f.top == WarningLevel::Emergency {
+                "特別警報"
+            } else {
+                "危険警報"
+            };
+            format!("{}に{level}", f.prefs.join("・"))
+        });
         if let Some(z) = &self.zoomed {
             // 日本全体の地図 (と別枠) を海で隠し、寄った地図を描き直す (隠した凡例と別枠の題は上の絵からも消す)
             rect(t.low(), main.x, main.y, main.w, main.h, SEA, 1.0);

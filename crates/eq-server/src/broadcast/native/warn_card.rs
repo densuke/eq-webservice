@@ -77,37 +77,60 @@ fn level_color(l: WarningLevel) -> [u8; 3] {
     }
 }
 
-const NAME_PX: f32 = 19.0;
-const PLACES_PX: f32 = 16.0;
+const NAME_PX: f32 = 18.0;
+const PLACES_PX: f32 = 15.0;
 const PAD: f32 = 12.0;
-const MAX_W: f32 = 400.0;
+const MAX_W: f32 = 560.0;
 /// 1 種類の市町村の行数の上限 (種類と合わせて 1 種類 4 行)
 const PLACE_LINES: usize = 3;
 const MAX_ITEMS: usize = 2;
 
-/// s を幅 max に収まる行に分ける (文字単位)。lines 行を超える分は最後の行を「…」で切る
-pub fn wrap(text: &mut Text, s: &str, px: f32, max: f32, lines: usize) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
+/// s を幅 max に収まる行に分ける。区切り (「・」「、」空白) の後ろで折り、1 語で収まらないときだけ語の途中で折る。
+/// lines 行を超える分は最後の行を「…」で切る。width は文字列の幅
+pub fn wrap(s: &str, max: f32, lines: usize, mut width: impl FnMut(&str) -> f32) -> Vec<String> {
+    let mut words: Vec<String> = Vec::new();
     let mut cur = String::new();
     for ch in s.chars() {
-        let next = format!("{cur}{ch}");
-        if !cur.is_empty() && text.width(&next, px) > max {
-            out.push(std::mem::take(&mut cur));
-            if out.len() == lines {
-                let last = out.last_mut().expect("line");
-                while !last.is_empty() && text.width(&format!("{last}…"), px) > max {
-                    last.pop();
-                }
-                last.push('…');
-                return out;
-            }
-            cur = ch.to_string();
-        } else {
-            cur = next;
+        cur.push(ch);
+        if matches!(ch, '・' | '、' | ' ') {
+            words.push(std::mem::take(&mut cur));
         }
     }
     if !cur.is_empty() {
-        out.push(cur);
+        words.push(cur);
+    }
+    let mut out: Vec<String> = Vec::new();
+    let mut line = String::new();
+    for w in words {
+        if line.is_empty() || width(&format!("{line}{w}")) <= max {
+            line.push_str(&w);
+        } else {
+            out.push(std::mem::take(&mut line));
+            line = w;
+        }
+        // 1 語が長すぎるときは文字で折る
+        while width(&line) > max && line.chars().count() > 1 {
+            let mut head = String::new();
+            for ch in line.chars() {
+                if !head.is_empty() && width(&format!("{head}{ch}")) > max {
+                    break;
+                }
+                head.push(ch);
+            }
+            line = line[head.len()..].to_string();
+            out.push(head);
+        }
+    }
+    if !line.is_empty() {
+        out.push(line);
+    }
+    if out.len() > lines {
+        out.truncate(lines);
+        let last = out.last_mut().expect("line");
+        while !last.is_empty() && width(&format!("{last}…")) > max {
+            last.pop();
+        }
+        last.push('…');
     }
     out
 }
@@ -121,7 +144,9 @@ pub fn draw(pm: &mut Pixmap, text: &mut Text, f: &WarnFocus, region: Region, are
             rows.push((String::new(), 8.0, TEXT));
         }
         rows.push((item.name.clone(), NAME_PX, TEXT));
-        for l in wrap(text, &item.places(usize::MAX), PLACES_PX, inner, PLACE_LINES) {
+        for l in wrap(&item.places(usize::MAX), inner, PLACE_LINES, |s| {
+            text.width(s, PLACES_PX)
+        }) {
             rows.push((l, PLACES_PX, [0xd0, 0xd7, 0xde]));
         }
     }
@@ -189,6 +214,23 @@ mod tests {
         let p = place_card((10.0, 100.0, 120.0, 200.0), (300.0, 90.0), area, &[]);
         assert!(p.x >= 0.0 && p.x + 300.0 <= 900.0 && p.y >= 86.0 && p.y + 90.0 <= 720.0);
         assert_eq!(overlap((p.x, p.y, 300.0, 90.0), (10.0, 100.0, 120.0, 200.0)), 0.0);
+    }
+
+    #[test]
+    fn places_wrap_after_the_separators_and_end_with_an_ellipsis() {
+        let w = |s: &str| s.chars().count() as f32;
+        // 「有田川町」を途中で折らない
+        assert_eq!(
+            wrap("和歌山県 有田市・湯浅町・有田川町", 13.0, 3, w),
+            vec!["和歌山県 有田市・湯浅町・", "有田川町"]
+        );
+        // 1 語が長すぎるときだけ語の途中で折る
+        assert_eq!(
+            wrap("あいうえおかきくけこ", 4.0, 3, w),
+            vec!["あいうえ", "おかきく", "けこ"]
+        );
+        // 行数を超えたら最後の行を「…」で切る
+        assert_eq!(wrap("あ・い・う・え", 2.0, 2, w), vec!["あ・", "い…"]);
     }
 
     #[test]

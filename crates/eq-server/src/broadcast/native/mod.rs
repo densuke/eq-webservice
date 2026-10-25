@@ -128,6 +128,8 @@ pub struct Native {
     pub calm: watch::Receiver<bool>,
     /// 出している地震の最大震度・警報か (record の判断用。calm より先に送る)
     pub shown: watch::Receiver<Shown>,
+    /// 寄っているか (平時でも寄っている間は地震の画面の fps で送る)
+    pub zoomed: watch::Receiver<bool>,
     tasks: Vec<JoinHandle<()>>,
 }
 
@@ -217,6 +219,7 @@ pub fn start(
     let (tx, frames) = watch::channel(Arc::new(Vec::new()));
     let (calm_tx, calm) = watch::channel(true);
     let (shown_tx, shown) = watch::channel(Shown::NONE);
+    let (zoomed_tx, zoomed) = watch::channel(false);
     let (label, test) = (cfg.label.clone(), cfg.test);
     // 描き直すかを調べる間隔。地震波が動く間はこの間隔ごとに描き直すので、地震の画面の fps に合わせる
     let check_ms = 1000 / u64::from(cfg.fps.max(1));
@@ -247,6 +250,7 @@ pub fn start(
                 frames: tx,
                 calm: calm_tx,
                 shown: shown_tx,
+                zoomed: zoomed_tx,
                 label,
                 test,
                 check_ms,
@@ -267,6 +271,7 @@ pub fn start(
         frames,
         calm,
         shown,
+        zoomed,
         tasks,
     })
 }
@@ -332,6 +337,7 @@ struct Out {
     frames: watch::Sender<Arc<Vec<u8>>>,
     calm: watch::Sender<bool>,
     shown: watch::Sender<Shown>,
+    zoomed: watch::Sender<bool>,
     label: String,
     test: bool,
     check_ms: u64,
@@ -372,12 +378,19 @@ async fn render_loop(renderer: Renderer, st: Shared, out: Out, notices: Option<U
                 notices: s.notices.as_ref(),
             })
         };
-        let Some(Output { i420, calm, shown }) = o else {
+        let Some(Output {
+            i420,
+            calm,
+            shown,
+            zoomed,
+        }) = o
+        else {
             continue;
         };
         // calm より先に送る (record は calm が変わったときに読む)
         let _ = out.shown.send_if_modified(|c| std::mem::replace(c, shown) != shown);
         let _ = out.calm.send_if_modified(|c| std::mem::replace(c, calm) != calm);
+        let _ = out.zoomed.send_if_modified(|z| std::mem::replace(z, zoomed) != zoomed);
         let _ = out.frames.send(Arc::new(i420));
         if last_calm != Some(calm) {
             last_calm = Some(calm);

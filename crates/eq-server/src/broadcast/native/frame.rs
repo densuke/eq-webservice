@@ -184,6 +184,16 @@ impl Frame {
         self.within(lon, lat, 0.0)
     }
 
+    /// その地点が、この面の描いてよい枠の中に映るか (寄った本図は、地図の枠の外 = 上部バー・右パネルに出る点を除く)。
+    /// 型 (clip) を通さずに描く点 (雨の点・天気の札) に使う
+    pub fn shows(&self, lon: f64, lat: f64) -> bool {
+        let inside = |c: &Clip| {
+            let (x, y) = self.view.px(lon, lat);
+            (c.rect.left()..=c.rect.right()).contains(&x) && (c.rect.top()..=c.rect.bottom()).contains(&y)
+        };
+        self.contains(lon, lat) && self.clip.as_ref().is_none_or(inside)
+    }
+
     /// 範囲を margin 度広げて見たとき、その地点が別枠の中か (本図は全部)
     fn within(&self, lon: f64, lat: f64, margin: f64) -> bool {
         self.inset.as_ref().is_none_or(|i| {

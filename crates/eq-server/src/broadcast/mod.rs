@@ -361,7 +361,11 @@ async fn session(cfg: &BroadcastConfig, output: &[String], secrets: &[String]) -
             // native: 描き直された画面、または平時と地震の切り替え (すぐコマの間隔を変える)
             r = async {
                 match native.as_mut() {
-                    Some(n) => tokio::select! { r = n.frames.changed() => r.map(|_| true), r = n.calm.changed() => r.map(|_| false) },
+                    Some(n) => tokio::select! {
+                        r = n.frames.changed() => r.map(|_| true),
+                        r = n.calm.changed() => r.map(|_| false),
+                        r = n.zoomed.changed() => r.map(|_| false),
+                    },
                     None => std::future::pending().await,
                 }
             } => {
@@ -370,7 +374,8 @@ async fn session(cfg: &BroadcastConfig, output: &[String], secrets: &[String]) -
                     if is_frame {
                         frame = n.frames.borrow_and_update().clone();
                     } else {
-                        let next = frame_rate(cfg, *n.calm.borrow_and_update());
+                        // 平時でも寄っている間 (危険警報以上の県への寄り) は地震の画面の fps
+                        let next = frame_rate(cfg, *n.calm.borrow_and_update() && !*n.zoomed.borrow_and_update());
                         if next != rate {
                             tracing::info!(fps = next, "broadcast: frame rate changed");
                             rate = next;
