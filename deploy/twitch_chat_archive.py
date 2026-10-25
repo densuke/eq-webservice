@@ -7,6 +7,7 @@
 - 配信中かは app token (twitch_live_check と共有) で調べ、送るのは配信者の user token
   (twitch_chat_authorize.py が TOKEN に置く。期限が近いか 401 なら更新して置き直す)。トークンの値は出さない。
 - 落とされた (is_sent: false) のが DROPS_TO_NOTIFY 回続いたら、notify-discord.sh で 1 度知らせる。
+  許可が切れた (リフレッシュできない・トークンが無い) ときも 1 度知らせる (送れたら数え直す)。
 - --dry-run は送らずに、流すときの文面を出すだけ (状態も書かない)。
 - 1 行目に結果。終了コードは 送った・流さない=0、送れなかった=1、調べられない=2。
 """
@@ -73,6 +74,15 @@ def after_drop(state: dict | None) -> tuple[dict, bool]:
     return {**(state or {}), "drops": drops}, drops == DROPS_TO_NOTIFY
 
 
+def after_auth_failure(state: dict | None) -> tuple[dict, bool]:
+    """許可が切れた印を付けた状態と、今回はじめて切れたか (純粋な関数)"""
+    return {**(state or {}), "auth_failed": True}, not (state or {}).get("auth_failed")
+
+
+class AuthError(Exception):
+    """配信者の許可が切れた (twitch_chat_authorize.py でやり直す)"""
+
+
 def needs_refresh(tok: dict, now: float) -> bool:
     return tok.get("expires_at", 0) - now <= REFRESH_MARGIN_SEC
 
@@ -126,8 +136,13 @@ def token_response(tok: dict, user_id: str, login: str) -> dict:
 def refresh(env: dict, tok: dict) -> dict:
     body = urllib.parse.urlencode({"grant_type": "refresh_token", "refresh_token": tok["refresh_token"],
                                    "client_id": env["TWITCH_CLIENT_ID"], "client_secret": env["TWITCH_CLIENT_SECRET"]}).encode()
-    with urllib.request.urlopen(urllib.request.Request("https://id.twitch.tv/oauth2/token", data=body), timeout=20) as r:
-        new = token_response(json.load(r), tok["user_id"], tok["login"])
+    try:
+        with urllib.request.urlopen(urllib.request.Request("https://id.twitch.tv/oauth2/token", data=body), timeout=20) as r:
+            new = token_response(json.load(r), tok["user_id"], tok["login"])
+    except urllib.error.HTTPError as e:
+        if e.code in (400, 401):  # リフレッシュトークンが無効 (パスワードの変更・連携を外した)
+            raise AuthError(f"リフレッシュできない (HTTP {e.code})") from e
+        raise
     write_json(TOKEN, new, 0o600)  # 新しいリフレッシュトークンが返るので毎回置き直す
     return new
 
@@ -146,7 +161,7 @@ def send(env: dict, tok: dict, text: str) -> dict:
 def send_as_user(env: dict, text: str) -> dict:
     tok = read_json(TOKEN)
     if not tok:
-        raise ValueError(f"配信者のトークンが無い ({TOKEN})。twitch_chat_authorize.py で許可する")
+        raise AuthError(f"配信者のトークンが無い ({TOKEN})")
     if needs_refresh(tok, time.time()):
         tok = refresh(env, tok)
     try:
@@ -189,7 +204,15 @@ def run(env: dict, login: str, queue_dir: str, dry_run: bool) -> int:
     if dry_run:
         print("DRY " + text)
         return 0
-    res = send_as_user(env, text)
+    try:
+        res = send_as_user(env, text)
+    except AuthError as e:
+        state, tell = after_auth_failure(state)
+        write_json(STATE, state)
+        if tell:
+            notify(f"Twitch のチャットへの案内が止まった: {e}。Pi で twitch_chat_authorize.py をやり直す")
+        print(f"NG 許可が切れた: {e}。twitch_chat_authorize.py で許可し直す")
+        return 1
     if not res.get("is_sent"):
         state, tell = after_drop(state)
         write_json(STATE, state)

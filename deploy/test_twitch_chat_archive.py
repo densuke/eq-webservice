@@ -1,5 +1,5 @@
 # twitch_chat_archive の判断と文面の確かめ (python3 deploy/test_twitch_chat_archive.py)
-from twitch_chat_archive import (DROPS_TO_NOTIFY, EVERY_MS, MAX_AGE_MS, PLAYLIST_URL, STALE_MS, after_drop, calm,
+from twitch_chat_archive import (DROPS_TO_NOTIFY, EVERY_MS, MAX_AGE_MS, PLAYLIST_URL, STALE_MS, after_auth_failure, after_drop, calm,
                                  decide, latest_upload, message, needs_refresh)
 
 H = 3_600_000
@@ -39,6 +39,11 @@ s, notify = after_drop(s)
 assert s["drops"] == DROPS_TO_NOTIFY and notify
 assert not after_drop(s)[1]  # 知らせるのは 1 度だけ
 assert after_drop({"announced_youtube_id": "b", "last_post_ms": 5})[0]["announced_youtube_id"] == "b"  # ほかは保つ
+
+# 許可が切れた (リフレッシュできない・トークンが無い): 最初の 1 回だけ知らせる。ほかの項目は保つ
+s, notify = after_auth_failure({"announced_youtube_id": "b", "last_post_ms": 5})
+assert notify and s["auth_failed"] and s["announced_youtube_id"] == "b"
+assert not after_auth_failure(s)[1]
 
 # トークンの期限: 残り 5 分を切ったら更新する
 assert needs_refresh({"expires_at": 1000 + 301}, 1000) is False
