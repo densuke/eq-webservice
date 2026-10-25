@@ -67,6 +67,7 @@ fn router_with_slots<S: Synth>(
 ) -> Router {
     Router::new()
         .route("/api/tts/event/{id}", get(event::<S>))
+        .route("/api/tts/attention", get(attention::<S>))
         .route("/api/tts", post(custom::<S>))
         .route(
             "/api/tts/announce",
@@ -173,6 +174,27 @@ fn permit_body(bytes: Vec<u8>, permit: OwnedSemaphorePermit, timeout: Duration) 
     // 終端 (None) の後に hyper が再度 poll しても panic しないよう、以後は常に None
     .fuse();
     Body::from_stream(chunks)
+}
+
+/// 震度速報のあと続報が来ないときの案内 (固定の文)。docs/tts.md S15
+async fn attention<S: Synth>(State(st): State<Arc<AppState<S>>>, Query(q): Query<RateQuery>) -> Response {
+    if !q.valid() {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    let Some(cache) = st.cache.clone() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    match cache
+        .announce(&phrase::attention_segments(), Duration::from_secs(3))
+        .await
+    {
+        Ok(bytes) => wav_response(q.apply(bytes), Some("public, max-age=86400")),
+        Err(TtsError::Budget) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
+        Err(TtsError::Failed(e)) => {
+            tracing::warn!("tts attention failed: {e:#}");
+            StatusCode::SERVICE_UNAVAILABLE.into_response()
+        }
+    }
 }
 
 async fn event<S: Synth>(
@@ -507,6 +529,17 @@ mod tests {
         assert_eq!(parts.status, StatusCode::OK);
         assert_eq!(parts.headers[header::CONTENT_TYPE], "audio/wav");
         assert!(!wav::parse(body).unwrap().is_empty());
+    }
+
+    // ---- GET /api/tts/attention ----
+
+    #[tokio::test]
+    async fn get_attention_returns_the_fixed_notice() {
+        let e = env(1_000_000);
+        let (parts, body) = get(app(&e), "/api/tts/attention").await;
+        assert_wav(&parts, &body);
+        let (parts, _) = get(app(&e), "/api/tts/attention?rate=12345").await;
+        assert_eq!(parts.status, StatusCode::BAD_REQUEST);
     }
 
     // ---- GET /api/tts/event/{id} ----

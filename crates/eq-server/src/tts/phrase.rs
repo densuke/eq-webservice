@@ -22,6 +22,8 @@ const WATCH_AREA_LIMIT: usize = 10;
 const USERQUAKE_REPORTED: &str = "揺れを感じたという報告が集まっています。";
 const REPEAT: &str = "繰り返します。";
 const RESUMED: &str = "新たな情報です。";
+const NO_HYPOCENTER_YET: &str = "震源に関する情報は、まだ発表されていません。";
+const ATTENTION: &str = "今後の情報に注意してください。";
 /// 同じ地震の前の地震情報からこれだけ空いたら、「新たな情報です。」と発生時刻・震源・M を言い直す (docs/tts.md S14)
 const RESUME_GAP_MS: u64 = 120_000;
 
@@ -231,6 +233,8 @@ pub fn fixed_segments() -> Vec<String> {
         USERQUAKE_REPORTED,
         REPEAT,
         RESUMED,
+        NO_HYPOCENTER_YET,
+        ATTENTION,
     ]
     .map(String::from);
     let scales = SCALES.iter().flat_map(|s| [max_sentence(*s), expected_sentence(*s)]);
@@ -514,6 +518,11 @@ fn announce_tsunami(ev: &Event, priors: &[&Event]) -> Vec<String> {
         out.push(EVACUATE.to_string());
     }
     out
+}
+
+/// 震度速報のあと震源の情報が来ないまま時間が経ったときの案内 (`GET /api/tts/attention`)。docs/tts.md S15
+pub fn attention_segments() -> Vec<String> {
+    vec![NO_HYPOCENTER_YET.to_string(), ATTENTION.to_string()]
 }
 
 /// 続報は前の報 (priors) との差分だけ読む。docs/tts.md S8。

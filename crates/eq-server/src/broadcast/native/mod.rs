@@ -425,12 +425,30 @@ async fn ws_once(
     // この接続で届いた報 (到着順)。hello の分は文脈だけで、音は鳴らさない
     let mut live: Vec<Event> = Vec::new();
     let mut gate = Gate::default();
+    // 「今後の情報に注意」を読んだ地震 (QuakeSummary::updated_ms) と、サーバの時計とのずれ
+    let mut attended: Vec<u64> = Vec::new();
+    let mut offset = 0i64;
+    let mut tick = tokio::time::interval(ATTENTION_CHECK);
     let (mut ws, _) = tokio_tungstenite::connect_async(url).await.context("connect")?;
     change(st, |s| s.connected = true);
-    while let Some(msg) = ws.next().await {
+    loop {
+        let msg = tokio::select! {
+            msg = ws.next() => msg,
+            _ = tick.tick() => {
+                if let Some(n) = notices {
+                    let now = model::server_now(local_now_ms(), offset);
+                    attention_for(&live, now, &mut attended, base, voice, n);
+                }
+                continue;
+            }
+        };
+        let Some(msg) = msg else { break };
         match msg? {
             Message::Text(t) => match serde_json::from_str::<ServerMessage>(t.as_str()) {
                 Ok(m) => {
+                    let (ServerMessage::Hello { server_time_ms, .. } | ServerMessage::Event { server_time_ms, .. }) =
+                        &m;
+                    offset = model::clock_offset(*server_time_ms, local_now_ms());
                     if let Some(n) = notices {
                         sound_for(&mut live, &mut gate, &m, base, voice, n);
                     }
@@ -443,6 +461,30 @@ async fn ws_once(
         }
     }
     anyhow::bail!("closed")
+}
+
+/// 「今後の情報に注意」を見る間隔
+const ATTENTION_CHECK: Duration = Duration::from_secs(5);
+
+/// 震度速報のあと震源の情報が来ないまま時間が経った地震に、案内音と「今後の情報に注意」を 1 回だけ知らせる (docs/tts.md S15)
+fn attention_for(
+    live: &[Event],
+    now_ms: u64,
+    attended: &mut Vec<u64>,
+    base: &str,
+    voice: bool,
+    notices: &UnboundedSender<String>,
+) {
+    for q in model::attention_due(&model::group_quakes(live), now_ms) {
+        if attended.contains(&q.updated_ms) {
+            continue;
+        }
+        attended.push(q.updated_ms);
+        let _ = notices.send(model::alert_notice(AlertLevel::Info));
+        if voice {
+            let _ = notices.send(model::voice_notice(&model::attention_url(base)));
+        }
+    }
 }
 
 /// 直近に覚えておく報の数

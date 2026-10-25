@@ -7,7 +7,7 @@ use super::data::rain_color;
 use super::draw::Scene;
 use super::eew::{eew_forecast_text, eew_kind_text, EewSummary};
 use super::layout_resolve::Rect;
-use super::model::{hypo_text, scale_color, scale_text_color, tsunami_text, QuakeSummary};
+use super::model::{awaiting_follow_up, hypo_text, scale_color, scale_text_color, tsunami_text, QuakeSummary};
 use super::paint::{rect, rrect, BG, LINE, MUTED, PANEL, TEXT};
 use super::placed::Placed;
 use super::text::Text;
@@ -142,7 +142,10 @@ pub fn draw_dynamic(pm: &mut Pixmap, text: &mut Text, scene: &Scene, p: &Placed)
     } else if let Some(d) = p.detail {
         match (scene.quake, scene.eew) {
             (None, Some(e)) => draw_eew_detail(pm, text, e, d),
-            (q, _) => draw_detail(pm, text, q.or(scene.history.first()), q.is_some(), d),
+            (q, _) => {
+                let awaiting = q.is_some_and(|q| awaiting_follow_up(q, scene.now_ms));
+                draw_detail(pm, text, q.or(scene.history.first()), q.is_some(), awaiting, d)
+            }
         }
     }
     if let (None, Some(h)) = (intro, p.history) {
@@ -255,7 +258,8 @@ fn draw_intro(pm: &mut Pixmap, text: &mut Text, lines: &[String], d: Rect, h: Re
 
 /// 右パネルの上: 地震の詳細 (地震の画面のときはその地震、平時は最新の地震)
 /// (矩形 d は定義の detail。中の位置は d の上端からの距離)
-fn draw_detail(pm: &mut Pixmap, text: &mut Text, q: Option<&QuakeSummary>, live: bool, d: Rect) {
+/// awaiting は震度速報のあと震源の情報が来ないまま時間が経ったとき (震源の欄に「今後の情報に注意」を添える)
+fn draw_detail(pm: &mut Pixmap, text: &mut Text, q: Option<&QuakeSummary>, live: bool, awaiting: bool, d: Rect) {
     let x = d.x + PAD;
     let Some(q) = q else {
         text.draw(pm, "受信した情報はまだありません。", x, d.y + 34.0, 13.0, MUTED);
@@ -282,7 +286,14 @@ fn draw_detail(pm: &mut Pixmap, text: &mut Text, q: Option<&QuakeSummary>, live:
         MUTED,
     );
     for (i, (k, v)) in [
-        ("震源", hypo_text(q.hypocenter.as_ref())),
+        (
+            "震源",
+            if awaiting {
+                "調査中。今後の情報に注意してください".into()
+            } else {
+                hypo_text(q.hypocenter.as_ref())
+            },
+        ),
         ("津波", tsunami_text(&q.tsunami).into()),
     ]
     .iter()

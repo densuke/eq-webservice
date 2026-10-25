@@ -7,6 +7,8 @@ export interface Item {
   priority?: boolean;
   /** POST /api/tts/announce に送る JSON。なければ id で GET */
   body?: string;
+  /** id の代わりに取りに行く声 (「今後の情報に注意」など固定の文) */
+  url?: string;
 }
 
 /** 大津波警報・津波警報を含む (解除でない) 津波か */
@@ -58,6 +60,11 @@ export function enqueue(queue: readonly Item[], item: Item): Item[] {
   return next;
 }
 
+/** 震度速報のあと続報が来ないときの「今後の情報に注意」(固定の文) */
+export function attentionUrl(base: string, rate?: number): string {
+  return withRate(new URL("api/tts/attention", base).href, rate);
+}
+
 export function voiceUrl(id: string, base: string, rate?: number): string {
   return withRate(new URL("api/tts/event/" + encodeURIComponent(id), base).href, rate);
 }
@@ -81,7 +88,7 @@ function next(): void {
     next();
   };
   if (!head.body) {
-    play(new Audio(voiceUrl(head.id, location.href, BROWSER_RATE)), advance);
+    play(new Audio(head.url ?? voiceUrl(head.id, location.href, BROWSER_RATE)), advance);
     return;
   }
   // 履歴・デモ: 本文を POST して WAV を受け取る (サーバは未合成の部品を飛ばす)
@@ -106,6 +113,12 @@ function play(audio: HTMLAudioElement, advance: () => void): void {
 /** 読み上げを待ち行列に入れる (鳴っていなければ始める) */
 export function enqueueVoice(id: string, group: string, priority = false): void {
   queue = enqueue(queue, { id, group, priority });
+  if (!playing) next();
+}
+
+/** 「今後の情報に注意」を待ち行列に入れる (group はその地震。同じ地震の続報の読み上げが来れば差し替わる) */
+export function enqueueAttention(group: string): void {
+  queue = enqueue(queue, { id: "attention", group, url: attentionUrl(location.href, BROWSER_RATE) });
   if (!playing) next();
 }
 

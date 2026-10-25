@@ -26,7 +26,8 @@ import type { EewEvent, EqEvent, UserquakeEvent } from "./types.ts";
 import { type UserquakeRead, confidenceGrade, latestUserquake, userquakeReadable, userquakeShown } from "./userquake.ts";
 import { type Warnings, mergeFocuses, topLevel, warnFocusAt, warnFocuses, warningSummary } from "./warnings.ts";
 import { notifyVoice, mixerAudio } from "./broadcast.ts";
-import { enqueueAnnounce, enqueueVoice, isPriorityTsunami, tsunamiHistory, voiceRoute, voiceUrl } from "./voice.ts";
+import { attentionUrl, enqueueAnnounce, enqueueAttention, enqueueVoice, isPriorityTsunami, tsunamiHistory, voiceRoute, voiceUrl } from "./voice.ts";
+import { attentionDue, awaitingFollowUp } from "./attention.ts";
 import { loadBgmConfig, updateBgm } from "./bgm.ts";
 import { loadBanners, updateBanner } from "./banner.ts";
 import { startViewers } from "./viewers.ts";
@@ -194,6 +195,31 @@ export function onEvents(all: EqEvent[], live: boolean, target: World = liveWorl
   invalidateSubMap();
   renderAll();
   if (alert) playAlert(alert);
+}
+
+/** 「今後の情報に注意」を知らせた地震 (キーと最後の報の時刻) と、前に見たときに待っていた地震 */
+const attended = new Set<string>();
+let awaiting = "";
+
+/** 震度速報のあと震源の情報が来ないまま時間が経った地震に、案内音と「今後の情報に注意」を 1 回だけ (docs/tts.md S15) */
+function checkAttention(): void {
+  const t = now();
+  const quakes = app.world.store.list().filter((g) => g.kind === "quake");
+  const waiting = quakes.filter((g) => awaitingFollowUp(g, t)).map((g) => g.key).join(",");
+  // 待ちの表示が出た・消えたら、詳細を描き直す
+  if (waiting !== awaiting) {
+    awaiting = waiting;
+    renderDetail();
+  }
+  for (const g of quakes) {
+    const id = `${g.key}@${g.updatedAt}`;
+    if (!attentionDue(g, t) || attended.has(id)) continue;
+    attended.add(id);
+    playAlert("info");
+    if (!app.settings.voice || !soundEnabled()) continue;
+    if (mixerAudio) notifyVoice(attentionUrl(location.href));
+    else enqueueAttention(g.key);
+  }
 }
 
 let toastTimer = 0;
@@ -405,6 +431,7 @@ void loadLayoutFile();
 window.addEventListener("resize", () => applyLayout());
 
 loadTelop();
+window.setInterval(checkAttention, 5_000);
 // 気象警報・注意報は 5 分ごとに取り直す
 window.setInterval(() => void loadWarnings().catch(() => {}), 5 * 60_000);
 // 主要都市の天気とアメダスの雨も 5 分ごと (サーバは 10 分ごとに取得)
