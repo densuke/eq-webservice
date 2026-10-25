@@ -128,6 +128,20 @@ body {
   background: rgba(13, 17, 23, 0.8); padding: 4px 9px; border-radius: 6px; font-size: 12px; font-weight: 600; color: var(--text);
 }
 
+/* 平時に寄せた危険警報以上の区域の札と矢印。色は段階 (危険警報 紫・特別警報 白) */
+.warn-card-layer { position: absolute; inset: 0; pointer-events: none; z-index: 1; --wc: #aa00ff; }
+.warn-card-layer[data-level="emergency"] { --wc: #fff; }
+.wc-arrow { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.wc-arrow line { stroke: var(--wc); stroke-width: 3; stroke-linecap: round; }
+.wc-arrow marker path { fill: var(--wc); }
+.warn-card {
+  position: absolute; max-width: min(320px, 70%); padding: 8px 12px; border: 2px solid var(--wc); border-radius: 8px;
+  background: rgba(13, 17, 23, 0.9); color: var(--text); font-size: 13px; line-height: 1.4;
+}
+.wc-item + .wc-item { margin-top: 6px; }
+.wc-name { font-weight: 700; }
+.wc-places, .wc-rest { color: var(--muted); font-size: 12px; }
+
 /* 画面外の地震の方向 (地図の端)。色は最大震度 */
 .offscreen-layer { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
 .offscreen {
