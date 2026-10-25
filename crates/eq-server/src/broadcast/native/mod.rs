@@ -642,6 +642,8 @@ mod layout_def_tests;
 #[cfg(test)]
 mod layout_resolve_tests;
 #[cfg(test)]
+mod legend_tests;
+#[cfg(test)]
 mod sound_tests;
 #[cfg(test)]
 mod spread_tests;

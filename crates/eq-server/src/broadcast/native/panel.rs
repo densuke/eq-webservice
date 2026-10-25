@@ -3,6 +3,7 @@
 use tiny_skia::Pixmap;
 
 use super::chip;
+use super::data::rain_color;
 use super::draw::Scene;
 use super::eew::{eew_forecast_text, eew_kind_text, EewSummary};
 use super::layout_resolve::Rect;
@@ -45,18 +46,39 @@ const WARN_LEGEND: [(&str, [u8; 3]); 4] = [
 const HISTORY_HEAD: f32 = 36.0;
 const HISTORY_ROW: f32 = 52.0;
 
-/// 震度の凡例 (左下。1 が下。矩形は定義の legend)。寄った地図は海から描き直すので、その上に描き直す
-pub fn draw_legend(pm: &mut Pixmap, text: &mut Text, area: Rect) {
+/// 雨の凡例の段 (1 時間降水量 mm の下限。上ほど強い)。色は雨の点と同じ data::rain_color
+const RAIN_STEPS: [(&str, f64); 8] = [
+    ("<1", 0.0),
+    ("1", 1.0),
+    ("5", 5.0),
+    ("10", 10.0),
+    ("20", 20.0),
+    ("30", 30.0),
+    ("50", 50.0),
+    ("80", 80.0),
+];
+
+/// 左下の凡例 (矩形は定義の legend)。震度は 1 が下。
+/// rain なら雨の凡例 (雨の点の色は震度の配色と似るので、点が出ている間は差し替える。1 段目に単位)
+pub fn draw_legend(pm: &mut Pixmap, text: &mut Text, area: Rect, rain: bool) {
     let Rect { x, y: y0, w, h } = area;
     rrect(pm, x, y0, w, h, 6.0, BG, 0.8);
+    let row = |i: usize| y0 + 6.0 + i as f32 * 15.0;
+    if rain {
+        text.draw(pm, "mm/時", x + 4.0, row(0) + 12.0, 9.0, MUTED);
+        for (i, (label, mm)) in RAIN_STEPS.iter().rev().enumerate() {
+            rect(pm, x + 7.0, row(i + 1), 7.0, 15.0, rain_color(*mm), 1.0);
+            text.draw(pm, label, x + 18.0, row(i + 1) + 12.0, 10.0, MUTED);
+        }
+        return;
+    }
     for (i, (label, color)) in GAUGE.iter().rev().enumerate() {
-        let y = y0 + 6.0 + i as f32 * 15.0;
-        rect(pm, x + 7.0, y, 7.0, 15.0, *color, 1.0);
-        text.draw(pm, label, x + 18.0, y + 12.0, 10.0, MUTED);
+        rect(pm, x + 7.0, row(i), 7.0, 15.0, *color, 1.0);
+        text.draw(pm, label, x + 18.0, row(i) + 12.0, 10.0, MUTED);
     }
 }
 
-/// 動かない部分: バーと右パネルの地、題、出典 (震度の凡例は地図の上の札なので draw_legend を別に呼ぶ)
+/// 動かない部分: バーと右パネルの地、題、出典 (凡例は雨の点で中身が変わるので draw_dynamic が描く)
 pub fn draw_frame(pm: &mut Pixmap, text: &mut Text, p: &Placed) {
     if let Some(bar) = p.topbar {
         rect(pm, bar.x, bar.y, bar.w, bar.h, PANEL, 1.0);
@@ -103,8 +125,12 @@ pub fn draw_dynamic(pm: &mut Pixmap, text: &mut Text, scene: &Scene, p: &Placed)
         text.draw(pm, mode, bar.x + 210.0, bar.y + 24.0, 12.0, MUTED);
         draw_top_right(pm, text, scene, bar);
     }
-    if let (false, Some(legend)) = (shaking, p.legend) {
-        draw_warn_legend(pm, text, legend);
+    if let Some(legend) = p.legend {
+        let rain = !shaking && scene.weather.is_some_and(|w| !w.rain.is_empty());
+        draw_legend(pm, text, legend, rain);
+        if !shaking {
+            draw_warn_legend(pm, text, legend);
+        }
     }
     // 記録から描き直すとき、最初の報が届くまでは、右の欄にあらまし (この動画で再現する地震) を出す
     let intro = scene
