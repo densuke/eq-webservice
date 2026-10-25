@@ -60,6 +60,8 @@ fn natural(slot: &str) -> Option<(f32, f32)> {
         "credit" => (380.0, 90.0),
         "map-sub" => (380.0, 300.0),
         "inset" => (226.0, 220.0),
+        // 小笠原の別枠 (frame.rs の OGASAWARA。高さ 150、幅は範囲の縦横比で約 60)
+        "ogasawara" => (60.0, 150.0),
         "legend" => (34.0, 147.0),
         "clock" => (176.0, 74.0),
         _ => return None,

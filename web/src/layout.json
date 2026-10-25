@@ -223,7 +223,7 @@
                 "overlays": {
                   "top-left": {"flow": "column", "items": ["inset"]},
                   "bottom-left": {"flow": "column", "items": ["legend"]},
-                  "bottom-right": {"flow": "column", "items": ["clock"]}
+                  "bottom-right": {"flow": "column", "items": ["ogasawara", "clock"]}
                 }
               },
               {
@@ -263,7 +263,7 @@
                 "overlays": {
                   "top-left": {"flow": "column", "items": ["inset"]},
                   "bottom-left": {"flow": "column", "items": ["legend"]},
-                  "bottom-right": {"flow": "column", "items": ["clock"]}
+                  "bottom-right": {"flow": "column", "items": ["ogasawara", "clock"]}
                 }
               },
               {

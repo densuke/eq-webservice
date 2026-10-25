@@ -11,7 +11,7 @@ use super::camera::{Fit, MapBox};
 use super::cards::CardCache;
 use super::data::{CityWeather, WarningLevel, Warnings};
 use super::eew::{forecast_tag, EewSummary, Wave};
-use super::frame::{BoxRect, Clip, Frame, OKINAWA};
+use super::frame::{BoxRect, Clip, Frame, OGASAWARA, OKINAWA};
 use super::geo::{Coast, Shape, View};
 use super::hindsight::Hindsight;
 use super::icon::Icons;
@@ -19,7 +19,8 @@ use super::layout_resolve::Rect;
 use super::model::{scale_color, scale_text_color, QuakeSummary};
 use super::notice::{self, LayoutCache, Notices};
 use super::paint::{
-    circle, epicenter, ghost_epicenter, rect, rrect, LAND, LAND_EDGE, MUTED, NEIGHBOR, NEIGHBOR_EDGE, SEA, TEXT,
+    circle, epicenter, ghost_epicenter, line, rect, rrect, LAND, LAND_EDGE, MUTED, NEIGHBOR, NEIGHBOR_EDGE, PANEL, SEA,
+    TEXT,
 };
 use super::panel;
 use super::placed::Placed;
@@ -165,8 +166,13 @@ pub struct Renderer {
     pub(super) text: Text,
     /// 日本全体の本図 (path はこの座標で作ってある)
     main: Frame,
-    /// 離島の別枠
+    /// 離島の別枠 (南西諸島・小笠原)
     insets: Vec<Frame>,
+    /// いま出している別枠 (insets と同じ並び。render_into で決める)。日本全体では南西諸島はいつも、
+    /// 小笠原と、寄っているときの別枠は、その範囲に揺れや震央があるときだけ
+    shown: Vec<bool>,
+    /// 出している別枠の組み合わせごとの、地図の枠から別枠を除いた型 (作るのが重いので覚える)
+    clips: HashMap<Vec<bool>, Option<Clip>>,
     /// 寄った本図 (set_view で入れる)。あれば、本図と別枠の代わりにこれを描く
     zoomed: Option<Frame>,
     /// 寄りの設定が有効なとき: 地図の枠の型と、地震情報細分区域の外接矩形 (名前 -> 地図の座標)
@@ -205,15 +211,20 @@ impl Renderer {
         text: Text,
         placed: Placed,
     ) -> Renderer {
-        let insets: Vec<Frame> = placed
-            .inset
-            .and_then(|at| Frame::inset(&view, &OKINAWA, at))
+        let insets: Vec<Frame> = [(placed.inset, &OKINAWA), (placed.ogasawara, &OGASAWARA)]
             .into_iter()
+            .filter_map(|(at, spec)| Frame::inset(&view, spec, at?))
             .collect();
+        let shown: Vec<bool> = insets.iter().map(Frame::always).collect();
         let mut r = Renderer {
             text,
-            main: Frame::main(view).bounded(placed.main, insets.first()),
+            main: Frame::main(view).with_clip(Frame::main_clip(
+                placed.main,
+                insets.iter().zip(&shown).filter(|(_, s)| **s).map(|(f, _)| f),
+            )),
             insets,
+            shown,
+            clips: HashMap::new(),
             zoomed: None,
             clip: None,
             zones: Zones::default(),
@@ -319,20 +330,75 @@ impl Renderer {
         });
     }
 
+    /// 出す別枠を決め、本図 (日本全体か寄ったもの) の型をそれに合わせる (別枠の所は本図が描かない)
+    fn choose_insets(&mut self, scene: &Scene) {
+        let zoomed = self.zoomed.is_some();
+        let shown: Vec<bool> = self
+            .insets
+            .iter()
+            .map(|f| (!zoomed && f.always()) || self.has_content(f, scene))
+            .collect();
+        let clip = match self.clips.get(&shown) {
+            Some(c) => c.clone(),
+            None => {
+                let c = Frame::main_clip(self.placed.main, shown_insets(&self.insets, &shown));
+                self.clips.insert(shown.clone(), c.clone());
+                c
+            }
+        };
+        if let Some(z) = self.zoomed.as_mut() {
+            z.set_clip(clip.clone());
+        }
+        self.main.set_clip(clip);
+        self.shown = shown;
+    }
+
+    /// 別枠の範囲に、揺れ (観測点・塗り)・震央・のちに分かる震源や観測点があるか。
+    /// 寄った本図にすでに映っているもの (離島だけが揺れて本図がその島に寄ったとき) は数えない (同じ所を二重に出さない)
+    fn has_content(&self, f: &Frame, scene: &Scene) -> bool {
+        let Some(spec) = f.spec() else { return false };
+        let seen = |lon: f64, lat: f64| self.zoomed.as_ref().is_some_and(|z| z.dot_at(lon, lat).is_some());
+        let seen_box = |b: MapBox| {
+            self.zoomed.as_ref().is_some_and(|z| {
+                let (x, y) = z.view.map_px((b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0);
+                z.mask_contains((x, y))
+            })
+        };
+        let shake = Shake::of(scene, Some(&self.zones));
+        let dots = shake
+            .iter()
+            .flat_map(|s| &s.dots)
+            .any(|&(lon, lat, _)| f.contains(lon, lat) && !seen(lon, lat));
+        let painted = shake
+            .iter()
+            .flat_map(|s| s.scales.iter())
+            .filter_map(|(name, _)| self.zones.box_of(name))
+            .any(|b| spec.covers(b) && !seen_box(b));
+        let marked = |lon: f64, lat: f64| f.marker(lon, lat).is_some() && !seen(lon, lat);
+        let epicenter = shake
+            .iter()
+            .filter_map(|s| s.hypocenter)
+            .any(|h| h.longitude.zip(h.latitude).is_some_and(|(lon, lat)| marked(lon, lat)));
+        let hindsight = scene.hindsight.is_some_and(|h| marked(h.lon, h.lat));
+        let later = foresight_shown(scene).is_some_and(|fs| {
+            let points: Vec<_> = fs.points.iter().map(super::model::to_point).collect();
+            self.zones
+                .dots(&points)
+                .iter()
+                .any(|&(lon, lat, _)| f.contains(lon, lat) && !seen(lon, lat))
+        });
+        dots || painted || epicenter || hindsight || later
+    }
+
     /// 動かない部分: 海・陸・県境、別枠、パネルの枠。split なら、凡例と別枠の題 (波より上の札) を別の絵に分ける
     fn draw_base(&mut self, split: bool) -> Target {
         let mut t = Target::new(Pixmap::new(W, H).expect("size"), split);
         let main = self.placed.main;
         rect(t.low(), main.x, main.y, main.w, main.h, SEA, 1.0);
-        for f in std::iter::once(&self.main).chain(&self.insets) {
-            if let Some(((x, y, w, h), _)) = f.inset_box() {
-                rrect(t.low(), x - 1.0, y - 1.0, w + 2.0, h + 2.0, 4.0, INSET_LINE, 1.0);
-                rect(t.low(), x, y, w, h, SEA, 1.0);
-            }
-            draw_land(t.low(), f, &self.neighbors, &self.prefs);
-            if let Some(((x, y, _, _), title)) = f.inset_box() {
-                self.text.draw(t.top(), title, x + 4.0, y + 12.0, 10.0, MUTED);
-            }
+        draw_land(t.low(), &self.main, &self.neighbors, &self.prefs);
+        // 日本全体の表示でいつも出す別枠 (南西諸島) は動かない部分に入れる。ほかは render_into が出すときだけ描く
+        for f in self.insets.iter().filter(|f| f.always()) {
+            draw_inset_face(&mut t, &mut self.text, f, &self.neighbors, &self.prefs);
         }
         panel::draw_frame(t.low(), &mut self.text, &self.placed);
         t
@@ -386,17 +452,48 @@ impl Renderer {
             };
             format!("{}に{level}", f.prefs.join("・"))
         });
+        self.choose_insets(scene);
         if let Some(z) = &self.zoomed {
             // 日本全体の地図 (と別枠) を海で隠し、寄った地図を描き直す (隠した凡例と別枠の題は上の絵からも消す)
             rect(t.low(), main.x, main.y, main.w, main.h, SEA, 1.0);
             t.clear_over(main);
             draw_land(t.low(), z, &self.neighbors, &self.prefs);
         }
-        for (slot, f) in frames(&self.main, &self.insets, &self.zoomed).into_iter().enumerate() {
+        // 動かない部分に無い別枠 (寄っているときの別枠・小笠原) は、ここで枠と陸を描く
+        let zoomed = self.zoomed.is_some();
+        for (f, _) in self
+            .insets
+            .iter()
+            .zip(&self.shown)
+            .filter(|(f, s)| **s && (zoomed || !f.always()))
+        {
+            draw_inset_face(&mut t, &mut self.text, f, &self.neighbors, &self.prefs);
+        }
+        let shown_boxes: Vec<BoxRect> = shown_insets(&self.insets, &self.shown)
+            .filter_map(|f| f.inset_box().map(|(r, _)| r))
+            .collect();
+        // 震央が別枠に映っているなら、本図の縁の「震央 (画面の外)」は出さない
+        let epicenter_in_inset = Shake::of(scene, Some(&self.zones))
+            .and_then(|s| s.hypocenter)
+            .and_then(|h| h.longitude.zip(h.latitude))
+            .is_some_and(|(lon, lat)| shown_insets(&self.insets, &self.shown).any(|f| f.marker(lon, lat).is_some()));
+        for (slot, f) in frames(&self.main, &self.insets, &self.shown, &self.zoomed)
+            .into_iter()
+            .enumerate()
+        {
             match Shake::of(scene, Some(&self.zones)) {
-                Some(s) => draw_shake(&mut t, &mut self.text, &self.prefs, f, &s, true, main.right()),
+                Some(s) => draw_shake(
+                    &mut t,
+                    &mut self.text,
+                    &self.prefs,
+                    f,
+                    &s,
+                    true,
+                    main.right(),
+                    !epicenter_in_inset,
+                ),
                 None => {
-                    let (fixed, bounds) = card_room(f, &self.insets, self.zoomed.is_some(), scene.test, &placed);
+                    let (fixed, bounds) = card_room(f, &shown_boxes, scene.test, &placed);
                     let env = calm::CardEnv {
                         slot,
                         prefs: &self.prefs,
@@ -520,7 +617,7 @@ impl Renderer {
 
     /// 地震波の円 (P 波は青、S 波は赤で、内側をうっすら塗る) を重ねる
     pub fn draw_waves(&self, pm: &mut Pixmap, waves: &[Wave]) {
-        self.draw_rings(pm, waves, frames(&self.main, &self.insets, &self.zoomed));
+        self.draw_rings(pm, waves, frames(&self.main, &self.insets, &self.shown, &self.zoomed));
     }
 
     /// 円の path は日本全体の本図の座標で作り、寄った本図・別枠・サブの地図は変換して映す
@@ -541,23 +638,37 @@ impl Renderer {
 
 /// 描く面: 寄っていれば寄った本図だけ、そうでなければ本図と別枠
 /// 札を置かない所と、置いてよい範囲。別枠は枠の中だけ。本図は左下の凡例・情報の窓・別枠 (寄っていないとき) を避ける
-fn card_room(f: &Frame, insets: &[Frame], zoomed: bool, test: bool, placed: &Placed) -> (Vec<BoxRect>, BoxRect) {
+/// insets は出している別枠の枠 (札を置かない所)
+fn card_room(f: &Frame, insets: &[BoxRect], test: bool, placed: &Placed) -> (Vec<BoxRect>, BoxRect) {
     if let Some((rect, _)) = f.inset_box() {
         return (Vec::new(), rect);
     }
     let mut fixed: Vec<BoxRect> = placed.legend.map(Rect::tuple).into_iter().collect();
     fixed.push(calm::info_window(placed.main));
-    if !zoomed {
-        fixed.extend(insets.iter().filter_map(|i| i.inset_box().map(|(r, _)| r)));
-    }
+    fixed.extend(insets);
     (fixed, calm::main_bounds(test, placed.main))
 }
 
-fn frames<'a>(main: &'a Frame, insets: &'a [Frame], zoomed: &'a Option<Frame>) -> Vec<&'a Frame> {
-    match zoomed {
-        Some(z) => vec![z],
-        None => std::iter::once(main).chain(insets).collect(),
-    }
+fn shown_insets<'a>(insets: &'a [Frame], shown: &'a [bool]) -> impl Iterator<Item = &'a Frame> {
+    insets.iter().zip(shown).filter(|(_, s)| **s).map(|(f, _)| f)
+}
+
+/// 描く面: 本図 (日本全体か寄ったもの) と、出している別枠
+fn frames<'a>(main: &'a Frame, insets: &'a [Frame], shown: &'a [bool], zoomed: &'a Option<Frame>) -> Vec<&'a Frame> {
+    std::iter::once(zoomed.as_ref().unwrap_or(main))
+        .chain(shown_insets(insets, shown))
+        .collect()
+}
+
+/// 別枠の枠線・海・陸と題 (題は波より上の絵)
+fn draw_inset_face(t: &mut Target, text: &mut Text, f: &Frame, neighbors: &[Shape], prefs: &[Shape]) {
+    let Some(((x, y, w, h), title)) = f.inset_box() else {
+        return;
+    };
+    rrect(t.low(), x - 1.0, y - 1.0, w + 2.0, h + 2.0, 4.0, INSET_LINE, 1.0);
+    rect(t.low(), x, y, w, h, SEA, 1.0);
+    draw_land(t.low(), f, neighbors, prefs);
+    text.draw(t.top(), title, x + 4.0, y + 12.0, 10.0, MUTED);
 }
 
 /// 周辺国の陸地と都道府県をその面に描く
@@ -589,7 +700,7 @@ fn draw_sub_map(
     rect(t.low(), x, y, w, h, SEA, 1.0);
     draw_land(t.low(), f, neighbors, prefs);
     if let Some(s) = Shake::of(scene, None) {
-        draw_shake(t, text, prefs, f, &s, false, x + w);
+        draw_shake(t, text, prefs, f, &s, false, x + w, false);
     }
     tsunami_coast::draw(t.low(), f, coast, scene.tsunami);
     // 枠線は波より上 (波の円が枠の 1px を塗りつぶさない)
@@ -700,7 +811,9 @@ fn wave_paths(view: &View, waves: &[Wave]) -> Vec<WavePaths> {
 }
 
 /// 揺れの画面: 都道府県を震度の色で塗り、震度の札と震央 (と札) を出す (札は本図だけ)。
-/// map_right は地図の枠 (定義の main) の右端 (緊急地震速報の札が本図の右端をはみ出さないため)
+/// map_right は地図の枠 (定義の main) の右端 (緊急地震速報の札が本図の右端をはみ出さないため)。
+/// pointer は、震央が本図の外のとき縁に向きの矢印を出すか (別枠に震央が映っているときは出さない)
+#[allow(clippy::too_many_arguments)]
 fn draw_shake(
     t: &mut Target,
     text: &mut Text,
@@ -709,6 +822,7 @@ fn draw_shake(
     shake: &Shake,
     cards: bool,
     map_right: f32,
+    pointer: bool,
 ) {
     let hit: Vec<(&Shape, Scale)> = shake
         .scales
@@ -754,6 +868,27 @@ fn draw_shake(
                 1.0,
             );
             text.draw_center(pm, label, x, y + 5.0, 14.0, scale_text_color(*sc));
+        }
+    }
+    // 震央が遠く、揺れた範囲だけに寄って画面の外になったときは、枠の縁にその向きの矢印と「震央」を出す
+    let off = shake
+        .hypocenter
+        .filter(|_| cards && pointer)
+        .and_then(|h| frame.edge_pointer(h.longitude?, h.latitude?, 28.0));
+    if let Some(((x, y), (ux, uy))) = off {
+        let tip = (x + ux * 14.0, y + uy * 14.0);
+        let back = (x - ux * 6.0, y - uy * 6.0);
+        for side in [-1.0f32, 1.0] {
+            let wing = (back.0 - uy * 10.0 * side, back.1 + ux * 10.0 * side);
+            line(pm, wing, tip, 4.0, [0xff, 0xff, 0xff], 1.0);
+            line(pm, wing, tip, 2.0, [0xe0, 0x20, 0x20], 1.0);
+        }
+        if text.enabled() {
+            let label = "震央 (画面の外)";
+            let w = text.width(label, 13.0) + 12.0;
+            let (lx, ly) = (x - ux * 26.0 - w / 2.0, y - uy * 26.0);
+            rrect(pm, lx, ly - 11.0, w, 22.0, 5.0, PANEL, 0.9);
+            text.draw(pm, label, lx + 6.0, ly + 5.0, 13.0, TEXT);
         }
     }
     if let Some((x, y)) = shake.hypocenter.and_then(|h| frame.marker(h.longitude?, h.latitude?)) {

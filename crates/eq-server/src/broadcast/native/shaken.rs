@@ -85,8 +85,26 @@ impl Zones {
             let (x, y) = project(*lon, *lat);
             boxes.push(MapBox::around(x, y, 0.0));
         }
-        let union = |b: Vec<MapBox>| b.into_iter().fold(None, |a, b| MapBox::union(a, Some(b)));
-        union(boxes).or_else(|| union(prefs.iter().filter_map(|p| self.prefs.get(*p).copied()).collect()))
+        mainland_first(boxes)
+            .or_else(|| mainland_first(prefs.iter().filter_map(|p| self.prefs.get(*p).copied()).collect()))
+    }
+
+    /// 区域・県の名前の外接矩形 (地図の座標)
+    pub fn box_of(&self, name: &str) -> Option<MapBox> {
+        self.areas.get(name).or_else(|| self.prefs.get(name)).copied()
+    }
+}
+
+/// 外接矩形の和。離島の別枠の範囲 (frame::ISLANDS) のものは、本土側に 1 つでもあれば外す (別枠に任せる)。
+/// 離島だけが揺れたときは、その離島の範囲
+fn mainland_first(boxes: Vec<MapBox>) -> Option<MapBox> {
+    let union = |b: Vec<MapBox>| b.into_iter().fold(None, |a, b| MapBox::union(a, Some(b)));
+    let island = |b: &MapBox| super::frame::ISLANDS.iter().any(|s| s.covers(*b));
+    let (islands, mainland): (Vec<MapBox>, Vec<MapBox>) = boxes.into_iter().partition(island);
+    if mainland.is_empty() {
+        union(islands)
+    } else {
+        union(mainland)
     }
 }
 
@@ -167,5 +185,22 @@ mod tests {
             Some(b(90.0, -10.0, 300.0, 90.0))
         );
         assert_eq!(z.shaken(&[], &[], &[]), None);
+    }
+
+    #[test]
+    fn island_areas_are_left_to_the_insets_when_the_mainland_also_shook() {
+        let at = |lon: f64, lat: f64| {
+            let (x, y) = project(lon, lat);
+            MapBox::around(x, y, 10.0)
+        };
+        let (kagoshima, amami, chichijima) = (at(130.5, 31.6), at(129.5, 28.4), at(142.2, 27.1));
+        // 本土と奄美 (南西諸島の別枠) が揺れたら本土だけ
+        assert_eq!(mainland_first(vec![kagoshima, amami]), Some(kagoshima));
+        // 関東と父島 (小笠原の別枠) も同じ
+        let tokyo = at(139.7, 35.7);
+        assert_eq!(mainland_first(vec![chichijima, tokyo]), Some(tokyo));
+        // 離島だけなら離島
+        assert_eq!(mainland_first(vec![amami]), Some(amami));
+        assert_eq!(mainland_first(vec![]), None);
     }
 }
