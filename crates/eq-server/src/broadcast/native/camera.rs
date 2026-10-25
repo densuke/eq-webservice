@@ -98,12 +98,27 @@ pub struct Epicenter {
     pub origin_ms: Option<i64>,
 }
 
-/// いま見せる範囲 (web の renderScene)。None は日本全体
+/// 震央が揺れた範囲からこれより離れていたら、震央を入れずに揺れた範囲だけを見せる (km。web の FAR_EPICENTER_KM)
+pub const FAR_EPICENTER_KM: f64 = 500.0;
+
+/// 点 (x, y) から矩形 b までの距離 (km。中なら 0)
+fn distance_to_box_km(x: f64, y: f64, b: MapBox) -> f64 {
+    let dx = (b.x0 - x).max(x - b.x1).max(0.0);
+    let dy = (b.y0 - y).max(y - b.y1).max(0.0);
+    dx.hypot(dy) / KM_TO_UNITS
+}
+
+/// いま見せる範囲 (web の renderScene)。None は日本全体。
+/// 震央が揺れた範囲から遠い (FAR_EPICENTER_KM) ときは揺れた範囲だけ (2026-10-25 小笠原諸島西方沖: 震央 北緯 28 度、揺れたのは関東〜東北。
+/// 両方を囲むと日本全体と変わらない)。震央は画面の外になり、地震波の円は外から入ってくる
 pub fn target_box(aim: &Aim, now_ms: u64) -> Option<MapBox> {
     let Some(c) = aim.epicenter else {
         return aim.shaken.map(MapBox::pad);
     };
     let (x, y) = project(c.lon, c.lat);
+    if let Some(b) = aim.shaken.filter(|b| distance_to_box_km(x, y, *b) > FAR_EPICENTER_KM) {
+        return Some(b.pad());
+    }
     let t_ms = c.origin_ms.map(|o| now_ms as i64 - o);
     let stop_km = stop_radius_km(x, y, aim.shaken);
     let waving = t_ms.is_some_and(|t| t < wave_life_ms(c.depth_km, stop_km));
@@ -291,6 +306,41 @@ mod tests {
         assert_eq!(follow_radius_km(Some(10.0), 300.0), MIN_RADIUS_KM);
         assert_eq!(follow_radius_km(Some(150.0), 300.0), 150.0);
         assert_eq!(follow_radius_km(Some(900.0), 300.0), 300.0);
+    }
+
+    #[test]
+    fn a_far_offshore_epicenter_is_left_out_and_only_the_shaken_area_is_shown() {
+        // 2026-10-25 小笠原諸島西方沖 (北緯 28.0 東経 139.9 深さ 530km)。揺れたのは関東〜東北
+        let (x0, y0) = project(138.5, 41.5);
+        let (x1, y1) = project(142.0, 34.8);
+        let shaken = MapBox { x0, y0, x1, y1 };
+        let far = Aim {
+            epicenter: Some(Epicenter {
+                lat: 28.0,
+                lon: 139.9,
+                depth_km: 530.0,
+                origin_ms: Some(0),
+            }),
+            shaken: Some(shaken),
+            forecast: false,
+        };
+        // 波の最中でも、終わってからも、揺れた範囲だけ
+        assert_eq!(target_box(&far, 200_000), Some(shaken.pad()));
+        assert_eq!(target_box(&far, 3_600_000), Some(shaken.pad()));
+        // 揺れた範囲が分からないうちは、今までどおり震央に寄る
+        assert!(target_box(&Aim { shaken: None, ..far }, 200_000).is_some_and(|b| {
+            let (x, y) = project(139.9, 28.0);
+            (b.x0..=b.x1).contains(&x) && (b.y0..=b.y1).contains(&y)
+        }));
+        // 近い震央 (千葉県東方沖と関東) は震央も入れる
+        let (cx, cy) = chiba();
+        let near = Aim {
+            epicenter: epicenter(Some(0)),
+            ..far
+        };
+        assert!(
+            target_box(&near, 3_600_000).is_some_and(|b| (b.x0..=b.x1).contains(&cx) && (b.y0..=b.y1).contains(&cy))
+        );
     }
 
     #[test]

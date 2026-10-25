@@ -25,6 +25,8 @@ pub struct Placed {
     pub notice: Option<Rect>,
     pub credit: Option<Rect>,
     pub inset: Option<Rect>,
+    /// 小笠原の別枠 (揺れや震央があるときだけ出す)
+    pub ogasawara: Option<Rect>,
     pub legend: Option<Rect>,
     pub clock: Option<Rect>,
     /// サブの地図 (地震の画面の定義から)
@@ -77,6 +79,7 @@ impl Placed {
             notice,
             credit: c.get("credit").copied(),
             inset: c.get("inset").copied(),
+            ogasawara: c.get("ogasawara").copied(),
             legend: c.get("legend").copied(),
             clock: c.get("clock").copied(),
             sub: q.get("map-sub").copied(),
@@ -100,6 +103,7 @@ impl Placed {
             ("notice", self.notice),
             ("credit", self.credit),
             ("inset", self.inset),
+            ("ogasawara", self.ogasawara),
             ("legend", self.legend),
             ("clock", self.clock),
             ("map-sub", self.sub),

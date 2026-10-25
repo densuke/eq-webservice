@@ -653,6 +653,8 @@ mod dots_bench;
 #[cfg(test)]
 mod dots_tests;
 #[cfg(test)]
+mod inset_tests;
+#[cfg(test)]
 mod layout_def_tests;
 #[cfg(test)]
 mod layout_resolve_tests;

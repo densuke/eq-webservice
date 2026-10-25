@@ -16,6 +16,24 @@ pub struct InsetSpec {
     pub title: &'static str,
     pub lon: (f64, f64),
     pub lat: (f64, f64),
+    /// 日本全体の表示でいつも出すか。そうでなければ、その範囲に揺れや震央があるときだけ出す (寄っているときは、どちらも中身があるときだけ)
+    pub always: bool,
+}
+
+impl InsetSpec {
+    /// 範囲の地図の座標の外接矩形
+    pub fn map_box(&self) -> super::camera::MapBox {
+        let (x0, y0) = project(self.lon.0, self.lat.1);
+        let (x1, y1) = project(self.lon.1, self.lat.0);
+        super::camera::MapBox { x0, y0, x1, y1 }
+    }
+
+    /// 地図の座標の矩形 b の中心がこの範囲の中か (揺れた区域がこの離島のものか)
+    pub fn covers(&self, b: super::camera::MapBox) -> bool {
+        let r = self.map_box();
+        let (cx, cy) = ((b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0);
+        (r.x0..=r.x1).contains(&cx) && (r.y0..=r.y1).contains(&cy)
+    }
 }
 
 /// 南西諸島。日本全体の表示から外れる離島を別枠で映す。置き場所 (枠の左上と高さ。幅は範囲の縦横比から決める) は
@@ -24,7 +42,19 @@ pub const OKINAWA: InsetSpec = InsetSpec {
     title: "南西諸島",
     lon: (122.5, 131.5),
     lat: (24.0, 31.0),
+    always: true,
 };
+
+/// 小笠原。日本全体の表示の南の外。揺れや震央があるときだけ出す (web の INSETS の ogasawara)。置き場所は定義の ogasawara
+pub const OGASAWARA: InsetSpec = InsetSpec {
+    title: "小笠原",
+    lon: (140.8, 142.5),
+    lat: (24.0, 27.9),
+    always: false,
+};
+
+/// 離島の別枠の範囲 (寄る範囲を決めるとき、ここの揺れは別枠に任せる)
+pub const ISLANDS: [&InsetSpec; 2] = [&OKINAWA, &OGASAWARA];
 
 /// 別枠の範囲の外でも、この度数以内の震央は枠の縁に寄せて印を置く / そのときの枠の縁からの余白
 const MARKER_MARGIN_DEG: f64 = 1.5;
@@ -53,16 +83,16 @@ pub struct Clip {
 
 impl Clip {
     fn new(rect: Rect) -> Option<Clip> {
-        Clip::new_without(rect, None)
+        Clip::new_without(rect, &[])
     }
 
-    /// rect の中だけ。hole (別枠など、別の面が描く所) は除く
-    fn new_without(rect: Rect, hole: Option<Rect>) -> Option<Clip> {
+    /// rect の中だけ。holes (別枠など、別の面が描く所) は除く
+    fn new_without(rect: Rect, holes: &[Rect]) -> Option<Clip> {
         let mut mask = Mask::new(super::draw::W, super::draw::H)?;
         let mut pb = PathBuilder::new();
         pb.push_rect(rect);
-        if let Some(h) = hole {
-            pb.push_rect(h);
+        for h in holes {
+            pb.push_rect(*h);
         }
         mask.fill_path(&pb.finish()?, FillRule::EvenOdd, false, Transform::identity());
         Some(Clip {
@@ -80,6 +110,7 @@ struct Inset {
     rect: Rect,
     bounds: (f64, f64, f64, f64),
     title: &'static str,
+    spec: &'static InsetSpec,
 }
 
 impl Frame {
@@ -92,19 +123,40 @@ impl Frame {
         }
     }
 
-    /// 日本全体の本図を、地図の枠 (main) の中だけに描くようにする (波の円・震度の塗りなどが右の列や上下の帯の上に
-    /// かからない)。別枠の矩形 (枠線の 1px 外まで) は別枠が自分の面で描くので除く
-    pub fn bounded(self, main: Slot, inset: Option<&Frame>) -> Frame {
-        let hole = inset.and_then(|f| f.inset.as_ref()).and_then(|i| {
-            Rect::from_xywh(
-                i.rect.x() - 1.0,
-                i.rect.y() - 1.0,
-                i.rect.width() + 2.0,
-                i.rect.height() + 2.0,
-            )
-        });
-        let clip = Rect::from_xywh(main.x, main.y, main.w, main.h).and_then(|r| Clip::new_without(r, hole));
+    /// 地図の枠 (main) から、出している別枠 (枠線の 1px 外まで) を除いた型。日本全体の本図と寄った本図が使う。
+    /// 波の円・震度の塗りなどが右の列や上下の帯、別枠の上にかからない
+    pub fn main_clip<'a>(main: Slot, insets: impl Iterator<Item = &'a Frame>) -> Option<Clip> {
+        let holes: Vec<Rect> = insets
+            .filter_map(|f| f.inset.as_ref())
+            .filter_map(|i| {
+                Rect::from_xywh(
+                    i.rect.x() - 1.0,
+                    i.rect.y() - 1.0,
+                    i.rect.width() + 2.0,
+                    i.rect.height() + 2.0,
+                )
+            })
+            .collect();
+        Clip::new_without(Rect::from_xywh(main.x, main.y, main.w, main.h)?, &holes)
+    }
+
+    /// 型を差し替える (出す別枠が変わったとき)
+    pub fn with_clip(self, clip: Option<Clip>) -> Frame {
         Frame { clip, ..self }
+    }
+
+    pub fn set_clip(&mut self, clip: Option<Clip>) {
+        self.clip = clip;
+    }
+
+    /// 日本全体の表示でいつも出す面か (本図・南西諸島)
+    pub fn always(&self) -> bool {
+        self.inset.as_ref().is_none_or(|i| i.spec.always)
+    }
+
+    /// 別枠の範囲の定義 (本図は None)
+    pub fn spec(&self) -> Option<&'static InsetSpec> {
+        self.inset.as_ref().map(|i| i.spec)
     }
 
     /// 寄った本図の枠 (地図の枠)
@@ -128,7 +180,7 @@ impl Frame {
     }
 
     /// at は定義の inset の矩形。左上と高さを使い、幅は範囲の縦横比から決める (矩形の幅は使わない)
-    pub fn inset(main: &View, spec: &InsetSpec, at: Slot) -> Option<Frame> {
+    pub fn inset(main: &View, spec: &'static InsetSpec, at: Slot) -> Option<Frame> {
         let (x0, y0) = project(spec.lon.0, spec.lat.1);
         let (x1, y1) = project(spec.lon.1, spec.lat.0);
         let w = at.h * ((x1 - x0) / (y1 - y0)) as f32;
@@ -145,6 +197,7 @@ impl Frame {
                 rect,
                 bounds: (spec.lon.0, spec.lon.1, spec.lat.0, spec.lat.1),
                 title: spec.title,
+                spec,
             }),
         })
     }
@@ -166,6 +219,11 @@ impl Frame {
         }
         let p = self.view.px(lon, lat);
         self.clip.as_ref().is_none_or(|c| c.contains(p)).then_some(p)
+    }
+
+    /// 画面の点がこの面の描いてよい枠の中か (枠の無い日本全体の本図は常に中)
+    pub fn mask_contains(&self, p: (f32, f32)) -> bool {
+        self.clip.as_ref().is_none_or(|c| c.contains(p))
     }
 
     /// 別枠か
@@ -217,6 +275,25 @@ impl Frame {
             // 寄った本図は、枠の外 (右パネルや上部バーの上) には置かない
             None => self.clip.as_ref().is_none_or(|c| c.contains((x, y))).then_some((x, y)),
         }
+    }
+
+    /// 寄った本図で、その地点が枠の外になるとき、枠の中心からその地点へ向かう線が枠 (縁から pad 内側) と交わる位置と、
+    /// その向き (単位ベクトル)。枠の中・別枠・日本全体の本図では None (画面外の震央の向きを示す印に使う)
+    pub fn edge_pointer(&self, lon: f64, lat: f64, pad: f32) -> Option<((f32, f32), (f32, f32))> {
+        let (Some(c), None) = (&self.clip, &self.inset) else {
+            return None;
+        };
+        let (x, y) = self.view.px(lon, lat);
+        let r = c.rect;
+        if c.contains((x, y)) {
+            return None;
+        }
+        let (cx, cy) = ((r.left() + r.right()) / 2.0, (r.top() + r.bottom()) / 2.0);
+        let (dx, dy) = (x - cx, y - cy);
+        let (hw, hh) = (r.width() / 2.0 - pad, r.height() / 2.0 - pad);
+        let t = (hw / dx.abs().max(1e-3)).min(hh / dy.abs().max(1e-3));
+        let d = dx.hypot(dy).max(1e-3);
+        Some(((cx + dx * t, cy + dy * t), (dx / d, dy / d)))
     }
 
     /// 日本全体の本図の画面の座標 (県の札の位置など) を、この面の画面の座標にする。
@@ -352,7 +429,7 @@ mod tests {
     fn the_home_map_is_bounded_to_the_map_rect_without_the_inset() {
         let main = View::fit_home(MAP_RECT);
         let ins = Frame::inset(&main, &OKINAWA, INSET).unwrap();
-        let home = Frame::main(main).bounded(MAIN, Some(&ins));
+        let home = Frame::main(main).with_clip(Frame::main_clip(MAIN, std::iter::once(&ins)));
         let m = home.mask().unwrap();
         let on = |x: u32, y: u32| m.data()[(y * crate::broadcast::native::draw::W + x) as usize] > 0;
         assert!(on(450, 300) && on(899, 719) && on(300, 40)); // 地図の枠の中
