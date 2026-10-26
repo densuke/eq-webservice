@@ -165,6 +165,15 @@ export function heldEew(g: EewGroup): EewEvent {
 
 const maxOf = (xs: number[]): number => xs.reduce((a, b) => Math.max(a, b));
 
+/** これより深い地震の緊急地震速報は予測震度を出さない (気象庁。深さ 150km の報には予測震度が付いた例がある) */
+const DEEP_KM = 150;
+
+/**
+ * 最新の報が深い地震で予測震度が不明か。そうなら浅いと見ていた頃の予想は捨てる
+ * (2026-10-25 小笠原諸島西方沖: 第 1〜3 報の深さ 10km・震度 2 が、深さ 200km 以上で不明になった後も残った)
+ */
+const deepUnknown = (latest: EewEvent): boolean => latest.max_scale < 0 && (latest.hypocenter?.depth_km ?? 0) > DEEP_KM;
+
 /**
  * 同じ地震 (同じ event_id) の報から、予想を最大で持ち続けた 1 件を作る。
  * 地域・県・最大震度は全報の最大、警報は一度でも出ていれば警報のまま。震源などは最新の報。
@@ -184,7 +193,7 @@ export function heldForecast(events: EewEvent[]): EewEvent {
   return {
     ...latest,
     warning: live.some((e) => e.warning),
-    max_scale: maxOf(live.map((e) => e.max_scale)),
+    max_scale: deepUnknown(latest) ? -1 : maxOf(live.map((e) => e.max_scale)),
     pref_max: [...prefs].map(([pref, scale]) => ({ pref, scale })),
     areas: [...areas.values()].map((xs) => ({
       ...xs[xs.length - 1],

@@ -185,6 +185,32 @@ pub fn current_quake(groups: &[QuakeSummary], now_ms: u64) -> Option<&QuakeSumma
         .max_by_key(|g| (g.max_scale, g.updated_ms))
 }
 
+/// 震度速報のあと、震源の情報が来ないままこれだけ経ったら「今後の情報に注意」を出す (docs/tts.md S15)
+pub const AWAIT_MS: u64 = 90_000;
+/// 「今後の情報に注意」を画面に出し続ける上限 (最後の報から)
+const AWAIT_SHOW_MS: u64 = 10 * 60_000;
+/// 読み上げは AWAIT_MS からこの間だけ (つなぎ直した直後に古い震度速報で読まないように)
+pub const AWAIT_VOICE_MS: u64 = 30_000;
+
+/// 震源の情報が来ないまま AWAIT_MS 以上経った地震か (now はサーバの時計)
+pub fn awaiting_follow_up(q: &QuakeSummary, now_ms: u64) -> bool {
+    let age = now_ms.saturating_sub(q.updated_ms);
+    q.hypocenter.is_none() && (AWAIT_MS..AWAIT_SHOW_MS).contains(&age)
+}
+
+/// 「今後の情報に注意」の読み上げを始める地震 (AWAIT_MS を過ぎた直後だけ)。1 回だけ読むのは呼ぶ側が覚える
+pub fn attention_due(groups: &[QuakeSummary], now_ms: u64) -> Vec<&QuakeSummary> {
+    groups
+        .iter()
+        .filter(|q| awaiting_follow_up(q, now_ms) && now_ms - q.updated_ms < AWAIT_MS + AWAIT_VOICE_MS)
+        .collect()
+}
+
+/// 「今後の情報に注意」の声の URL
+pub fn attention_url(base: &str) -> String {
+    format!("{base}/api/tts/attention")
+}
+
 /// サーバの時計とのずれ (ミリ秒)。サーバの時刻から自分の時刻を引く
 pub fn clock_offset(server_ms: u64, local_ms: u64) -> i64 {
     server_ms as i64 - local_ms as i64
@@ -509,6 +535,28 @@ mod tests {
                 comment: String::new(),
             }),
         }
+    }
+
+    /// 2026-10-25 小笠原諸島西方沖: 震度速報 11:12:31 のあと、震源の情報 11:15:37 まで 3 分空いた
+    #[test]
+    fn a_scale_prompt_without_a_follow_up_waits_then_asks_for_attention_once() {
+        let prompt = [quake("p", LT, T0, None, Scale::S3)];
+        let g = group_quakes(&prompt);
+        assert!(!awaiting_follow_up(&g[0], LT + AWAIT_MS - 1));
+        assert!(awaiting_follow_up(&g[0], LT + AWAIT_MS));
+        assert_eq!(attention_due(&g, LT + AWAIT_MS).len(), 1);
+        // 読み上げは過ぎた直後だけ。画面にはしばらく出し続ける
+        assert!(attention_due(&g, LT + AWAIT_MS + AWAIT_VOICE_MS).is_empty());
+        assert!(awaiting_follow_up(&g[0], LT + 9 * 60_000));
+        assert!(!awaiting_follow_up(&g[0], LT + 10 * 60_000));
+        // 震源の情報が来れば出さない
+        let both = [
+            prompt[0].clone(),
+            quake("d", LT + 60_000, T0, Some((28.0, 139.9)), Scale::UNKNOWN),
+        ];
+        let g = group_quakes(&both);
+        assert_eq!(g.len(), 1);
+        assert!(!awaiting_follow_up(&g[0], LT + 60_000 + AWAIT_MS));
     }
 
     fn with_points(mut e: Event, pts: &[(&str, Scale)]) -> Event {

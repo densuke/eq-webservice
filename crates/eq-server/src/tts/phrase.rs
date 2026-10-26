@@ -21,6 +21,11 @@ const EVACUATE: &str = "海岸から離れ、高台に避難してください�
 const WATCH_AREA_LIMIT: usize = 10;
 const USERQUAKE_REPORTED: &str = "揺れを感じたという報告が集まっています。";
 const REPEAT: &str = "繰り返します。";
+const RESUMED: &str = "新たな情報です。";
+const NO_HYPOCENTER_YET: &str = "震源に関する情報は、まだ発表されていません。";
+const ATTENTION: &str = "今後の情報に注意してください。";
+/// 同じ地震の前の地震情報からこれだけ空いたら、「新たな情報です。」と発生時刻・震源・M を言い直す (docs/tts.md S14)
+const RESUME_GAP_MS: u64 = 120_000;
 
 /// 震度の種類 (不明を除く)。46 は 5弱以上と推定。
 const SCALES: [Scale; 10] = [
@@ -227,6 +232,9 @@ pub fn fixed_segments() -> Vec<String> {
         EVACUATE,
         USERQUAKE_REPORTED,
         REPEAT,
+        RESUMED,
+        NO_HYPOCENTER_YET,
+        ATTENTION,
     ]
     .map(String::from);
     let scales = SCALES.iter().flat_map(|s| [max_sentence(*s), expected_sentence(*s)]);
@@ -351,12 +359,19 @@ fn announce_quake(ev: &Event, priors: &[&Event]) -> Vec<String> {
     if prior.is_empty() {
         return segments(ev);
     }
+    let resumed = resumed_after_gap(ev, priors);
     let mut out = Vec::new();
-    // 震源名とマグニチュード
+    // 間が空いたら震源とマグニチュードを言い直す。空いていなければ変わった分だけ
+    if resumed {
+        out.extend(origin_sentence(&q.origin_time));
+        out.push(place(q.hypocenter.as_ref()));
+        out.extend(mag(q.hypocenter.as_ref()));
+    }
     let last_name = prior.iter().rev().find_map(|p| hypo_name(&p.hypocenter));
     let ev_mag = hypo_mag(&q.hypocenter);
     let prev_mag = prior.iter().rev().find_map(|p| hypo_mag(&p.hypocenter));
     match hypo_name(&q.hypocenter) {
+        _ if resumed => {}
         Some(name) if last_name != Some(name) => {
             out.push(format!("震源は{name}。"));
             out.extend(mag(q.hypocenter.as_ref()));
@@ -414,7 +429,30 @@ fn announce_quake(ev: &Event, priors: &[&Event]) -> Vec<String> {
     if out.is_empty() {
         return out;
     }
-    std::iter::once(FOLLOW_UP.to_string()).chain(out).collect()
+    let head = if resumed { RESUMED } else { FOLLOW_UP };
+    std::iter::once(head.to_string()).chain(out).collect()
+}
+
+/// 同じ地震の直前の地震情報から RESUME_GAP_MS 以上空いて届いた地震情報か (受信時刻が分からなければ空いていないとみなす)
+fn resumed_after_gap(ev: &Event, priors: &[&Event]) -> bool {
+    let last = priors
+        .iter()
+        .rev()
+        .find(|p| matches!(p.body, EventBody::Quake(_)))
+        .map(|p| p.received_at_ms);
+    matches!(last, Some(t) if t > 0 && ev.received_at_ms >= t + RESUME_GAP_MS)
+}
+
+/// 「11時10分ごろ、地震がありました。」(発生時刻 "YYYY/MM/DD HH:MM:SS" の JST)。読めなければ部品なし
+fn origin_sentence(origin_time: &str) -> Option<String> {
+    let (_, hms) = origin_time.split_once(' ')?;
+    let mut it = hms.split(':').map(|x| x.parse::<u32>().ok());
+    let (h, m) = (it.next()??, it.next()??);
+    if h > 23 || m > 59 {
+        return None;
+    }
+    let minute = if m == 0 { String::new() } else { format!("{m}分") };
+    Some(format!("{h}時{minute}ごろ、地震がありました。"))
 }
 
 /// 名前 + 「。」を最大 limit 件、超えたら「ほかの地域。」。
@@ -482,6 +520,11 @@ fn announce_tsunami(ev: &Event, priors: &[&Event]) -> Vec<String> {
     out
 }
 
+/// 震度速報のあと震源の情報が来ないまま時間が経ったときの案内 (`GET /api/tts/attention`)。docs/tts.md S15
+pub fn attention_segments() -> Vec<String> {
+    vec![NO_HYPOCENTER_YET.to_string(), ATTENTION.to_string()]
+}
+
 /// 続報は前の報 (priors) との差分だけ読む。docs/tts.md S8。
 pub fn announce_segments(ev: &Event, priors: &[&Event]) -> Vec<String> {
     if priors.is_empty() {
@@ -512,7 +555,16 @@ pub fn spoken_segments(ev: &Event, priors: &[&Event]) -> Vec<String> {
         EventBody::Tsunami(t) if segs.iter().any(|s| s == EVACUATE) => tsunami_again(t, &segs),
         _ => return segs,
     };
-    let mut out = segs;
+    // 最終報のまとめは震源・M を既に読むので、間が空いたときは頭に「新たな情報です。」と発生時刻だけ足す
+    let mut out = match &ev.body {
+        EventBody::Quake(q) if resumed_after_gap(ev, priors) => {
+            let mut head = vec![RESUMED.to_string()];
+            head.extend(origin_sentence(&q.origin_time));
+            head.extend(segs);
+            head
+        }
+        _ => segs,
+    };
     out.push(REPEAT.to_string());
     out.extend(again);
     out
@@ -678,6 +730,89 @@ mod tests {
                 areas,
             }),
         )
+    }
+
+    fn at(ms: u64, q: Quake) -> Event {
+        Event {
+            received_at_ms: ms,
+            ..quake_ev(Quake {
+                origin_time: "2026/10/25 11:10:00".into(),
+                ..q
+            })
+        }
+    }
+
+    /// 2026-10-25 小笠原諸島西方沖: 震度速報 11:12:31 → 震源の情報 11:15:37 (3 分後) → 最終報 11:17:15 (1.6 分後)
+    #[test]
+    fn a_quake_report_after_a_gap_restates_the_time_and_the_hypocenter() {
+        let prompt = at(
+            1_000,
+            quake(QuakeInfoType::ScalePrompt, "", None, Scale::S3, "Checking"),
+        );
+        let dest = at(
+            187_000,
+            quake(
+                QuakeInfoType::Destination,
+                "小笠原諸島西方沖",
+                Some(7.0),
+                Scale::UNKNOWN,
+                "None",
+            ),
+        );
+        assert_eq!(
+            spoken_segments(&dest, &[&prompt]),
+            s(&[
+                "新たな情報です。",
+                "11時10分ごろ、地震がありました。",
+                "震源は小笠原諸島西方沖。",
+                "マグニチュード7.0。",
+                "この地震による津波の心配はありません。",
+            ])
+        );
+        // 2 分未満なら今までどおりの続報
+        let soon = Event {
+            received_at_ms: 100_000,
+            ..dest.clone()
+        };
+        assert_eq!(spoken_segments(&soon, &[&prompt])[0], "続報。");
+        // 受信時刻が分からない記録では付けない
+        let unknown = Event {
+            received_at_ms: 0,
+            ..prompt.clone()
+        };
+        assert_eq!(spoken_segments(&dest, &[&unknown])[0], "続報。");
+        // 最終報は 1.6 分後なので付かない。間が空けば、まとめの頭に付く (繰り返しには付けない)
+        let detail = quake(
+            QuakeInfoType::DetailScale,
+            "小笠原諸島西方沖",
+            Some(7.0),
+            Scale::S3,
+            "None",
+        );
+        assert_eq!(
+            spoken_segments(&at(285_000, detail.clone()), &[&prompt, &dest])[0],
+            "地震情報。"
+        );
+        let late = spoken_segments(&at(400_000, detail), &[&prompt, &dest]);
+        assert_eq!(
+            late[..3],
+            s(&["新たな情報です。", "11時10分ごろ、地震がありました。", "地震情報。"])
+        );
+        assert_eq!(late.iter().filter(|x| *x == "新たな情報です。").count(), 1);
+    }
+
+    #[test]
+    fn origin_sentence_reads_the_hour_and_minute() {
+        assert_eq!(
+            origin_sentence("2026/10/25 09:05:30").as_deref(),
+            Some("9時5分ごろ、地震がありました。")
+        );
+        assert_eq!(
+            origin_sentence("2026/10/25 00:00:00").as_deref(),
+            Some("0時ごろ、地震がありました。")
+        );
+        assert_eq!(origin_sentence(""), None);
+        assert_eq!(origin_sentence("2026/10/25 xx:10:00"), None);
     }
 
     #[test]

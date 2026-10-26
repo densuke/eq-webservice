@@ -30,7 +30,7 @@ pub fn prewarm_segments() -> Vec<String> {
 pub fn record_segments(events: &[Event]) -> Vec<String> {
     let all = events
         .iter()
-        .flat_map(|ev| super::phrase::announce_segments(ev, &super::priors::priors_of(ev, events)));
+        .flat_map(|ev| super::phrase::spoken_segments(ev, &super::priors::priors_of(ev, events)));
     dedupe(all)
 }
 

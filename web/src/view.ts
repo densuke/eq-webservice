@@ -12,6 +12,7 @@ import { $, map } from "./dom.ts";
 import type { JapanMap } from "./map.ts";
 import { listOpen, shownInList } from "./personal.ts";
 import { app, now } from "./state.ts";
+import { ATTENTION_TEXT, awaitingFollowUp } from "./attention.ts";
 import { activeAreas } from "./tsunami.ts";
 import type { EewEvent, PrefScale, Scale, TsunamiEvent } from "./types.ts";
 
@@ -170,7 +171,7 @@ export function renderDetail(): void {
         <div class="detail-title">${numTag(g.key)}${esc(q.hypocenter?.name || "震源調査中")}</div>
         <div class="detail-sub">${esc(q.originTime)} 発生</div></div></div>
       <dl class="facts">
-        <dt>震源</dt><dd>${esc(hypoText(q.hypocenter))}</dd>
+        <dt>震源</dt><dd>${esc(awaitingFollowUp(g, now()) ? ATTENTION_TEXT : hypoText(q.hypocenter))}</dd>
         <dt>津波</dt><dd>${esc(TSUNAMI_TEXT[q.domesticTsunami] ?? "—")}</dd>
       </dl>
       ${q.comment ? `<p class="comment">${esc(q.comment)}</p>` : ""}
