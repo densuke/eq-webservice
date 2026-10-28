@@ -154,7 +154,11 @@ fn aim_of(
             })
         }),
         shaken: renderer.zones().shaken(areas, &with_later(points), prefs),
-        forecast,
+        forecast: if forecast {
+            renderer.zones().shaken(areas, points, prefs)
+        } else {
+            None
+        },
     };
     let Some(current) = current else {
         // 本物の震源が届くまでは、のちに分かった震源へ寄る (波は追わず、震央の周りを映す)
@@ -166,7 +170,7 @@ fn aim_of(
                 origin_ms: None,
             }),
             shaken: renderer.zones().shaken(&[], &later, &[]),
-            forecast: false,
+            forecast: None,
         });
     };
     match current {

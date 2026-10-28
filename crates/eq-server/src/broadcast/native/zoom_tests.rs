@@ -455,6 +455,9 @@ fn write_zoomed_png_when_asked() {
         notices: None,
         spread: None,
     };
+    let shaken = r
+        .zones()
+        .shaken(&["千葉県北東部", "茨城県南部"], &[], &["千葉県", "茨城県"]);
     let aim = camera::Aim {
         epicenter: Some(camera::Epicenter {
             lat: 35.7,
@@ -462,10 +465,8 @@ fn write_zoomed_png_when_asked() {
             depth_km: 40.0,
             origin_ms: Some(T0),
         }),
-        shaken: r
-            .zones()
-            .shaken(&["千葉県北東部", "茨城県南部"], &[], &["千葉県", "茨城県"]),
-        forecast: true,
+        shaken,
+        forecast: shaken,
     };
     r.set_view(camera::target_box(&aim, SHOWN_AT).map(|b| camera::fit_box(b, r.map_aspect())));
     let mut pm = r.render(&scene);

@@ -86,8 +86,9 @@ pub struct Aim {
     pub epicenter: Option<Epicenter>,
     /// 揺れた範囲 (緊急地震速報なら予想の地域、無ければ県の本土)
     pub shaken: Option<MapBox>,
-    /// 緊急地震速報の予想か (揺れる範囲を、波が届く前から収める)
-    pub forecast: bool,
+    /// 緊急地震速報の予想の地域。波が届く前から収める (shaken と違い、記録から描き直すときの、のちの観測点は入れない。
+    /// 入れると最初から最後の範囲まで引いてしまう。2026-10-29 千葉県北東部)
+    pub forecast: Option<MapBox>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -127,12 +128,7 @@ pub fn target_box(aim: &Aim, now_ms: u64) -> Option<MapBox> {
     }
     let s_km = t_ms.and_then(|t| surface_radius_km(VS_KM_S, c.depth_km, t as f64 / 1000.0));
     let follow = MapBox::around(x, y, follow_radius_km(s_km, stop_km));
-    let shown = if aim.forecast {
-        MapBox::union(Some(follow), aim.shaken)
-    } else {
-        Some(follow)
-    };
-    shown.map(MapBox::pad)
+    MapBox::union(Some(follow), aim.forecast).map(MapBox::pad)
 }
 
 /// 地図の枠の縦横比に合わせた表示範囲 (地図の座標。左上と大きさ)
@@ -322,7 +318,7 @@ mod tests {
                 origin_ms: Some(0),
             }),
             shaken: Some(shaken),
-            forecast: false,
+            forecast: None,
         };
         // 波の最中でも、終わってからも、揺れた範囲だけ
         assert_eq!(target_box(&far, 200_000), Some(shaken.pad()));
@@ -370,6 +366,26 @@ mod tests {
     }
 
     #[test]
+    fn an_eew_starts_on_its_forecast_areas_even_when_the_later_stations_reach_farther() {
+        // 2026-10-29 千葉県北東部: 予想は関東の南、のちの観測点は宮城〜静岡。最初は予想の地域まで、波に合わせて引く
+        const T0: i64 = 1_790_000_000_000;
+        let (x, y) = chiba();
+        let forecast = MapBox::around(x, y, 60.0);
+        let later = MapBox::around(x, y + 50.0, 300.0);
+        let aim = Aim {
+            epicenter: epicenter(Some(T0)),
+            shaken: Some(later),
+            forecast: Some(forecast),
+        };
+        let early = target_box(&aim, (T0 + 10_000) as u64).unwrap();
+        assert_eq!(early, MapBox::around(x, y, MIN_RADIUS_KM).pad());
+        let mid = target_box(&aim, (T0 + 50_000) as u64).unwrap();
+        assert!(width_km(mid) > width_km(early) && width_km(mid) < width_km(later.pad()));
+        let end = target_box(&aim, (T0 + 600_000) as u64).unwrap();
+        assert_eq!(end, later.pad());
+    }
+
+    #[test]
     fn the_union_ignores_a_missing_side() {
         let a = MapBox::around(0.0, 0.0, 10.0);
         let b = MapBox::around(100.0, 0.0, 10.0);
@@ -384,10 +400,10 @@ mod tests {
         const T0: i64 = 1_790_000_000_000;
         let (x, y) = chiba();
         let shaken = MapBox::around(x + 30.0, y - 20.0, 60.0);
-        let aim = |forecast| Aim {
+        let aim = |forecast: bool| Aim {
             epicenter: epicenter(Some(T0)),
             shaken: Some(shaken),
-            forecast,
+            forecast: forecast.then_some(shaken),
         };
         // 発生の 10 秒後: S 波はまだ小さい。最小の半径 (80km) で寄る
         let early = target_box(&aim(false), (T0 + 10_000) as u64).unwrap();
@@ -416,7 +432,7 @@ mod tests {
         let aim = |shaken| Aim {
             epicenter: None,
             shaken,
-            forecast: false,
+            forecast: None,
         };
         assert_eq!(target_box(&aim(Some(b)), 0), Some(b.pad()));
         assert_eq!(target_box(&aim(None), 0), None);
@@ -425,7 +441,7 @@ mod tests {
         let a = Aim {
             epicenter: epicenter(None),
             shaken: None,
-            forecast: false,
+            forecast: None,
         };
         assert_eq!(target_box(&a, 5), Some(MapBox::around(x, y, 0.0).pad()));
     }
