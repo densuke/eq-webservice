@@ -399,6 +399,55 @@ fn the_pending_hindsight_epicenter_is_zoomed_to_until_the_real_one_arrives() {
     assert_eq!(st.zoom_ratio(), 1.0);
 }
 
+/// 再現動画: 本物の震源が届く前も、のちの観測点の円に合わせて震央から引く (最初から最後の範囲にしない。2026-10-29 千葉県北東部)
+#[test]
+fn before_the_real_epicenter_arrives_the_view_widens_with_the_later_stations_circle() {
+    use crate::quake::{ObservationPoint, StationPos};
+    let h = Hindsight {
+        lat: 35.7,
+        lon: 140.8,
+        depth_km: 40.0,
+        origin_ms: T0,
+    };
+    // 震源から北へ約 280km の観測点 (仙台のあたり)
+    let points = vec![ObservationPoint {
+        pref: "宮城県".into(),
+        addr: "仙台のあたり".into(),
+        is_area: false,
+        scale: Scale::S2,
+        station: Some(StationPos {
+            lat: 38.2,
+            lon: 140.9,
+            area: "宮城県南部".into(),
+        }),
+    }];
+    let info = ReplayInfo {
+        foresight: Some(replay_info::Foresight {
+            lat: h.lat,
+            lon: h.lon,
+            depth_km: h.depth_km,
+            origin_ms: T0,
+            points: &points,
+        }),
+        intro: &[],
+    };
+    let icons = Icons::new();
+    let height_at = |after_ms: u64| {
+        let mut st = Stepper::new(load_renderer(&config(true)).unwrap());
+        for k in 0..20 {
+            st.step(&Input {
+                replay: Some(&info),
+                hindsight: Some(&h),
+                ..input(&[], T0 as u64 + after_ms + k * 200, &icons)
+            });
+        }
+        st.zoom_fit().h
+    };
+    let early = height_at(5_000);
+    let late = height_at(80_000);
+    assert!(late > early * 1.5, "{early} -> {late}");
+}
+
 /// 寄る・寄らないで 1 コマを描く時間 (リリースビルドで。e2 の配信に寄りを使えるかの見積もり)。
 /// 波が広がって表示範囲が毎コマ動く間 (発生の 20 秒後から 8 秒。S 波が揺れた範囲の端へ届くまで) と、落ち着いた後 (60 秒後から 8 秒) を測る。
 /// フォントは EQ_NATIVE_FONT (無ければ文字は描かない)。

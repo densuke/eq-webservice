@@ -161,13 +161,14 @@ fn aim_of(
         },
     };
     let Some(current) = current else {
-        // 本物の震源が届くまでは、のちに分かった震源へ寄る (波は追わず、震央の周りを映す)
+        // 本物の震源が届くまでは、のちに分かった震源へ寄る。のちの観測点があれば、その円 (Foresight::spread) と同じ時計で
+        // 波を追って引く (無いと最初から最後の範囲まで引いたまま。2026-10-29 千葉県北東部は緊急地震速報が発生の 74 秒後)
         return hindsight.map(|h| Aim {
             epicenter: Some(Epicenter {
                 lat: h.lat,
                 lon: h.lon,
                 depth_km: h.depth_km,
-                origin_ms: None,
+                origin_ms: foresight.map(|f| f.origin_ms),
             }),
             shaken: renderer.zones().shaken(&[], &later, &[]),
             forecast: None,
