@@ -35,6 +35,9 @@ bgm_url = ""
 # 2026-10-21: YouTube と Twitch へ同時に (ffmpeg の tee。1 回の圧縮で両方へ。片方が落ちても続く)。
 # tee では -map と FLV の codec tag (7 = H.264、10 = AAC) が要る (無いと「Output file does not contain any stream」「Tag [27] incompatible」で止まる)
 output = ["-map", "0:v", "-map", "0:a", "-tag:v", "7", "-tag:a", "10", "-f", "tee", "[f=flv:onfail=ignore]rtmps://a.rtmps.youtube.com/live2/$YOUTUBE_LIVE_API_KEY|[f=flv:onfail=ignore]rtmps://ingest.global-contribute.live-video.net/app/$TWITCH_STREAM_KEY"]
+# 2026-10-29: tee の送り先が 1 つ落ちたら (ffmpeg の「Slave muxer #N failed」)、配信を立ち上げ直してつなぎ直す。
+# twitch-live-watch だけだと、気づくまで 10 分以上かかる (10-28 21:10 の Twitch は 13 分)。立ち上げ直すあいだ YouTube も数秒途切れる
+restart_on_lost_output = true
 
 # 直近 15 分の録画 (ring) と、地震のときの切り出し (archive)。書き込みが多いので SSD に置く (microSD に書かない)
 [record]
