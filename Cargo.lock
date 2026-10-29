@@ -327,7 +327,7 @@ dependencies = [
 
 [[package]]
 name = "eq-server"
-version = "0.59.2"
+version = "0.60.0"
 dependencies = [
  "ab_glyph",
  "anyhow",
