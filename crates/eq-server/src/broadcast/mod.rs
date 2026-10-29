@@ -119,6 +119,9 @@ pub struct BroadcastConfig {
     pub state_file: String,
     /// 地震の画面になったときの録画の切り出し (native・ffmpeg のときだけ。ring は eq-server が mpegts を受けて書く)。省けば何もしない
     pub record: Option<record::RecordConfig>,
+    /// ffmpeg の tee で送り先の 1 つが落ちたら (onfail=ignore で残りは続く)、配信を立ち上げ直して全部つなぎ直す。
+    /// 立ち上げ直すあいだ、残っていた送り先も数秒途切れる。既定は無効 (落ちた送り先は twitch-live-watch などの見張りが直す)
+    pub restart_on_lost_output: bool,
 }
 
 /// 既定の圧縮 (コマの間隔が一定のとき)。3000k で頭打ちにする
@@ -183,6 +186,7 @@ impl Default for BroadcastConfig {
             output: Vec::new(),
             state_file: String::new(),
             record: None,
+            restart_on_lost_output: false,
         }
     }
 }

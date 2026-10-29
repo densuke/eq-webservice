@@ -27,6 +27,8 @@ pub struct FfmpegEncoder {
     /// `[record]` のとき、送り出し用の ffmpeg と、mpegts を分けるタスク
     sender: Option<(Proc, JoinHandle<()>)>,
     secrets: Vec<String>,
+    /// tee の送り先が 1 つ落ちたら終える (`restart_on_lost_output`)
+    restart_on_lost_output: bool,
 }
 
 impl Drop for FfmpegEncoder {
@@ -126,6 +128,7 @@ impl FfmpegEncoder {
                 stdin,
                 sender: None,
                 secrets: secrets.to_vec(),
+                restart_on_lost_output: cfg.restart_on_lost_output,
             });
         };
         let pipe = MPEGTS_PIPE.map(String::from);
@@ -147,6 +150,7 @@ impl FfmpegEncoder {
             stdin,
             sender: Some((send, pump)),
             secrets: secrets.to_vec(),
+            restart_on_lost_output: cfg.restart_on_lost_output,
         })
     }
 
@@ -162,21 +166,27 @@ impl FfmpegEncoder {
     /// ffmpeg (送り出しもあれば両方) の出力を流し続け、どれかが終わったら理由を返す
     pub async fn closed(&mut self) -> anyhow::Error {
         let secrets = &self.secrets;
+        let restart = self.restart_on_lost_output;
         match self.sender.as_mut() {
             Some((send, _)) => {
-                tokio::select! { e = self.main.closed(secrets) => e, e = send.closed(secrets) => e }
+                tokio::select! { e = self.main.closed(secrets, restart) => e, e = send.closed(secrets, restart) => e }
             }
-            None => self.main.closed(secrets).await,
+            None => self.main.closed(secrets, restart).await,
         }
     }
 }
 
 impl Proc {
-    /// 出力を流し続け、終わったら理由を返す
-    async fn closed(&mut self, secrets: &[String]) -> anyhow::Error {
+    /// 出力を流し続け、終わったら理由を返す。restart なら、tee の送り先が 1 つ落ちたところで終える
+    async fn closed(&mut self, secrets: &[String], restart: bool) -> anyhow::Error {
         loop {
             match self.log.next_line().await {
-                Ok(Some(l)) => tracing::warn!("{}: {}", self.name, redact(&l, secrets)),
+                Ok(Some(l)) => {
+                    tracing::warn!("{}: {}", self.name, redact(&l, secrets));
+                    if restart && lost_output(&l) {
+                        return anyhow::anyhow!("{}: tee の送り先が落ちたので、立ち上げ直してつなぎ直す", self.name);
+                    }
+                }
                 Ok(None) => break,
                 Err(e) => return e.into(),
             }
@@ -188,9 +198,26 @@ impl Proc {
     }
 }
 
+/// tee の送り先が 1 つ落ちた (onfail=ignore なので ffmpeg は残りで続ける)。
+/// 例: `[tee @ 0x...] Slave muxer #1 failed: End of file, continuing with 1/2 slaves.`
+fn lost_output(line: &str) -> bool {
+    line.contains("Slave muxer #") && line.contains("failed")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_failed_tee_slave_counts_as_a_lost_output() {
+        // 2026-10-28 21:10 pi の Twitch
+        assert!(lost_output(
+            "[tee @ 0xaaaae26dca50] Slave muxer #1 failed: End of file, continuing with 1/2 slaves."
+        ));
+        assert!(!lost_output(
+            "[flv @ 0xaaaae270fe90] Failed to update header with correct duration."
+        ));
+    }
 
     #[test]
     fn the_sender_copies_streams_and_lets_a_stall_gap_through() {
