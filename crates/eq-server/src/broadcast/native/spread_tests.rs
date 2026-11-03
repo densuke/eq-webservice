@@ -1,8 +1,7 @@
-//! 揺れの広がりの再現 (docs/superpowers/specs/2026-10-18-quake-spread-replay-design.md): コマへの組み込みと描画
+//! ライブの観測点: 地震情報が届いたらすぐ全部出し、円は描き直さない (2026-11-03 千葉県北東部)
 
 use super::icon::Icons;
 use super::model::group_quakes;
-use super::spread::{self, spread_of, Spread, LEAD_MS};
 use super::step::{frame_waves, Stepper};
 use super::zoom_tests::{config_sub, input};
 use super::*;
@@ -15,7 +14,7 @@ const EPI: (f64, f64) = (40.5, 134.0);
 const NEAR: (f64, f64) = (40.5 + 30.0 / 111.2, 134.0);
 const FAR: (f64, f64) = (40.5 + 120.0 / 111.2, 134.0);
 /// 観測点の値の入った報の受信時刻 (発生から 3 分: 地震情報の発生時刻からの波は描き終わっている)
-pub(super) const R1: u64 = T0 as u64 + 180_000;
+const R1: u64 = T0 as u64 + 180_000;
 
 fn station(addr: &str, (lat, lon): (f64, f64), scale: Scale) -> ObservationPoint {
     ObservationPoint {
@@ -32,7 +31,7 @@ fn station(addr: &str, (lat, lon): (f64, f64), scale: Scale) -> ObservationPoint
 }
 
 /// 最大震度 max の地震の、観測点の値の入った報 (受信は R1)
-pub(super) fn report(max: Scale) -> Vec<Event> {
+fn report(max: Scale) -> Vec<Event> {
     vec![Event {
         id: "q1".into(),
         source: "p2pquake".into(),
@@ -58,40 +57,22 @@ pub(super) fn report(max: Scale) -> Vec<Event> {
     }]
 }
 
-fn spread_now(events: &[Event], now: u64) -> Spread {
-    let r = load_renderer(&config_sub(false, false)).unwrap();
-    let groups = group_quakes(events);
-    spread_of(events, &groups[0], r.zones(), now).unwrap()
-}
-
 #[test]
-fn the_spread_wave_replaces_the_quake_wave() {
+fn a_late_report_does_not_redraw_the_waves() {
     let events = report(Scale::S3);
     let groups = group_quakes(&events);
-    let now = R1 + LEAD_MS + 5_000;
-    // 発生から 3 分を過ぎているので、地震情報の発生時刻からの波は無い
-    assert!(frame_waves(&groups, &[], true, None, None, &|_, _| 0.0, now).is_empty());
-    let s = spread_now(&events, now);
-    let waves = frame_waves(&groups, &[], true, None, Some(&s), &|_, _| 0.0, now);
-    assert_eq!(waves, vec![spread::wave(&s, now)]);
-}
-
-#[test]
-fn the_frame_is_redrawn_every_tick_while_spreading() {
+    // 発生から 3 分を過ぎているので、受信のあとも波は描かない
+    assert!(frame_waves(&groups, &[], true, None, &|_, _| 0.0, R1 + 7_000).is_empty());
+    // 波が動かないので、同じ秒の 2 コマ目は描き直さない
     let mut st = Stepper::new(load_renderer(&config_sub(false, false)).unwrap());
     let icons = Icons::new();
-    let start = R1 + LEAD_MS;
-    // 波が動いている間は、同じ秒の中でもコマごとに描き直す (再現が無ければ同じ秒の 2 コマ目は None)
-    for (events, want) in [(report(Scale::S3), true), (report(Scale::S2), false)] {
-        assert!(st.step(&input(&events, start + 3_000, &icons)).is_some());
-        assert_eq!(st.step(&input(&events, start + 3_200, &icons)).is_some(), want);
-    }
+    assert!(st.step(&input(&events, R1 + 5_000, &icons)).is_some());
+    assert!(st.step(&input(&events, R1 + 5_200, &icons)).is_none());
 }
 
 mod drawing {
     use super::super::geo::View;
     use super::super::model::scale_color;
-    use super::super::paint::SEA;
     use super::super::shaken::Point;
     use super::super::tests::{map_rect, quake, renderer, rgb, scene};
     use super::super::text::Text;
@@ -100,7 +81,6 @@ mod drawing {
     /// 震央から約 60km 北・約 200km 北 (震央の印と重ならない)
     const NEAR60: (f64, f64) = (40.5 + 60.0 / 111.2, 134.0);
     const FAR200: (f64, f64) = (40.5 + 200.0 / 111.2, 134.0);
-    const START: u64 = 1_800_000_000_000;
 
     fn dot(addr: &str, (lat, lon): (f64, f64), scale: Scale) -> Point {
         Point {
@@ -116,58 +96,14 @@ mod drawing {
         (x as u32, y as u32)
     }
 
-    fn spreading() -> Spread {
-        Spread {
-            lat: EPI.0,
-            lon: EPI.1,
-            depth_km: 10.0,
-            start_ms: START,
-            end_ms: START + 60_000,
-        }
-    }
-
     #[test]
-    fn only_the_reached_dots_are_drawn_while_spreading() {
+    fn every_dot_is_drawn_as_soon_as_the_report_arrives() {
         let mut r = renderer(Text::none());
         let mut g = quake(Scale::S4, &[("石川県", Scale::S4)], Some(EPI));
         g.points = vec![dot("近い", NEAR60, Scale::S4), dot("遠い", FAR200, Scale::S3)];
-        // 20 秒後: S 波は地表で約 74km。近い点だけが灯る
-        let mut sc = scene(Some(&g), &[], None, None);
-        sc.now_ms = START + 20_000;
-        sc.spread = Some(spreading());
-        let pm = r.render(&sc);
-        assert_eq!(rgb(&pm, spot(NEAR60)), scale_color(Scale::S4));
-        assert_eq!(rgb(&pm, spot(FAR200)), SEA);
-        // 再現が無ければ、どちらも灯る (今のまま)
-        sc.spread = None;
-        let pm = r.render(&sc);
+        let pm = r.render(&scene(Some(&g), &[], None, None));
         assert_eq!(rgb(&pm, spot(NEAR60)), scale_color(Scale::S4));
         assert_eq!(rgb(&pm, spot(FAR200)), scale_color(Scale::S3));
-    }
-
-    #[test]
-    fn the_spread_label_is_drawn_only_while_spreading() {
-        let font = BroadcastConfig::default().font;
-        let mut r = renderer(Text::load(&font, 0).unwrap_or_else(|_| Text::none()));
-        if !r.text.enabled() {
-            return;
-        }
-        let g = quake(Scale::S4, &[("石川県", Scale::S4)], Some(EPI));
-        let mut sc = scene(Some(&g), &[], None, None);
-        sc.now_ms = START + 20_000;
-        let without = r.render(&sc);
-        sc.spread = Some(spreading());
-        let with = r.render(&sc);
-        // 本図の右上 (左上は南西諸島の別枠と重なる)
-        let (x, y, w, _) = map_rect();
-        let (right, y) = ((x + w) as u32, y as u32);
-        let in_corner = |pm: &tiny_skia::Pixmap, from: u32, to: u32| {
-            (y + 6..y + 30)
-                .flat_map(|yy| (from..to).map(move |xx| (xx, yy)))
-                .any(|p| rgb(pm, p) != rgb(&without, p))
-        };
-        assert!(in_corner(&with, right - 200, right - 8));
-        assert!(!in_corner(&with, x as u32 + 8, x as u32 + 240));
     }
 }
 
@@ -188,6 +124,6 @@ fn an_area_only_follow_up_keeps_the_station_dots() {
     }];
     events.push(area_only);
     let groups = group_quakes(&events);
-    // 区域だけの続報が来ても、観測点を含む報の点を使う (再現の最中に点が消えない)
+    // 区域だけの続報が来ても、観測点を含む報の点を使う (点が消えない)
     assert!(groups[0].points.iter().any(|p| !p.is_area));
 }
