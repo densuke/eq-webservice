@@ -133,7 +133,6 @@ pub(super) fn scene<'a>(
         status: None,
         viewers: None,
         notices: None,
-        spread: None,
     }
 }
 
@@ -679,7 +678,6 @@ fn write_fixture_pngs_when_asked() {
     };
     let notice_png = r.render(&Scene {
         notices: Some(&notices),
-        spread: None,
         ..scene(None, &history[1..], Some(&warnings), Some(&weather))
     });
     notice_png
@@ -1070,7 +1068,6 @@ fn the_notice_box_is_drawn_in_calm_only() {
     let mut with = |quake| {
         r.render(&Scene {
             notices: Some(&n),
-            spread: None,
             ..scene(quake, &[], None, None)
         })
     };

@@ -28,7 +28,7 @@ use super::pref_list;
 use super::quake_band;
 use super::replay_info::{Foresight, ReplayInfo};
 use super::shaken::{Stations, Zones};
-use super::spread::{self, Spread};
+use super::spread;
 use super::test_mark;
 use super::text::Text;
 use super::tsunami_coast;
@@ -79,8 +79,6 @@ pub struct Scene<'a> {
     pub viewers: Option<u64>,
     /// 平時の右パネルの下に出すお知らせ (docs/broadcast-native.md)。ライブだけが入れる。再現動画は None
     pub notices: Option<&'a Notices>,
-    /// 揺れの広がりの再現の最中なら、その再現 (S 波が届いた観測点だけを灯す)
-    pub spread: Option<Spread>,
     /// 記録から描き直すときだけの情報 (最初の円に合わせて灯す観測点・あらまし)。ライブは None
     pub replay: Option<&'a ReplayInfo<'a>>,
 }
@@ -515,7 +513,7 @@ impl Renderer {
         }
         let label = match foresight_shown(scene) {
             Some(fs) if fs.waving(scene.now_ms) => Some(FORESIGHT_LABEL),
-            _ => scene.spread.map(|_| SPREAD_LABEL),
+            _ => None,
         };
         if let (Some(label), true) = (label, self.text.enabled()) {
             // 右上 (左上は南西諸島の別枠と重なる)
@@ -727,7 +725,6 @@ fn draw_hindsight(pm: &mut Pixmap, text: &mut Text, frame: &Frame, h: &Hindsight
 }
 
 /// 揺れの広がりの再現の最中に、本図の右上に出す案内
-const SPREAD_LABEL: &str = "揺れの広がり (再現)";
 /// 記録から描き直すとき、最初の円に合わせてのちの観測点を灯している間の案内
 const FORESIGHT_LABEL: &str = "揺れの広がり (のちの観測値で再現)";
 
@@ -774,13 +771,7 @@ impl<'a> Shake<'a> {
                 scales: &q.pref_scales,
                 forecast: false,
                 hypocenter: q.hypocenter.as_ref(),
-                dots: zones
-                    .map(|z| z.dots(&q.points))
-                    .unwrap_or_default()
-                    .into_iter()
-                    // 揺れの広がりの再現の最中は、S 波が届いた点だけ
-                    .filter(|&(lon, lat, _)| scene.spread.is_none_or(|s| spread::lit(&s, scene.now_ms, lon, lat)))
-                    .collect(),
+                dots: zones.map(|z| z.dots(&q.points)).unwrap_or_default(),
                 tag: None,
             }),
             (None, Some(e)) => Some(Shake {

@@ -14,7 +14,6 @@ use super::model::same_quake;
 use super::notice::Notices;
 use super::replay_info::{Foresight, ReplayInfo};
 use super::shaken::Point;
-use super::spread::{self, Spread};
 use super::{eew, model, quake_band, yuv, HISTORY};
 use crate::broadcast::record::Shown;
 use crate::broadcast::status::Notice;
@@ -59,14 +58,12 @@ pub struct Look {
     pub waving: bool,
 }
 
-/// 描く地震波。地震の画面のときの地震波と、のちに分かった震源の波 (その間は平時の画面でも描く)。
-/// 揺れの広がりの再現の最中は、その地震の今の波の代わりに再現の波を描く
+/// 描く地震波。地震の画面のときの地震波と、のちに分かった震源の波 (その間は平時の画面でも描く)
 pub(super) fn frame_waves(
     groups: &[model::QuakeSummary],
     eews: &[eew::EewSummary],
     in_quake_screen: bool,
     hindsight: Option<&Hindsight>,
-    spread: Option<&Spread>,
     reach_km: &dyn Fn(f64, f64) -> f64,
     now: u64,
 ) -> Vec<eew::Wave> {
@@ -75,10 +72,6 @@ pub(super) fn frame_waves(
     } else {
         Vec::new()
     };
-    if let Some(s) = spread {
-        waves.retain(|w| !spread::near(s, w));
-        waves.push(spread::wave(s, now));
-    }
     waves.extend(
         hindsight::pending(hindsight, groups, eews).and_then(|h| hindsight::wave(h, now, reach_km(h.lat, h.lon))),
     );
@@ -91,7 +84,6 @@ pub fn look(events: &[Event], now: u64, hindsight: Option<&Hindsight>) -> Look {
     let current = eew::current(&groups, &eews, now);
     Look {
         calm: current.is_none(),
-        // 揺れの広がりの再現は数えない (記録の描き直しでは、波の間に刻みの音を鳴らすため)。
         // shortcut: 揺れた範囲 (細分区域の表) を持たないので、波を描く長さは既定の広がりで見る。深い・遠い地震では
         // 描いている円より先に刻みの音が止まる。気になったら Zones を渡して step と同じ stop_radius_km を使う
         waving: !frame_waves(
@@ -99,7 +91,6 @@ pub fn look(events: &[Event], now: u64, hindsight: Option<&Hindsight>) -> Look {
             &eews,
             current.is_some(),
             hindsight,
-            None,
             &|_, _| DEFAULT_STOP_KM,
             now,
         )
@@ -333,12 +324,6 @@ impl Stepper {
         let foresight = i.replay.and_then(|r| r.foresight.as_ref());
         let view = self.aim_camera(current, &eews, pending, foresight, i.warnings, now, i.fast_forward);
         self.aim_sub(current, &eews);
-        // 揺れの広がりの再現は、地震の画面の地震が観測点の値の入った地震情報のときだけ。
-        // 記録から描き直すときは、最初の円に合わせて観測点を灯しているので、描き直さない (その時刻にまた揺れたように見えるため)
-        let spread = match i.replay.and_then(|r| r.foresight.as_ref()) {
-            Some(_) => None,
-            None => quake.and_then(|q| spread::spread_of(i.events, q, self.renderer.zones(), now)),
-        };
         // 地震波は地震の画面のときだけ描く (のちに分かった震源の波は、平時の画面でも描く)
         // 円は、その波の震央から地震の画面の揺れた範囲の一番遠い角までで止め、S 波がそこに届くまで描く (eew::wave_life_ms)。
         // 震源の分からない地震情報 (震度速報) の画面でも、緊急地震速報の波は揺れた範囲の端まで描く。
@@ -348,24 +333,14 @@ impl Stepper {
             let (x, y) = project(lon, lat);
             stop_radius_km(x, y, shaken)
         };
-        let waves: Vec<eew::Wave> = frame_waves(
-            &groups,
-            &eews,
-            current.is_some(),
-            i.hindsight,
-            spread.as_ref(),
-            &reach,
-            now,
-        )
-        .into_iter()
-        .map(|w| w.capped(reach(w.lat, w.lon)))
-        .collect();
+        let waves: Vec<eew::Wave> = frame_waves(&groups, &eews, current.is_some(), i.hindsight, &reach, now)
+            .into_iter()
+            .map(|w| w.capped(reach(w.lat, w.lon)))
+            .collect();
         // サブの地図の波は、サブの地図に映している地震の波だけ (保持時間・薄さは配信のサブの地図には無い)
-        let sub_wave = match &spread {
-            Some(s) => Some(spread::wave(s, now)),
-            None => current.and_then(|c| eew::sub_wave(c, &groups, &eews, now, &reach)),
-        }
-        .map(|w| w.capped(reach(w.lat, w.lon)));
+        let sub_wave = current
+            .and_then(|c| eew::sub_wave(c, &groups, &eews, now, &reach))
+            .map(|w| w.capped(reach(w.lat, w.lon)));
         // 地震波以外を描き直すのは、データが変わったとき・平時と地震が切り替わったとき・秒が進んだときだけ。
         // 地震波が動いている間は、その上にコマごとに波だけを重ねる
         let still_key = (
@@ -405,7 +380,6 @@ impl Stepper {
                 status: i.status,
                 viewers: i.viewers,
                 notices: i.notices,
-                spread,
                 replay: i.replay,
             };
             let still = if layered {
