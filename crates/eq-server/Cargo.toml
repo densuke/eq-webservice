@@ -17,7 +17,7 @@ serde_json.workspace = true
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "signal", "net", "process", "io-util"] }
 tokio-tungstenite = { version = "0.27", features = ["rustls-tls-native-roots"] }
 toml = "0.9"
-tower-http = { version = "0.6", features = ["fs", "compression-gzip", "set-header"] }
+tower-http = { version = "0.7", features = ["fs", "compression-gzip", "set-header"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 roxmltree = "0.21.1"
