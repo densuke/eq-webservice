@@ -9,8 +9,10 @@ cargo clippy -q --all-targets -- -D warnings
 cargo test -q
 (cd web && npx tsc --noEmit && npm test --silent >/dev/null)
 # 依存の既知の脆弱性 (cargo-audit が無ければ省く。入れるなら brew install cargo-audit)
+# git はフックに GIT_INDEX_FILE などを渡す。cargo-audit が勧告のデータベース (git) を取り直すとき、それを受け継いで
+# このリポジトリの index にデータベースの中身を書き込んでしまうので外す (2026-11-19)
 if command -v cargo-audit >/dev/null; then
-  cargo audit -q
+  env -u GIT_INDEX_FILE -u GIT_DIR -u GIT_WORK_TREE -u GIT_PREFIX cargo audit -q
 else
   echo "pre-commit: cargo-audit が無いので依存の監査を省きます" >&2
 fi
