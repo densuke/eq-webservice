@@ -1,0 +1,10 @@
+# ~/.config/systemd/user/youtube-chat-archive.service に置く。タイマーは deploy/youtube-chat-archive.timer
+# 認証情報は YouTube の見張りと同じファイル (読むだけ。範囲に youtube か youtube.force-ssl が要る。docs/youtube-chat-archive.md)
+[Unit]
+Description=eq-webservice YouTube のライブ配信のチャットに再現動画を案内する
+
+[Service]
+Type=oneshot
+Slice=eq.slice
+# 受け口の名前と queue の場所は環境に合わせる
+ExecStart=/usr/bin/python3 %h/work/eq-e2cast/tools/youtube_chat_archive.py %h/.config/pd2/youtube-upload-token.json 地震モニター用 /opt/eq-cast/replay/queue
