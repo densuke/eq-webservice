@@ -44,7 +44,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          # n2 (Ubuntu 24.04、glibc 2.39) で動くよう 24.04 で作る。ubuntu-latest は 2026-11 に 26.04 (glibc 2.43) になり、
+          # v0.60.2 が n2 で「GLIBC_2.43 not found」で起動しなかった
+          - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
           - os: macos-latest # Apple Silicon (arm64)
             target: aarch64-apple-darwin
