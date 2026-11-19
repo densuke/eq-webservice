@@ -1,6 +1,6 @@
 # Twitch のチャットに再現動画を案内する (設計メモ)
 
-2026-10-25 時点の調査と設計案。実装は `deploy/twitch_chat_archive.py` (案内)・`deploy/twitch_chat_authorize.py` (許可)・`deploy/pi/user/twitch-chat-archive.service`・`deploy/twitch-chat-archive.timer`。置き方は docs/broadcast-pi.md。
+2026-10-25 時点の調査と設計案。実装は `deploy/twitch_chat_archive.py` (案内)・`deploy/twitch_chat_authorize.py` (許可)・`deploy/pi/user/twitch-chat-archive.service`・`deploy/twitch-chat-archive.timer`。置き方は docs/broadcast-pi.md。YouTube のライブ配信のチャットへの案内は docs/youtube-chat-archive.md (同じ規則・文面)。
 
 ## ねらい
 

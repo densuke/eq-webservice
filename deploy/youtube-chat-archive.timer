@@ -1,0 +1,9 @@
+[Unit]
+Description=eq-webservice YouTube のライブ配信のチャットに再現動画を案内する (5 分ごと)
+
+[Timer]
+OnBootSec=8min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

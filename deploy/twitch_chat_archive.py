@@ -87,8 +87,8 @@ def needs_refresh(tok: dict, now: float) -> bool:
     return tok.get("expires_at", 0) - now <= REFRESH_MARGIN_SEC
 
 
-def message(job: dict, kind: str) -> str:
-    """チャットの文面。再生リストは定期の案内 (again) にだけ添える (純粋な関数)"""
+def message(job: dict, kind: str, max_len: int = MAX_LEN) -> str:
+    """チャットの文面 (max_len 文字まで)。再生リストは定期の案内 (again) にだけ添える (純粋な関数)"""
     quakes = sorted(job.get("quakes") or [], key=lambda q: q.get("origin_ms", 0))
     first = quakes[0] if quakes else {}
     t = datetime.datetime.fromtimestamp(first.get("origin_ms", 0) / 1000, JST)
@@ -102,7 +102,7 @@ def message(job: dict, kind: str) -> str:
         head, tail = "【地震の記録】", " の再現動画を上げました " + url
     else:
         head, tail = "【地震の記録】最新の再現動画: ", f" {url} 地震アーカイブ {PLAYLIST_URL}"
-    return head + what[: MAX_LEN - len(head) - len(tail)] + tail
+    return head + what[: max_len - len(head) - len(tail)] + tail
 
 
 def read_json(path: str) -> dict | None:
